@@ -1,0 +1,32 @@
+# 50 · PERIFÉRICOS
+# Impresoras, escáneres y pendrives: lo que se usa todos los días y lo que
+# más guerra da.
+#
+# printer-driver-all pesa, pero en un centro sin internet no se puede
+# descargar el controlador de una impresora desconocida. Va dentro.
+
+# Impresión
+cups
+cups-client
+cups-filters
+printer-driver-all
+system-config-printer
+hplip
+
+# Escaneado
+sane-utils
+libsane-common
+simple-scan
+skanlite
+
+# Pendrives y discos externos
+udisks2
+usbutils
+gvfs
+gvfs-backends
+kio-fuse
+
+# Documentos — los informes se entregan en papel y en archivo
+libreoffice-writer
+libreoffice-calc
+libreoffice-l10n-es

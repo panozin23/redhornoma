@@ -1,0 +1,37 @@
+# 30 · VIRTUALIZACIÓN
+# El corazón de RedHornoma. Aquí vive el Windows que ejecuta SALMI, SNIS y
+# SOAPS.
+#
+# Probado en cursalialinux sobre Intel y AMD, con Windows 7, 8.1, 10 y 11.
+
+# Motor
+qemu-system-x86
+qemu-system-gui
+qemu-utils
+qemu-block-extra
+
+# Gestión
+libvirt-daemon-system
+libvirt-daemon-driver-qemu
+libvirt-clients
+libvirt-daemon-config-network
+virtinst
+virt-manager
+virt-viewer
+
+# Arranque UEFI y arranque seguro dentro de la máquina virtual
+ovmf
+seabios
+
+# Chip de seguridad emulado — Windows 11 lo exige
+swtpm
+swtpm-tools
+
+# Red de las máquinas virtuales
+bridge-utils
+dnsmasq-base
+netcat-openbsd
+
+# Pantalla de la máquina virtual
+spice-client-gtk
+libspice-server1

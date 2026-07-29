@@ -1,0 +1,28 @@
+# 40 · RED DEL CENTRO
+# Para que las computadoras del centro se vean, se administren a distancia y
+# compartan carpetas con el Windows.
+
+# Administración a distancia — la regla de oro del proyecto
+openssh-server
+openssh-client
+
+# Que las máquinas se encuentren solas por su nombre
+avahi-daemon
+avahi-utils
+libnss-mdns
+
+# Carpetas compartidas con el Windows virtual
+samba
+samba-common-bin
+smbclient
+cifs-utils
+
+# Diagnóstico de red
+nmap
+traceroute
+curl
+wget
+rsync
+
+# Cortafuegos
+ufw

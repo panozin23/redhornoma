@@ -1,0 +1,12 @@
+# 20 · IDIOMA
+# Todo en español. El personal de los centros no tiene por qué leer inglés.
+
+locales
+console-setup
+keyboard-configuration
+
+# Español en el escritorio y los programas
+task-spanish
+firefox-esr-l10n-es-es
+hunspell-es
+hyphen-es

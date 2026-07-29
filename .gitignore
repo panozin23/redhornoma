@@ -1,0 +1,35 @@
+# ── Restos de construir la ISO ───────────────────────────────────────
+# Se regeneran solos y ocupan 14 GB. Nunca van al repositorio.
+receta/chroot/
+receta/binary/
+receta/cache/
+receta/.build/
+receta/build.log
+receta/chroot.*
+receta/binary.*
+receta/live-image-*
+
+# ── Lo que genera «lb config» a partir de auto/config ─────────────────
+# La receta de verdad es auto/config y las listas. Esto es su resultado.
+receta/config/bootstrap
+receta/config/binary
+receta/config/chroot
+receta/config/common
+receta/config/source
+receta/config/package-lists/live.list.chroot
+
+# Los «hooks» de config/hooks/ son enlaces a los de live-build, no nuestros.
+# Los propios viven en receta/hooks-propios/ y construir-iso.sh los copia.
+receta/config/hooks/
+
+# ── Binarios grandes ─────────────────────────────────────────────────
+# Una ISO son 2,7 GB: no caben ni tienen sentido en un repositorio.
+isos/
+*.iso
+*.qcow2
+*.deb
+*.tar.*
+
+# ── Respaldos de trabajo ─────────────────────────────────────────────
+*.antes-de-*
+*~

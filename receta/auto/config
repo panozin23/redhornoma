@@ -1,0 +1,38 @@
+#!/bin/sh
+# receta/auto/config — La receta de RedHornoma.
+#
+# Este archivo define QUÉ es RedHornoma. Todo lo que hay en la ISO sale de
+# aquí y de las listas de config/package-lists/.
+#
+# Regla del proyecto: nada se instala a mano dentro del sistema construido.
+# Si algo hace falta, se escribe en una lista. Así la ISO se puede rehacer
+# desde cero en cualquier momento.
+
+set -e
+
+lb config noauto \
+  --distribution trixie \
+  --parent-distribution trixie \
+  --archive-areas "main contrib non-free non-free-firmware" \
+  --architectures amd64 \
+  --binary-images iso-hybrid \
+  --debian-installer none \
+  --apt-indices false \
+  --apt-recommends true \
+  --firmware-chroot true \
+  --firmware-binary true \
+  --memtest none \
+  --win32-loader false \
+  --iso-application "RedHornoma" \
+  --iso-publisher "RedHornoma; proyecto independiente; https://github.com/panozin23" \
+  --iso-volume "RedHornoma" \
+  --bootappend-live "boot=live components quiet splash locales=es_BO.UTF-8 keyboard-layouts=es keyboard-model=pc105 timezone=America/La_Paz username=redhornoma hostname=redhornoma" \
+  --bootloaders "grub-efi syslinux" \
+  --uefi-secure-boot enable \
+  --mirror-bootstrap "http://deb.debian.org/debian/" \
+  --mirror-chroot "http://deb.debian.org/debian/" \
+  --mirror-binary "http://deb.debian.org/debian/" \
+  --security true \
+  --updates true \
+  --backports false \
+  "${@}"

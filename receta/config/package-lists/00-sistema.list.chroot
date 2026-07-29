@@ -1,0 +1,50 @@
+# 00 · SISTEMA BASE
+# Lo mínimo para que la máquina arranque en cualquier hardware.
+# Los centros de salud tienen computadoras de todas las épocas: aquí no se
+# escatima en controladores.
+
+# Núcleo
+linux-image-amd64
+
+# Controladores de fábrica — imprescindibles en hardware variado
+firmware-linux
+firmware-linux-nonfree
+firmware-misc-nonfree
+firmware-realtek
+firmware-atheros
+firmware-iwlwifi
+firmware-brcm80211
+firmware-amd-graphics
+intel-microcode
+amd64-microcode
+
+# Arranque, incluido el seguro
+grub-efi-amd64
+grub-efi-amd64-signed
+shim-signed
+mokutil
+efibootmgr
+os-prober
+
+# Discos y sistemas de archivos
+ntfs-3g
+exfatprogs
+dosfstools
+e2fsprogs
+gdisk
+parted
+smartmontools
+
+# Red básica
+network-manager
+network-manager-gnome
+iproute2
+iputils-ping
+bind9-dnsutils
+
+# Hora — los informes dependen de la fecha
+systemd-timesyncd
+
+# Permisos y servicios
+polkitd
+sudo

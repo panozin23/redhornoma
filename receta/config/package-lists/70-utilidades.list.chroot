@@ -1,0 +1,34 @@
+# 70 · UTILIDADES
+# Lo que necesitan las herramientas de RedHornoma para funcionar.
+
+# Ventanas gráficas desde guiones — con esto se hacen los paneles
+yad
+zenity
+xdg-utils
+
+# Comprimir y descomprimir
+p7zip-full
+unzip
+zip
+xz-utils
+
+# Diagnóstico
+htop
+lsb-release
+pciutils
+dmidecode
+lshw
+inxi
+
+# Programación de tareas — respaldos nocturnos
+cron
+
+# Registro de lo que pasa
+rsyslog
+
+# Cuando RedHornoma se ejecuta DENTRO de una máquina virtual — que es como
+# lo probamos nosotros — esto comparte el portapapeles con el equipo de
+# fuera y ajusta la resolución de pantalla sola. Sin ellos hay que teclear
+# a mano cada comando de prueba.
+spice-vdagent
+qemu-guest-agent

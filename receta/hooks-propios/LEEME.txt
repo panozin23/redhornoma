@@ -1,0 +1,12 @@
+Los ajustes propios de RedHornoma que se aplican DENTRO del sistema mientras
+se construye la ISO.
+
+Cada archivo de esta carpeta es un guion que se ejecuta dentro del sistema a
+medio construir. Se usan para cosas que no se pueden expresar como «instala
+este paquete»: activar un servicio, quitar algo que sobra, dejar un ajuste
+puesto.
+
+Los copia scripts/construir-iso.sh a receta/config/hooks/normal/ antes de
+construir. No se editan allí: allí se borran en cada limpieza.
+
+Nombre: NNNN-descripcion.hook.chroot   (los números marcan el orden)

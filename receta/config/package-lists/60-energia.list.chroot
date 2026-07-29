@@ -1,0 +1,12 @@
+# 60 · ENERGÍA
+# Los centros de primer nivel están en zonas rurales donde la luz se corta.
+# Un apagón a mitad de una escritura corrompe la base de datos: es la causa
+# número uno de desastres en sistemas como este.
+
+# Baterías (UPS) — funciona con las baratas conectadas por USB
+nut
+nut-client
+nut-server
+
+# Eventos de energía
+acpid

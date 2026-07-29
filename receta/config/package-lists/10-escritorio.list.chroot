@@ -1,0 +1,39 @@
+# 10 · ESCRITORIO
+# KDE Plasma en su versión mínima. RedHornoma no es una distro de escritorio:
+# el escritorio está para lanzar los programas de salud y poco más.
+#
+# Se usa kde-plasma-desktop (mínimo), NO kde-full ni task-kde-desktop, que
+# traen cientos de programas que aquí sobran.
+
+kde-plasma-desktop
+sddm
+sddm-theme-debian-breeze
+
+# Lo esencial del escritorio
+plasma-nm
+plasma-pa
+plasma-workspace
+kde-config-sddm
+systemsettings
+dolphin
+konsole
+kate
+ark
+gwenview
+okular
+kde-spectacle
+
+# Aspecto
+papirus-icon-theme
+breeze-gtk-theme
+fonts-noto
+fonts-noto-color-emoji
+fonts-liberation2
+
+# Sonido
+pipewire
+pipewire-pulse
+wireplumber
+
+# Navegador — para consultar el sitio del Ministerio
+firefox-esr

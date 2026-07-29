@@ -1,0 +1,272 @@
+#!/bin/bash
+# redhornoma-informe — Radiografía de un equipo antes de configurarlo.
+#
+# El primer principio de RedHornoma: preguntar a la máquina, nunca suponer.
+# Nació de una tarde entera de errores encadenados en dos PCs de escritorio,
+# cada uno fallando por algo distinto que no se veía desde fuera.
+#
+# No modifica nada. Solo mira, informa y da un veredicto:
+# qué papel puede desempeñar este equipo en el centro de salud.
+#
+# Uso:
+#   redhornoma-informe            en pantalla y guardado en un archivo
+#   redhornoma-informe --sin-color  para pegar en un chat o correo
+set -u
+
+SINCOLOR=0
+[ "${1:-}" = "--sin-color" ] && SINCOLOR=1
+[ -t 1 ] || SINCOLOR=1
+
+if [ "$SINCOLOR" = "1" ]; then
+  V=""; AZ=""; VE=""; RO=""; AM=""
+else
+  V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+fi
+
+ARCHIVO="${HOME:-/tmp}/informe-redhornoma-$(date '+%Y%m%d-%H%M').txt"
+
+sec(){ printf "\n${AZ}── %s ──${V}\n" "$1"; }
+d(){   printf "   %-24s %s\n" "$1" "$2"; }
+si(){  printf "   %-24s ${VE}%s${V}\n" "$1" "$2"; }
+no(){  printf "   %-24s ${RO}%s${V}\n" "$1" "$2"; }
+ojo(){ printf "   %-24s ${AM}%s${V}\n" "$1" "$2"; }
+
+# Se van marcando los impedimentos para el veredicto final
+FALLOS=""; AVISOS=""
+falla(){  FALLOS="$FALLOS|$1"; }
+avisa(){ AVISOS="$AVISOS|$1"; }
+
+{
+printf "${AZ}═══════════════════════════════════════════════════════${V}\n"
+printf "${AZ} INFORME DEL EQUIPO — RedHornoma${V}\n"
+printf "${AZ} %s${V}\n" "$(date '+%d de %B de %Y, %H:%M')"
+printf "${AZ}═══════════════════════════════════════════════════════${V}\n"
+
+# ═════════════════════════════════════════════════════════════════════
+sec "SISTEMA"
+d "Equipo:"     "$(hostname)"
+d "Sistema:"    "$(grep -oP 'PRETTY_NAME="\K[^"]+' /etc/os-release 2>/dev/null)"
+d "Núcleo:"     "$(uname -r)"
+d "Escritorio:" "${XDG_CURRENT_DESKTOP:-?} / ${XDG_SESSION_TYPE:-?}"
+d "Encendido desde hace:" "$(uptime -p 2>/dev/null | sed 's/^up //')"
+RH=$(dpkg-query -W -f='${Version}' redhornoma-base 2>/dev/null)
+d "RedHornoma:"  "${RH:-no instalado (equipo ajeno)}"
+
+# ═════════════════════════════════════════════════════════════════════
+sec "MÁQUINA"
+d "Fabricante:" "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null | head -1)"
+d "Modelo:"     "$(cat /sys/class/dmi/id/product_name 2>/dev/null | head -1)"
+d "Procesador:" "$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+d "Hilos:"      "$(nproc)"
+
+# La virtualización es innegociable: sin ella no hay Windows
+if grep -qm1 ' svm ' /proc/cpuinfo; then
+  si "Virtualización:" "AMD-V activa"
+elif grep -qm1 ' vmx ' /proc/cpuinfo; then
+  si "Virtualización:" "Intel VT-x activa"
+else
+  no "Virtualización:" "NO disponible"
+  echo "                            Suele estar apagada en la BIOS."
+  echo "                            Busca «Virtualization», «SVM» o «VT-x»."
+  falla "Sin virtualización no se puede ejecutar Windows"
+fi
+
+RAM_KB=$(awk '/MemTotal/{print $2}' /proc/meminfo)
+RAM_GB=$(( RAM_KB / 1024 / 1024 ))
+if   [ "$RAM_GB" -ge 8 ]; then si  "Memoria:" "$RAM_GB GB — holgada"
+elif [ "$RAM_GB" -ge 4 ]; then ojo "Memoria:" "$RAM_GB GB — justa, sirve para un puesto"
+                               [ "$RAM_GB" -lt 8 ] && avisa "Con $RAM_GB GB el equipo no debería ser el servidor"
+else no "Memoria:" "$RAM_GB GB — insuficiente"
+     falla "Hacen falta al menos 4 GB de memoria"
+fi
+
+[ -e /dev/kvm ] && si "/dev/kvm:" "presente" || { no "/dev/kvm:" "ausente"; falla "Falta /dev/kvm"; }
+ls /dev/tpm* >/dev/null 2>&1 && d "Chip TPM:" "sí" || d "Chip TPM:" "no — se emula igual"
+
+# ═════════════════════════════════════════════════════════════════════
+sec "DISCO"
+RUTA=/var/lib/libvirt/images
+[ -d "$RUTA" ] || RUTA=/var
+LIBRE_GB=$(df -BG --output=avail "$RUTA" 2>/dev/null | tail -1 | tr -dc '0-9')
+TOTAL=$(df -h --output=size "$RUTA" 2>/dev/null | tail -1 | tr -d ' ')
+# Un Windows con los programas de salud ocupa unos 40 GB. El servidor
+# necesita además sitio para los respaldos: por eso el listón es más alto.
+if   [ "${LIBRE_GB:-0}" -ge 120 ]; then si  "Espacio libre:" "$LIBRE_GB GB de $TOTAL — holgado"
+elif [ "${LIBRE_GB:-0}" -ge 60 ];  then ojo "Espacio libre:" "$LIBRE_GB GB de $TOTAL — bien para un puesto"
+     avisa "Con $LIBRE_GB GB libres cabe un Windows, pero no los respaldos del centro"
+elif [ "${LIBRE_GB:-0}" -ge 40 ];  then ojo "Espacio libre:" "$LIBRE_GB GB de $TOTAL — justo"
+     avisa "Con $LIBRE_GB GB libres el Windows cabe apretado; conviene liberar más"
+else no "Espacio libre:" "${LIBRE_GB:-?} GB de $TOTAL"
+     falla "Hacen falta al menos 40 GB libres para instalar Windows"
+fi
+# El disco físico bajo la partición raíz. En NVMe la partición se llama
+# nvme0n1p9 y el disco nvme0n1: quitar los dígitos del final no vale.
+PART=$(findmnt -no SOURCE / 2>/dev/null | cut -d'[' -f1)
+DISCO=$(lsblk -no PKNAME "$PART" 2>/dev/null | grep . | head -1)
+if [ -n "$DISCO" ]; then
+  LECT=$(lsblk -dno ROTA "/dev/$DISCO" 2>/dev/null | tr -d ' ')
+  MODELO=$(lsblk -dno MODEL "/dev/$DISCO" 2>/dev/null | sed 's/  */ /g;s/^ *//;s/ *$//')
+  case "$LECT" in
+    0) si "Tipo de disco:" "SSD o NVMe — ${MODELO:-sin modelo}" ;;
+    1) ojo "Tipo de disco:" "mecánico, lento — ${MODELO:-sin modelo}"
+       avisa "Con disco mecánico el Windows virtual irá despacio" ;;
+    *) d "Tipo de disco:" "${MODELO:-no se pudo averiguar}" ;;
+  esac
+else
+  d "Tipo de disco:" "no se pudo averiguar"
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+sec "RED"
+RT=$(ip route get 1.1.1.1 2>/dev/null | head -1)
+IFAZ=$(echo "$RT" | grep -oP 'dev \K\S+')
+MIIP=$(echo "$RT" | grep -oP 'src \K\S+')
+ROUTER=$(echo "$RT" | grep -oP 'via \K\S+')
+
+if [ -z "$IFAZ" ]; then
+  no "Conexión:" "sin salida a la red"
+  falla "Este equipo no está conectado a ninguna red"
+else
+  d "Tarjeta:"  "$IFAZ"
+  d "Dirección:" "$MIIP"
+  d "Router:"    "$ROUTER"
+  if [ -d "/sys/class/net/$IFAZ/wireless" ] || [ -e "/sys/class/net/$IFAZ/phy80211" ]; then
+    ojo "Tipo:" "WIFI"
+    echo "                            La red en puente no funciona por wifi."
+    echo "                            El servidor tiene que ir por cable."
+    avisa "Por wifi este equipo no puede ser el servidor"
+    ESWIFI=1
+  else
+    si "Tipo:" "por cable — sirve para servidor"
+    ESWIFI=0
+  fi
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+sec "ENERGÍA"
+if [ -d /sys/class/power_supply/BAT0 ] || [ -d /sys/class/power_supply/BAT1 ]; then
+  d "Batería interna:" "sí — es un portátil"
+  ESPORTATIL=1
+else
+  d "Batería interna:" "no — es de escritorio"
+  ESPORTATIL=0
+fi
+
+if command -v upsc >/dev/null 2>&1 && upsc -l 2>/dev/null | grep -q .; then
+  si "Batería externa (UPS):" "$(upsc -l 2>/dev/null | tr '\n' ' ')"
+else
+  UPSUSB=$(lsusb 2>/dev/null | grep -icE 'ups|american power|cyberpower|forza|tripp')
+  if [ "${UPSUSB:-0}" -gt 0 ]; then
+    ojo "Batería externa (UPS):" "detectada por USB pero sin configurar"
+    avisa "Hay una batería conectada que aún no está configurada"
+  else
+    d "Batería externa (UPS):" "ninguna"
+    [ "$ESPORTATIL" = "0" ] && avisa "Sin batería, un apagón puede dañar la base de datos"
+  fi
+fi
+
+SUSP=$(systemctl is-enabled sleep.target 2>/dev/null)
+[ "$SUSP" = "masked" ] && si "Suspensión:" "bloqueada — correcto para servidor" \
+                       || d  "Suspensión:" "permitida"
+
+# ═════════════════════════════════════════════════════════════════════
+sec "PROGRAMAS DE VIRTUALIZACIÓN"
+for p in qemu-system-x86 qemu-system-gui qemu-utils libvirt-daemon-system \
+         libvirt-clients virt-manager virt-viewer swtpm ovmf yad; do
+  v=$(dpkg-query -W -f='${Version}' "$p" 2>/dev/null)
+  if [ -n "$v" ]; then printf "   %-26s ${VE}%s${V}\n" "$p" "$v"
+  else printf "   %-26s ${RO}FALTA${V}\n" "$p"; falla "Falta el programa $p"; fi
+done
+
+# ═════════════════════════════════════════════════════════════════════
+sec "SERVICIOS Y PERMISOS"
+ACT=$(systemctl is-active libvirtd 2>/dev/null); HAB=$(systemctl is-enabled libvirtd 2>/dev/null)
+if [ "$ACT" = "active" ]; then si "libvirtd:" "encendido / $HAB"
+else no "libvirtd:" "$ACT / $HAB"; avisa "El motor de virtualización está apagado"; fi
+d "Usuario:" "$(id -un)"
+for g in libvirt kvm; do
+  if id -nG | tr ' ' '\n' | grep -qx "$g"; then si "grupo $g:" "sí"
+  else no "grupo $g:" "falta"; avisa "El usuario no está en el grupo $g"; fi
+done
+
+# ═════════════════════════════════════════════════════════════════════
+sec "QUÉ ACEPTA LIBVIRT EN ESTE EQUIPO"
+echo "   Lo que de verdad decide cómo hay que crear la máquina virtual."
+echo
+CAPS=$(virsh -c qemu:///system domcapabilities 2>/dev/null)
+if [ -z "$CAPS" ]; then
+  no "libvirt:" "no responde"
+  avisa "No se pudo preguntar a libvirt qué acepta este equipo"
+else
+  echo "$CAPS" | grep -q '<value>spice</value>' && si "Pantalla SPICE:" "sí" \
+                                                || ojo "Pantalla SPICE:" "no → se usará VNC"
+  echo "$CAPS" | grep -q '<value>vnc</value>'   && si "Pantalla VNC:" "sí" \
+                                                || no "Pantalla VNC:" "no"
+  d "Vídeo disponible:" "$(echo "$CAPS" | sed -n '/modelType/,/\/enum/p' | grep -oP '(?<=<value>)[a-z0-9]+' | tr '\n' ' ')"
+  echo "$CAPS" | grep -q 'efi' && si "Arranque UEFI:" "sí — Windows 11 posible" \
+                               || ojo "Arranque UEFI:" "no — solo Windows 7/8.1/10"
+  echo "$CAPS" | grep -q 'tpm' && si "TPM emulado:" "sí — Windows 11 posible" \
+                               || ojo "TPM emulado:" "no — solo Windows 7/8.1/10"
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+sec "MÁQUINAS VIRTUALES YA CREADAS"
+LISTA=$(virsh -c qemu:///system list --all 2>/dev/null | sed -n '3,20p' | grep .)
+if [ -n "$LISTA" ]; then echo "$LISTA" | sed 's/^/   /'
+else echo "   (ninguna todavía)"; fi
+
+sec "IMÁGENES Y DISCOS GUARDADOS"
+ENC=$(ls -lh /var/lib/libvirt/images/*.iso /var/lib/libvirt/images/*.qcow2 2>/dev/null \
+      | awk '{printf "   %-44s %s\n", $9, $5}' | sed 's|/var/lib/libvirt/images/||')
+[ -n "$ENC" ] && echo "$ENC" || echo "   (ninguna)"
+
+# ═════════════════════════════════════════════════════════════════════
+sec "IMPRESORAS Y ESCÁNERES"
+IMPR=$(lpstat -p 2>/dev/null | grep -c '^printer')
+d "Impresoras configuradas:" "${IMPR:-0}"
+USB=$(lsusb 2>/dev/null | grep -icE 'printer|scanner|hewlett|canon|epson|brother')
+d "Detectados por USB:" "${USB:-0}"
+
+# ═════════════════════════════════════════════════════════════════════
+#  VEREDICTO
+# ═════════════════════════════════════════════════════════════════════
+printf "\n${AZ}═══════════════════════════════════════════════════════${V}\n"
+printf "${AZ} VEREDICTO${V}\n"
+printf "${AZ}═══════════════════════════════════════════════════════${V}\n\n"
+
+if [ -n "$FALLOS" ]; then
+  printf "   ${RO}✖  ESTE EQUIPO TODAVÍA NO PUEDE USARSE${V}\n\n"
+  echo "$FALLOS" | tr '|' '\n' | grep . | sed 's/^/      • /'
+  echo
+  echo "   Resuelve esos puntos y vuelve a pasar el informe."
+else
+  PUEDE_SERVIDOR=1
+  [ "${ESWIFI:-1}" = "1" ]     && PUEDE_SERVIDOR=0
+  [ "$RAM_GB" -lt 8 ]          && PUEDE_SERVIDOR=0
+  [ "${LIBRE_GB:-0}" -lt 120 ] && PUEDE_SERVIDOR=0
+
+  if [ "$PUEDE_SERVIDOR" = "1" ]; then
+    printf "   ${VE}✅  PUEDE SER SERVIDOR${V}\n\n"
+    echo "      Va por cable, tiene memoria de sobra y espacio para la base"
+    echo "      de datos y los respaldos del centro."
+  else
+    printf "   ${VE}✅  PUEDE SER PUESTO DE TRABAJO${V}\n\n"
+    echo "      Sirve para que una persona meta información. Para servidor"
+    echo "      le falta algo de lo de abajo."
+  fi
+fi
+
+if [ -n "$AVISOS" ]; then
+  printf "\n   ${AM}A tener en cuenta:${V}\n\n"
+  echo "$AVISOS" | tr '|' '\n' | grep . | sed 's/^/      • /'
+fi
+
+printf "\n${AZ}═══════════════════════════════════════════════════════${V}\n"
+} 2>&1 | tee "$ARCHIVO"
+
+# Guardar también una copia sin colores, lista para enviar
+if [ "$SINCOLOR" = "0" ]; then
+  sed -i 's/\x1b\[[0-9;]*m//g' "$ARCHIVO" 2>/dev/null
+  printf "\n   Copia guardada en:\n      %s\n\n" "$ARCHIVO"
+  printf "   Para enviarla, adjunta ese archivo o pega su contenido.\n\n"
+fi

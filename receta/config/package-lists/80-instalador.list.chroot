@@ -1,0 +1,8 @@
+# 80 · INSTALADOR
+# Calamares: instalador gráfico, en español, que cualquiera puede seguir.
+#
+# Aquí se añadirá después la pregunta que define todo:
+#   ¿esta máquina es SERVIDOR, PUESTO o ADMINISTRACIÓN?
+
+calamares
+calamares-settings-debian
