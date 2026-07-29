@@ -134,6 +134,24 @@ echo "$CAPS" | grep -q 'tpm' && { HAY_TPM=1;  ok "TPM emulado disponible"; } \
                              || avi "sin TPM emulado — Windows 11 no será posible"
 
 # ── Cuánta memoria y disco hay de verdad ──────────────────────────────
+# ── Cuántos procesadores puede prestar ────────────────────────────────
+# Pedir más hilos de los que la máquina tiene no la hace más rápida: la
+# hace más lenta, y de paso ahoga al sistema de abajo. En los centros de
+# salud hay equipos de dos hilos, así que esto no es teórico.
+HILOS=$(nproc)
+if   [ "$HILOS" -le 2 ]; then VCPUS=2
+elif [ "$HILOS" -le 4 ]; then VCPUS=2
+else VCPUS=$(( HILOS - 2 )); [ "$VCPUS" -gt 4 ] && VCPUS=4
+fi
+d "Hilos del procesador:" "$HILOS"
+if [ "$HILOS" -le 2 ]; then
+  avi "solo $HILOS hilos — Windows funcionará, pero despacio"
+  echo "      Windows se llevará los dos y el sistema de abajo irá justo."
+  echo "      Es lo que hay: con menos de dos, Windows ni arranca."
+else
+  d "Para Windows:" "$VCPUS procesadores"
+fi
+
 RAM_TOTAL_MB=$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 ))
 # Al sistema anfitrión hay que dejarle lo suyo: con menos de 3 GB el
 # escritorio se arrastra y la experiencia es peor que sin virtualizar.
@@ -226,6 +244,44 @@ if [ "$TPM" = "si" ] && [ "$HAY_TPM" = "0" ]; then
   echo "         sudo apt install swtpm swtpm-tools"
   exit 1
 fi
+# ── ¿Aceptará Windows 11 este procesador? ─────────────────────────────
+# Windows 11 no se instala en cualquier procesador: comprueba el modelo
+# contra una lista, y los anteriores a 2017 quedan fuera. Como la máquina
+# virtual usa el procesador en modo directo, Windows ve el de verdad.
+#
+# Todos los procesadores de esa lista saben hacer AVX2, y los de antes no.
+# No es exacto al cien por cien, pero avisa a tiempo en vez de dejar que
+# la instalación falle después de veinte minutos.
+if [ "$VERSION" = "11" ] && ! grep -qm1 ' avx2 ' /proc/cpuinfo; then
+  echo
+  avi "este procesador es anterior a los que Windows 11 admite"
+  cat <<VIEJO
+
+      $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')
+
+      Aunque haya TPM y Arranque Seguro, el instalador de Windows 11
+      comprueba el modelo del procesador y rechazará este.
+
+      ${AZ}Lo sensato: instalar Windows 10.${V} Los programas del Ministerio
+      funcionan igual de bien, y en un equipo de esta edad irá más suelto.
+
+      Escribe ${AZ}10${V} para cambiar a Windows 10, o pulsa Enter para
+      intentarlo con el 11 de todos modos.
+
+VIEJO
+  printf "   ¿Qué hago? "
+  read -r CAMBIAR
+  if [ "$CAMBIAR" = "10" ]; then
+    echo
+    ok "mejor así — vuelve a ejecutarlo eligiendo Windows 10"
+    echo
+    echo "         sudo redhornoma-windows --version 10"
+    echo
+    exit 0
+  fi
+  avi "se sigue con Windows 11; puede que el instalador lo rechace"
+fi
+
 ok "este equipo puede con $ETIQUETA"
 
 # ── Ajustar a lo que hay de verdad ────────────────────────────────────
@@ -409,7 +465,7 @@ d "Sistema:"        "$ETIQUETA"
 d "Papel:"          "$([ "$PAPEL" = servidor ] && echo 'servidor del centro' || echo 'puesto de trabajo')"
 d "Nombre:"         "$NOMBRE"
 d "Memoria:"        "$(( RAM_MB / 1024 )) GB"
-d "Procesadores:"   "4, en modo directo"
+d "Procesadores:"   "$VCPUS, en modo directo"
 d "Chipset:"        "$MAQUINA"
 case "$FIRMWARE" in
   bios)        d "Firmware:" "BIOS antiguo, lo que Windows 7 espera" ;;
@@ -458,7 +514,7 @@ ARGS=(
   --name "$NOMBRE"
   --osinfo "$OSINFO"
   --memory "$RAM_MB"
-  --vcpus 4
+  --vcpus "$VCPUS"
   --cpu host-passthrough
   --machine "$MAQUINA"
   --disk "path=$DISCO,format=qcow2,bus=virtio,cache=writeback,discard=unmap"
