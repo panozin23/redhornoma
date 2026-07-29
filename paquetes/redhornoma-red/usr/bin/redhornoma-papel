@@ -1,0 +1,377 @@
+#!/bin/bash
+# redhornoma-papel — Define qué es esta computadora dentro del centro.
+#
+# Un centro de salud tiene una máquina que guarda la información y otras
+# que la consultan. Cada papel necesita ajustes distintos, y esta
+# herramienta los aplica todos de una vez a partir de una sola pregunta.
+#
+#   SERVIDOR        guarda la base de datos. No se mueve, no se duerme,
+#                   va por cable y su Windows arranca solo.
+#   PUESTO          un consultorio metiendo información.
+#   ADMINISTRACIÓN  la computadora de quien mantiene todo esto.
+#
+# Uso:
+#   redhornoma-papel                  mira e informa, no toca nada
+#   sudo redhornoma-papel --configurar
+#
+# Todo lo que cambia es reversible y se dice cómo deshacerlo.
+set -u
+
+CONF=/etc/redhornoma
+ARCHIVO_PAPEL="$CONF/papel"
+RESP=/var/backups/redhornoma
+
+CONFIGURAR=0; PAPEL=""; NOMBRE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --configurar) CONFIGURAR=1; shift ;;
+    --papel)  PAPEL="${2:-}";  shift 2 ;;
+    --nombre) NOMBRE="${2:-}"; shift 2 ;;
+    --ayuda|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Opción desconocida: $1"; exit 1 ;;
+  esac
+done
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+          printf "${AZ} %s${V}\n" "$1"
+          printf "${AZ}══════════════════════════════════════════════════════${V}\n"; }
+ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+d(){   printf "   %-24s %s\n" "$1" "$2"; }
+
+estado_vm(){ LC_ALL=C virsh -c qemu:///system domstate "$1" 2>/dev/null | tr -d '\n'; }
+
+titulo "EL PAPEL DE ESTA COMPUTADORA EN EL CENTRO"
+if [ "$CONFIGURAR" = "1" ]; then
+  printf "   Modo: ${RO}CONFIGURANDO${V}\n"
+  [ "$(id -u)" = "0" ] || { mal "para configurar hace falta sudo"; exit 1; }
+else
+  printf "   Modo: ${VE}solo mirar${V}  (no toca nada)\n"
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "1 · CÓMO ESTÁ AHORA"
+
+PAPEL_ACTUAL=$(cat "$ARCHIVO_PAPEL" 2>/dev/null)
+d "Papel asignado:" "${PAPEL_ACTUAL:-ninguno todavía}"
+
+NOMBRE_ACTUAL=$(hostname)
+case "$NOMBRE_ACTUAL" in
+  localhost*|debian|redhornoma)
+    avi "se llama «$NOMBRE_ACTUAL» — sin nombre propio"
+    echo "         Con varias computadoras en un centro, todas iguales,"
+    echo "         nadie sabrá cuál es cuál." ;;
+  *) ok "se llama «$NOMBRE_ACTUAL»" ;;
+esac
+
+# ── Red ───────────────────────────────────────────────────────────────
+RT=$(ip route get 1.1.1.1 2>/dev/null | head -1)
+IFAZ=$(echo "$RT" | grep -oP 'dev \K\S+')
+MIIP=$(echo "$RT" | grep -oP 'src \K\S+')
+ROUTER=$(echo "$RT" | grep -oP 'via \K\S+')
+
+if [ -z "$IFAZ" ]; then
+  mal "sin conexión a la red"
+  ESWIFI=1; RED=""
+else
+  d "Dirección:" "$MIIP"
+  d "Router:"    "$ROUTER"
+  if [ -d "/sys/class/net/$IFAZ/wireless" ] || [ -e "/sys/class/net/$IFAZ/phy80211" ]; then
+    ESWIFI=1; avi "por wifi ($IFAZ) — no puede ser servidor"
+  else
+    ESWIFI=0; ok "por cable ($IFAZ) — puede ser servidor"
+  fi
+  RED=$(echo "$MIIP" | cut -d. -f1-3)
+fi
+
+# ── Servicios ─────────────────────────────────────────────────────────
+systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1 \
+  && ok "SSH encendido" || avi "SSH apagado — no se podrá administrar a distancia"
+
+if command -v avahi-daemon >/dev/null 2>&1; then
+  systemctl is-active avahi-daemon >/dev/null 2>&1 \
+    && ok "se anuncia en la red por su nombre" \
+    || avi "no se anuncia en la red"
+else
+  avi "falta avahi-daemon — habrá que usar direcciones en vez de nombres"
+fi
+
+systemctl is-enabled sleep.target 2>/dev/null | grep -q masked \
+  && ok "no se duerme" || d "Suspensión:" "permitida"
+
+# ── Máquinas virtuales ────────────────────────────────────────────────
+MAQS=$(virsh -c qemu:///system list --all --name 2>/dev/null | grep -v '^$')
+if [ -n "$MAQS" ]; then
+  echo
+  printf "   ${AZ}Máquinas de Windows${V}\n"
+  while read -r m; do
+    [ -z "$m" ] && continue
+    AUTO=$(LC_ALL=C virsh -c qemu:///system dominfo "$m" 2>/dev/null | awk '/^Autostart:/{print $2}')
+    printf "      %-20s %-12s arranque solo: %s\n" "$m" "$(estado_vm "$m")" "${AUTO:-?}"
+  done <<< "$MAQS"
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+if [ "$CONFIGURAR" = "0" ]; then
+  titulo "PARA CONFIGURARLA"
+  cat <<FIN
+   Ejecuta lo mismo añadiendo --configurar:
+
+      ${AZ}sudo redhornoma-papel --configurar${V}
+
+   Te preguntará qué es esta computadora y lo dejará todo listo.
+
+FIN
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "2 · QUÉ ES ESTA COMPUTADORA"
+
+if [ -z "$PAPEL" ]; then
+  cat <<OPCIONES
+
+   ${AZ}1)  SERVIDOR${V}
+       Guarda la información de todo el centro. Los demás se conectan
+       aquí. No se dormirá nunca y su Windows arrancará solo.
+$([ "$ESWIFI" = "1" ] && printf "       %s\n" "${RO}Esta computadora va por wifi: no puede ser servidor.${V}")
+
+   ${AZ}2)  PUESTO DE TRABAJO${V}
+       Un consultorio metiendo sus consultas del día.
+
+   ${AZ}3)  ADMINISTRACIÓN${V}
+       La computadora de quien mantiene el centro. Puede entrar en las
+       demás, actualizarlas y ver cómo van.
+
+OPCIONES
+  printf "   Escribe 1, 2 o 3 y pulsa Enter: "
+  read -r R
+  case "$R" in
+    1) PAPEL=servidor ;; 2) PAPEL=puesto ;; 3) PAPEL=administracion ;;
+    *) mal "no entendí «$R»"; exit 1 ;;
+  esac
+fi
+
+if [ "$PAPEL" = "servidor" ] && [ "$ESWIFI" = "1" ]; then
+  mal "una computadora por wifi no puede ser el servidor"
+  echo
+  echo "      La red en puente, que es lo que permite a los demás"
+  echo "      consultorios ver su Windows, no funciona por wifi: los"
+  echo "      puntos de acceso rechazan ese tráfico."
+  echo
+  echo "      Conecta un cable de red y vuelve a intentarlo."
+  exit 1
+fi
+ok "será: $PAPEL"
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "3 · CÓMO SE VA A LLAMAR"
+
+if [ -z "$NOMBRE" ]; then
+  case "$PAPEL" in
+    servidor)       SUG="servidor" ;;
+    administracion) SUG="administracion" ;;
+    *)              SUG="consultorio1" ;;
+  esac
+  cat <<NOMBRES
+
+   El nombre sirve para encontrarla sin recordar direcciones. Desde
+   cualquier otra computadora del centro bastará con escribir
+   ${AZ}$SUG.local${V} en vez de $MIIP.
+
+   Buenos nombres: servidor, consultorio1, consultorio2, farmacia,
+   estadistica, enfermeria, admision.
+
+NOMBRES
+  printf "   Nombre para esta computadora [%s]: " "$SUG"
+  read -r NOMBRE
+  NOMBRE="${NOMBRE:-$SUG}"
+fi
+
+# Los nombres de red admiten letras, números y guiones. Nada más.
+NOMBRE=$(echo "$NOMBRE" | tr 'A-ZÁÉÍÓÚÑ' 'a-záéíóúñ' \
+         | sed 'y/áéíóúñ/aeioun/' | tr -c 'a-z0-9-' '-' | sed 's/-*$//;s/^-*//')
+[ -n "$NOMBRE" ] || { mal "el nombre quedó vacío"; exit 1; }
+ok "se llamará «$NOMBRE» y responderá a «$NOMBRE.local»"
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "4 · APLICANDO"
+
+mkdir -p "$CONF" "$RESP"
+
+# ── El nombre ─────────────────────────────────────────────────────────
+printf "\n   ${AZ}Nombre${V}\n"
+cp -f /etc/hosts "$RESP/hosts.antes-de-$(date '+%Y%m%d-%H%M')" 2>/dev/null
+if hostnamectl set-hostname "$NOMBRE" 2>/dev/null; then
+  ok "el sistema ya se llama «$NOMBRE»"
+else
+  echo "$NOMBRE" > /etc/hostname && ok "nombre escrito (se aplicará al reiniciar)"
+fi
+# Que el propio equipo se resuelva a sí mismo, o sudo tarda diez segundos
+if grep -q '^127.0.1.1' /etc/hosts; then
+  sed -i "s/^127.0.1.1.*/127.0.1.1\t$NOMBRE/" /etc/hosts
+else
+  printf '127.0.1.1\t%s\n' "$NOMBRE" >> /etc/hosts
+fi
+ok "anotado en /etc/hosts"
+
+# ── Que se encuentren por el nombre ───────────────────────────────────
+printf "\n   ${AZ}Encontrarse en la red${V}\n"
+if command -v avahi-daemon >/dev/null 2>&1; then
+  systemctl enable --now avahi-daemon >/dev/null 2>&1 \
+    && ok "se anunciará como «$NOMBRE.local»" \
+    || avi "no se pudo encender el anuncio en la red"
+else
+  avi "falta avahi-daemon"
+  echo "         sudo apt install avahi-daemon libnss-mdns"
+fi
+
+# ── Administración a distancia ────────────────────────────────────────
+printf "\n   ${AZ}Administración a distancia${V}\n"
+systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1
+( systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1 ) \
+  && ok "SSH encendido" || avi "revisa SSH a mano"
+
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"; then
+  ufw allow from "$RED.0/24" to any port 22 proto tcp >/dev/null 2>&1 \
+    && ok "SSH permitido desde la red del centro ($RED.0/24)"
+  ufw allow from "$RED.0/24" to any port 5353 proto udp >/dev/null 2>&1
+fi
+
+# ── Lo propio del servidor ────────────────────────────────────────────
+if [ "$PAPEL" = "servidor" ]; then
+  printf "\n   ${AZ}Que esté siempre disponible${V}\n"
+  systemctl mask sleep.target suspend.target hibernate.target \
+                 hybrid-sleep.target >/dev/null 2>&1 \
+    && ok "no se dormirá nunca" || avi "no se pudo bloquear la suspensión"
+
+  for h in /home/*; do
+    u=$(basename "$h"); id "$u" >/dev/null 2>&1 || continue
+    [ -d "$h/.config" ] || continue
+    printf '[AC][SuspendSession]\nidleTime=0\nsuspendType=0\n' \
+      > "$h/.config/powermanagementprofilesrc"
+    chown "$u:$u" "$h/.config/powermanagementprofilesrc" 2>/dev/null
+  done
+  ok "ahorro de energía ajustado para todos los usuarios"
+
+  systemctl enable libvirtd >/dev/null 2>&1 && ok "motor de virtualización al arrancar"
+  systemctl start  libvirtd >/dev/null 2>&1
+
+  # Red en puente y arranque automático de su Windows
+  MAQS=$(virsh -c qemu:///system list --all --name 2>/dev/null | grep -v '^$')
+  if [ -n "$MAQS" ]; then
+    printf "\n   ${AZ}Su Windows${V}\n"
+    VM=$(echo "$MAQS" | head -1)
+    virsh -c qemu:///system autostart "$VM" >/dev/null 2>&1 \
+      && ok "«$VM» arrancará sola con el equipo"
+
+    TIPO=$(virsh -c qemu:///system dumpxml "$VM" 2>/dev/null \
+           | grep -oP "<interface type='\K[^']+" | head -1)
+    case "$TIPO" in
+      direct|bridge) ok "ya está en red en puente — los demás la ven" ;;
+      *)
+        if [ "$(estado_vm "$VM")" = "running" ]; then
+          avi "para ponerla en red en puente hay que apagarla primero"
+          echo "         Apaga el Windows desde dentro y ejecuta:"
+          echo "            sudo redhornoma-papel --configurar --papel servidor --nombre $NOMBRE"
+        else
+          MAC=$(virsh -c qemu:///system dumpxml "$VM" 2>/dev/null \
+                | grep -A4 '<interface' | grep -oP "mac address='\K[^']+" | head -1)
+          MODELO=$(virsh -c qemu:///system dumpxml "$VM" 2>/dev/null \
+                | grep -A6 '<interface' | grep -oP "model type='\K[^']+" | head -1)
+          virsh -c qemu:///system dumpxml "$VM" > "$RESP/$VM-$(date '+%Y%m%d-%H%M').xml" 2>/dev/null
+          VIEJA=/tmp/rh-iface-vieja.xml; NUEVA=/tmp/rh-iface-nueva.xml
+          virsh -c qemu:///system dumpxml "$VM" | awk '/<interface /,/<\/interface>/' > "$VIEJA"
+          cat > "$NUEVA" <<XML
+<interface type='direct'>
+  <mac address='${MAC}'/>
+  <source dev='${IFAZ}' mode='bridge'/>
+  <model type='${MODELO:-e1000e}'/>
+</interface>
+XML
+          if virsh -c qemu:///system detach-device "$VM" "$VIEJA" --config >/dev/null 2>&1 \
+             && virsh -c qemu:///system attach-device "$VM" "$NUEVA" --config >/dev/null 2>&1; then
+            ok "puesta en red en puente sobre $IFAZ, conservando su dirección física"
+            echo "         Dale una dirección fija dentro de Windows, fuera del"
+            echo "         rango que reparte el router. Por ejemplo $RED.50"
+          else
+            avi "no se pudo poner en puente — la máquina sigue como estaba"
+          fi
+          rm -f "$VIEJA" "$NUEVA"
+        fi ;;
+    esac
+  else
+    avi "todavía no hay ningún Windows en esta computadora"
+    echo "         Créalo con:  sudo redhornoma-windows"
+  fi
+fi
+
+# ── Lo propio de administración ───────────────────────────────────────
+if [ "$PAPEL" = "administracion" ]; then
+  printf "\n   ${AZ}Para administrar las demás${V}\n"
+  U="${SUDO_USER:-}"
+  if [ -n "$U" ] && [ ! -f "/home/$U/.ssh/id_ed25519" ]; then
+    sudo -u "$U" ssh-keygen -t ed25519 -N '' -q \
+      -f "/home/$U/.ssh/id_ed25519" -C "redhornoma-$NOMBRE" 2>/dev/null \
+      && ok "llave de acceso creada para $U"
+  else
+    ok "el usuario ya tiene su llave de acceso"
+  fi
+  echo "         Para darle acceso a otra computadora del centro:"
+  echo "            ssh-copy-id usuario@nombre-de-la-otra.local"
+fi
+
+# ── Dejarlo escrito ───────────────────────────────────────────────────
+echo "$PAPEL" > "$ARCHIVO_PAPEL"
+{ printf 'papel=%s\nnombre=%s\nfecha=%s\nred=%s\n' \
+    "$PAPEL" "$NOMBRE" "$(date '+%Y-%m-%d %H:%M')" "${RED:-?}.0/24"; } > "$CONF/centro.conf"
+chmod 644 "$ARCHIVO_PAPEL" "$CONF/centro.conf"
+printf "\n"
+ok "papel anotado en $ARCHIVO_PAPEL"
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "✅ LISTA"
+
+cat <<FIN
+
+   Esta computadora es ahora ${AZ}$NOMBRE${V}, con papel de ${AZ}$PAPEL${V}.
+
+   Desde cualquier otra del centro se llega escribiendo:
+
+      ssh $(id -un "${SUDO_USER:-root}" 2>/dev/null || echo usuario)@$NOMBRE.local
+
+FIN
+
+case "$PAPEL" in
+  servidor) cat <<SRV
+   ${AZ}Lo que queda por hacer${V}
+
+      1. Dale dirección fija dentro de Windows, por ejemplo $RED.50
+      2. Instala ahí SALMI en modo servidor
+      3. En los demás consultorios, apunta al servidor con esa dirección
+
+SRV
+  ;;
+  puesto) cat <<PST
+   ${AZ}Lo que queda por hacer${V}
+
+      1. Crea su Windows:   sudo redhornoma-windows
+      2. Instala SALMI como cliente
+      3. Cuando pida el servidor, pon la dirección del servidor del centro
+
+PST
+  ;;
+esac
+
+cat <<DESHACER
+   ${AM}Para deshacerlo${V}
+
+      sudo hostnamectl set-hostname NOMBRE-ANTERIOR
+      sudo systemctl unmask sleep.target suspend.target \\
+                            hibernate.target hybrid-sleep.target
+
+   Las copias de lo que se cambió están en $RESP
+
+DESHACER
