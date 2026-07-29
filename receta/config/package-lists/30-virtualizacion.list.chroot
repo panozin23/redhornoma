@@ -32,6 +32,13 @@ bridge-utils
 dnsmasq-base
 netcat-openbsd
 
-# Pantalla de la máquina virtual
+# Pantalla de la máquina virtual.
+#
+# qemu-system-modules-spice es el que decide si habrá SPICE o solo VNC, y
+# se declara expresamente: en una PC de escritorio con Intel se descubrió
+# que sin él libvirt solo ofrece VNC. Con SPICE se comparte el portapapeles,
+# la pantalla se ajusta sola y —lo importante para un centro de salud— se
+# pueden pasar pendrives e impresoras al Windows.
+qemu-system-modules-spice
 spice-client-gtk
 libspice-server1
