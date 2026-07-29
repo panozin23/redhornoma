@@ -96,3 +96,18 @@ El plan completo, con las siete fases, está en [PLAN.md](PLAN.md).
 
 Debian, KDE, GNU, QEMU, libvirt, Calamares y el trabajo de mucha gente que
 publicó lo suyo para que otros pudieran usarlo. Software libre.
+
+---
+
+## Licencia
+
+**GPL-3.0** — ver [LICENSE](LICENSE).
+
+Eres libre de usar RedHornoma, copiarlo, estudiarlo y modificarlo. Si lo
+mejoras y lo repartes, tienes que compartir esas mejoras con la misma
+libertad. Es la misma familia de licencias que Debian y KDE, los proyectos
+sobre los que está construido.
+
+**Windows no se incluye ni se reparte.** Cada centro debe usar sus propias
+licencias. RedHornoma se limita a alojar el sistema que el centro ya tiene
+derecho a usar.
