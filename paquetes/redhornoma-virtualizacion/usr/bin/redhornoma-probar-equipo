@@ -1,0 +1,194 @@
+#!/bin/bash
+# redhornoma-probar-equipo — ¿Puede esta computadora ejecutar Windows?
+#
+# Responde a esa pregunta SIN necesitar una imagen de Windows ni una
+# licencia. Sirve para decidir, delante de un equipo cualquiera, si vale
+# la pena instalar RedHornoma en él.
+#
+# Cómo lo hace: crea una máquina virtual de mentira con el mismo hardware
+# que necesitaría cada versión de Windows, la enciende unos segundos, mira
+# si arranca, y la borra entera. No queda nada.
+#
+# Uso:  sudo redhornoma-probar-equipo
+#
+# No toca ninguna máquina virtual que ya exista.
+set -u
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+
+PREFIJO=redhornoma-prueba
+DISCO=/var/lib/libvirt/images/$PREFIJO.qcow2
+estado_vm(){ LC_ALL=C virsh -c qemu:///system domstate "$1" 2>/dev/null | tr -d '\n'; }
+
+limpiar(){
+  virsh -c qemu:///system destroy  "$PREFIJO" >/dev/null 2>&1
+  virsh -c qemu:///system undefine "$PREFIJO" --nvram >/dev/null 2>&1
+  rm -f "$DISCO" /tmp/$PREFIJO.xml
+}
+trap limpiar EXIT
+
+printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+printf "${AZ} ¿PUEDE ESTA COMPUTADORA EJECUTAR WINDOWS?${V}\n"
+printf "${AZ}══════════════════════════════════════════════════════${V}\n\n"
+
+printf "   %s\n" "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null | head -1) $(cat /sys/class/dmi/id/product_name 2>/dev/null | head -1)"
+printf "   %s\n" "$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+printf "   %s hilos · %s GB de memoria\n\n" "$(nproc)" "$(( $(awk '/MemTotal/{print $2}' /proc/meminfo) / 1024 / 1024 ))"
+
+[ "$(id -u)" = "0" ] || { mal "hace falta sudo"; echo "      sudo redhornoma-probar-equipo"; exit 1; }
+
+# ── Lo básico ─────────────────────────────────────────────────────────
+if grep -qm1 ' svm ' /proc/cpuinfo;   then MARCA_CPU=AMD
+elif grep -qm1 ' vmx ' /proc/cpuinfo; then MARCA_CPU=Intel
+else
+  mal "el procesador no tiene la virtualización disponible"
+  echo "      Suele estar apagada en la BIOS: busca «Virtualization»,"
+  echo "      «SVM» o «VT-x». Sin eso, aquí no se puede ejecutar Windows."
+  exit 1
+fi
+ok "procesador $MARCA_CPU con virtualización activa"
+[ -e /dev/kvm ] || { mal "falta /dev/kvm"; exit 1; }
+
+if ! virsh -c qemu:///system version >/dev/null 2>&1; then
+  systemctl enable --now libvirtd >/dev/null 2>&1 \
+    || systemctl enable --now virtqemud.socket >/dev/null 2>&1
+  sleep 3
+fi
+virsh -c qemu:///system version >/dev/null 2>&1 \
+  || { mal "el motor de virtualización no responde"; exit 1; }
+ok "motor de virtualización en marcha"
+
+if virsh -c qemu:///system dominfo "$PREFIJO" >/dev/null 2>&1; then
+  avi "quedaba una prueba anterior sin borrar — se limpia"
+  limpiar
+fi
+
+CAPS=$(virsh -c qemu:///system domcapabilities 2>/dev/null)
+if echo "$CAPS" | grep -q '<value>spice</value>'; then
+  PANTALLA=spice
+  echo "$CAPS" | grep -q '<value>qxl</value>' && VIDEO=qxl || VIDEO=vga
+else
+  PANTALLA=vnc; VIDEO=vga
+fi
+ok "pantalla $PANTALLA con vídeo $VIDEO"
+
+qemu-img create -f qcow2 "$DISCO" 1G >/dev/null 2>&1 \
+  || { mal "no se pudo crear el disco de prueba"; exit 1; }
+chown libvirt-qemu:kvm "$DISCO" 2>/dev/null || true
+chmod 660 "$DISCO"
+
+# ── Probar cada versión ───────────────────────────────────────────────
+printf "\n${AZ}── Probando cada versión de Windows ──${V}\n\n"
+
+RESULTADOS=""
+
+probar(){
+  local ver="$1" etiqueta="$2" maquina="$3" firmware="$4" tpm="$5" usb="$6"
+  printf "   %-14s " "$etiqueta"
+
+  local args=(
+    --connect qemu:///system --dry-run --print-xml 1
+    --name "$PREFIJO" --osinfo generic --memory 2048 --vcpus 2
+    --cpu host-passthrough --machine "$maquina"
+    --disk "path=$DISCO,format=qcow2,bus=virtio"
+    --network none
+    --controller "type=usb,model=$usb"
+    --graphics "$PANTALLA" --video "$VIDEO"
+    --sound none --noautoconsole
+  )
+  case "$firmware" in
+    uefi)        args+=( --boot firmware=efi ) ;;
+    uefi-secure) args+=( --boot "firmware=efi,firmware.feature0.name=enrolled-keys,firmware.feature0.enabled=yes,firmware.feature1.name=secure-boot,firmware.feature1.enabled=yes" ) ;;
+  esac
+  local features="hyperv.relaxed.state=on,hyperv.vapic.state=on,hyperv.spinlocks.state=on,hyperv.spinlocks.retries=8191"
+  [ "$firmware" = "uefi-secure" ] && features="smm.state=on,$features"
+  args+=( --features "$features" )
+  [ "$tpm" = "si" ] && args+=( --tpm backend.type=emulator,backend.version=2.0,model=tpm-crb )
+
+  local xml=/tmp/$PREFIJO.xml
+  if ! virt-install "${args[@]}" > "$xml" 2>/dev/null; then
+    printf "${RO}no se pudo preparar${V}\n"; RESULTADOS="$RESULTADOS|$ver:NO"; return
+  fi
+  # <evmcs> es correcto en Intel y rompe el arranque en AMD
+  [ "$MARCA_CPU" = "AMD" ] && sed -i '/<evmcs/d' "$xml"
+
+  if ! virsh -c qemu:///system define "$xml" >/dev/null 2>&1; then
+    printf "${RO}rechazada por libvirt${V}\n"; RESULTADOS="$RESULTADOS|$ver:NO"; return
+  fi
+  if virsh -c qemu:///system start "$PREFIJO" >/dev/null 2>&1; then
+    sleep 4
+    if [ "$(estado_vm "$PREFIJO")" = "running" ]; then
+      printf "${VE}arranca${V}\n"; RESULTADOS="$RESULTADOS|$ver:SI"
+    else
+      printf "${RO}arranca y se cae${V}\n"; RESULTADOS="$RESULTADOS|$ver:NO"
+    fi
+  else
+    printf "${RO}no arranca${V}\n"; RESULTADOS="$RESULTADOS|$ver:NO"
+  fi
+  virsh -c qemu:///system destroy  "$PREFIJO" >/dev/null 2>&1
+  virsh -c qemu:///system undefine "$PREFIJO" --nvram >/dev/null 2>&1
+}
+
+probar 7  "Windows 7"   pc  bios        no ehci
+probar 8  "Windows 8.1" q35 uefi        no qemu-xhci
+probar 10 "Windows 10"  q35 uefi        si qemu-xhci
+probar 11 "Windows 11"  q35 uefi-secure si qemu-xhci
+
+# ── Veredicto ─────────────────────────────────────────────────────────
+printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+printf "${AZ} VEREDICTO${V}\n"
+printf "${AZ}══════════════════════════════════════════════════════${V}\n\n"
+
+sirve(){ echo "$RESULTADOS" | grep -q "|$1:SI"; }
+
+# Windows 11 comprueba el modelo del procesador y rechaza los anteriores
+# a 2017. Todos los que admite saben hacer AVX2; los de antes, no.
+CPU_MODERNA=0
+grep -qm1 ' avx2 ' /proc/cpuinfo && CPU_MODERNA=1
+
+if sirve 11 && [ "$CPU_MODERNA" = "1" ]; then
+  printf "   ${VE}✅  RECOMENDADO: Windows 11${V}\n\n"
+  echo "      Esta computadora puede con la versión más nueva."
+elif sirve 10; then
+  printf "   ${VE}✅  RECOMENDADO: Windows 10${V}\n\n"
+  if sirve 11 && [ "$CPU_MODERNA" = "0" ]; then
+    echo "      El hardware virtual de Windows 11 arranca aquí, pero su"
+    echo "      instalador rechaza este procesador por ser anterior a 2017."
+    echo "      Con Windows 10 no hay ese problema y los programas del"
+    echo "      Ministerio funcionan igual."
+  fi
+elif sirve 8 || sirve 7; then
+  printf "   ${AM}⚠️   SOLO VERSIONES ANTIGUAS${V}\n\n"
+  echo "      Esta computadora solo admite versiones que ya no reciben"
+  echo "      parches de seguridad. Sirve para un programa concreto y sin"
+  echo "      internet, pero no es lo deseable en un centro de salud."
+else
+  printf "   ${RO}✖   NO SIRVE PARA WINDOWS VIRTUAL${V}\n\n"
+  echo "      Ninguna versión llegó a arrancar. Manda el resultado de:"
+  echo "         redhornoma-informe --sin-color"
+fi
+
+echo
+printf "   ${AZ}Detalle${V}\n\n"
+for par in "7:Windows 7" "8:Windows 8.1" "10:Windows 10" "11:Windows 11"; do
+  n=${par%%:*}; e=${par#*:}
+  sirve "$n" && printf "      ${VE}●${V} %s\n" "$e" || printf "      ${RO}○${V} %s\n" "$e"
+done
+
+# ── Anotarlo en el catálogo ───────────────────────────────────────────
+CATALOGO=/var/lib/redhornoma
+mkdir -p "$CATALOGO" 2>/dev/null
+printf '%s\t%s\t%s\t%s\t%s\t%s\tPRUEBA:%s\n' \
+  "$(date '+%Y-%m-%d')" \
+  "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null | head -1 | tr '\t' ' ')" \
+  "$(cat /sys/class/dmi/id/product_name 2>/dev/null | head -1 | tr '\t' ' ')" \
+  "$MARCA_CPU" "$(nproc) hilos" "$PANTALLA/$VIDEO" \
+  "$(echo "$RESULTADOS" | tr '|' ' ' | sed 's/^ *//')" \
+  >> "$CATALOGO/equipos-probados.tsv" 2>/dev/null
+chmod 644 "$CATALOGO/equipos-probados.tsv" 2>/dev/null
+
+printf "\n   Anotado en %s\n" "$CATALOGO/equipos-probados.tsv"
+printf "   No queda ninguna máquina de prueba: todo se borró.\n\n"
