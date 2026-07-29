@@ -86,7 +86,33 @@ que se convierten en 2.313 instalados, arranca hasta el escritorio en español,
 con Calamares y toda la virtualización dentro. El arranque seguro se verificó
 byte a byte contra el shim firmado.
 
-**Fase 1 — Virtualización: en curso.**
+**Fase 1 — Virtualización: cerrada el 29 de julio de 2026.**
+
+Probada en dos máquinas deliberadamente distintas:
+
+| | Portátil HP | PC de escritorio |
+|---|---|---|
+| Procesador | AMD Ryzen 5 5500U, 12 hilos | Intel Pentium G630 de 2011, 2 hilos |
+| Disco | NVMe | mecánico |
+| Recomendación | Windows 11 | Windows 10 |
+
+Probar en la máquina vieja encontró cuatro fallos que no se veían de otra
+forma: cuatro procesadores pedidos a una máquina de dos, Windows 11
+ofrecido donde su instalador lo rechaza, `qemu-system-modules-spice`
+ausente de la receta, y la caída a VNC funcionando de verdad.
+
+### Las herramientas
+
+| | |
+|---|---|
+| `redhornoma-informe` | examina un equipo y da un veredicto |
+| `redhornoma-probar-equipo` | ¿puede ejecutar Windows? Sin necesitar imagen ni licencia |
+| `redhornoma-windows` | crea la máquina virtual, adaptada a lo que hay |
+| `redhornoma-virtio-reducido` | deja el CD de controladores en ~50 MB |
+
+Cada prueba se anota sola en `/var/lib/redhornoma/equipos-probados.tsv`.
+
+**Fase 2 — Red del centro: siguiente.**
 
 El plan completo, con las siete fases, está en [PLAN.md](PLAN.md).
 
