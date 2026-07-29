@@ -90,7 +90,9 @@ fi
 systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1 \
   && ok "SSH encendido" || avi "SSH apagado — no se podrá administrar a distancia"
 
-if command -v avahi-daemon >/dev/null 2>&1; then
+# avahi-daemon vive en /usr/sbin, que no está en el PATH de un usuario
+# normal. Buscarlo con «command -v» hace creer que falta cuando sí está.
+if [ -x /usr/sbin/avahi-daemon ] || command -v avahi-daemon >/dev/null 2>&1; then
   systemctl is-active avahi-daemon >/dev/null 2>&1 \
     && ok "se anuncia en la red por su nombre" \
     || avi "no se anuncia en la red"
@@ -204,10 +206,23 @@ mkdir -p "$CONF" "$RESP"
 # ── El nombre ─────────────────────────────────────────────────────────
 printf "\n   ${AZ}Nombre${V}\n"
 cp -f /etc/hosts "$RESP/hosts.antes-de-$(date '+%Y%m%d-%H%M')" 2>/dev/null
-if hostnamectl set-hostname "$NOMBRE" 2>/dev/null; then
+
+# Hay tres nombres y cambiar uno no cambia los otros:
+#   estático   el de /etc/hostname, el que vale al arrancar
+#   temporal   el que usa el sistema en marcha
+#   bonito     el que se enseña en los menús
+# Si ya había un nombre temporal puesto, systemd NO lo pisa al cambiar el
+# estático. Por eso se ponen los tres a mano.
+echo "$NOMBRE" > /etc/hostname
+hostnamectl set-hostname             "$NOMBRE" 2>/dev/null
+hostnamectl set-hostname --transient "$NOMBRE" 2>/dev/null || hostname "$NOMBRE" 2>/dev/null
+hostnamectl set-hostname --pretty    "$NOMBRE" 2>/dev/null
+
+if [ "$(hostname)" = "$NOMBRE" ]; then
   ok "el sistema ya se llama «$NOMBRE»"
 else
-  echo "$NOMBRE" > /etc/hostname && ok "nombre escrito (se aplicará al reiniciar)"
+  avi "el nombre quedó escrito pero el sistema aún responde «$(hostname)»"
+  echo "         Se arreglará solo al reiniciar."
 fi
 # Que el propio equipo se resuelva a sí mismo, o sudo tarda diez segundos
 if grep -q '^127.0.1.1' /etc/hosts; then
@@ -219,7 +234,9 @@ ok "anotado en /etc/hosts"
 
 # ── Que se encuentren por el nombre ───────────────────────────────────
 printf "\n   ${AZ}Encontrarse en la red${V}\n"
-if command -v avahi-daemon >/dev/null 2>&1; then
+# avahi-daemon vive en /usr/sbin, que no está en el PATH de un usuario
+# normal. Buscarlo con «command -v» hace creer que falta cuando sí está.
+if [ -x /usr/sbin/avahi-daemon ] || command -v avahi-daemon >/dev/null 2>&1; then
   systemctl enable --now avahi-daemon >/dev/null 2>&1 \
     && ok "se anunciará como «$NOMBRE.local»" \
     || avi "no se pudo encender el anuncio en la red"
