@@ -44,7 +44,10 @@ printf "${AZ}══════════════════════�
 
 # ═════════════════════════════════════════════════════════════════════
 sec "SISTEMA"
-d "Equipo:"     "$(hostname)"
+# El nombre se lee del núcleo. En cursalialinux el programa «hostname»
+# está sustituido por un guion que siempre responde «localhost.localdomain»,
+# y /proc no se puede falsear así.
+d "Equipo:"     "$(cat /proc/sys/kernel/hostname 2>/dev/null || uname -n)"
 d "Sistema:"    "$(grep -oP 'PRETTY_NAME="\K[^"]+' /etc/os-release 2>/dev/null)"
 d "Núcleo:"     "$(uname -r)"
 d "Escritorio:" "${XDG_CURRENT_DESKTOP:-?} / ${XDG_SESSION_TYPE:-?}"

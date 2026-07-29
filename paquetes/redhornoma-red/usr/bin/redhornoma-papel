@@ -43,6 +43,12 @@ d(){   printf "   %-24s %s\n" "$1" "$2"; }
 
 estado_vm(){ LC_ALL=C virsh -c qemu:///system domstate "$1" 2>/dev/null | tr -d '\n'; }
 
+# El nombre se lee del núcleo, no del programa «hostname». En cursalialinux
+# se descubrió que ese programa estaba sustituido por un guion que siempre
+# respondía «localhost.localdomain», y por eso la comprobación fallaba
+# aunque el nombre estuviera bien puesto. /proc no se puede falsear así.
+nombre_real(){ cat /proc/sys/kernel/hostname 2>/dev/null || uname -n; }
+
 titulo "EL PAPEL DE ESTA COMPUTADORA EN EL CENTRO"
 if [ "$CONFIGURAR" = "1" ]; then
   printf "   Modo: ${RO}CONFIGURANDO${V}\n"
@@ -57,7 +63,7 @@ titulo "1 · CÓMO ESTÁ AHORA"
 PAPEL_ACTUAL=$(cat "$ARCHIVO_PAPEL" 2>/dev/null)
 d "Papel asignado:" "${PAPEL_ACTUAL:-ninguno todavía}"
 
-NOMBRE_ACTUAL=$(hostname)
+NOMBRE_ACTUAL=$(nombre_real)
 case "$NOMBRE_ACTUAL" in
   localhost*|debian|redhornoma)
     avi "se llama «$NOMBRE_ACTUAL» — sin nombre propio"
@@ -218,10 +224,10 @@ hostnamectl set-hostname             "$NOMBRE" 2>/dev/null
 hostnamectl set-hostname --transient "$NOMBRE" 2>/dev/null || hostname "$NOMBRE" 2>/dev/null
 hostnamectl set-hostname --pretty    "$NOMBRE" 2>/dev/null
 
-if [ "$(hostname)" = "$NOMBRE" ]; then
+if [ "$(nombre_real)" = "$NOMBRE" ]; then
   ok "el sistema ya se llama «$NOMBRE»"
 else
-  avi "el nombre quedó escrito pero el sistema aún responde «$(hostname)»"
+  avi "el nombre quedó escrito pero el sistema aún responde «$(nombre_real)»"
   echo "         Se arreglará solo al reiniciar."
 fi
 # Que el propio equipo se resuelva a sí mismo, o sudo tarda diez segundos
