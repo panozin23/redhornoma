@@ -112,7 +112,22 @@ ausente de la receta, y la caída a VNC funcionando de verdad.
 
 Cada prueba se anota sola en `/var/lib/redhornoma/equipos-probados.tsv`.
 
-**Fase 2 — Red del centro: siguiente.**
+**Fase 2 — Red del centro: en curso.**
+
+`redhornoma-papel` define de una vez qué es cada computadora del centro
+—servidor, puesto o administración— y aplica todo lo que ese papel implica:
+nombre propio, anuncio en la red, SSH, y si es el servidor también la red en
+puente, el arranque automático de su Windows y el bloqueo de la suspensión.
+
+Probado en las dos máquinas. Ya se llaman entre ellas por su nombre:
+
+```
+ssh flora@maquina-servidor.local     en vez de     ssh flora@192.168.0.110
+```
+
+Falta: trasladar *Equipos en Red* —la herramienta gráfica para administrar
+las demás computadoras— y la prueba final de la fase, que es dos máquinas
+compartiendo la base de datos de SALMI.
 
 El plan completo, con las siete fases, está en [PLAN.md](PLAN.md).
 
