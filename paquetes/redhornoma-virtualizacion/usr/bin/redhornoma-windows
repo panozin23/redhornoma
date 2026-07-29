@@ -29,6 +29,13 @@ VERSION=""; ISO_WIN=""; NOMBRE=""; PAPEL=""
 
 V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
 
+# El estado de una máquina hay que leerlo SIEMPRE en idioma fijo. En un
+# sistema en español virsh responde «ejecutando», no «running», y comparar
+# con la palabra inglesa hace creer que falló algo que funcionó bien.
+# Los mensajes de error del usuario siguen en español: solo se fija el
+# idioma para esta consulta concreta.
+estado_vm(){ LC_ALL=C virsh -c qemu:///system domstate "$1" 2>/dev/null | tr -d '\n'; }
+
 titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
           printf "${AZ} %s${V}\n" "$1"
           printf "${AZ}══════════════════════════════════════════════════════${V}\n"; }
@@ -551,15 +558,18 @@ echo
 ARRANCA=0
 if ARRANQUE=$(virsh -c qemu:///system start "$NOMBRE" 2>&1); then
   sleep 6
-  if [ "$(virsh -c qemu:///system domstate "$NOMBRE" 2>/dev/null)" = "running" ]; then
+  if [ "$(estado_vm "$NOMBRE")" = "running" ]; then
     ARRANCA=1
     ok "arranca correctamente en este equipo"
     virsh -c qemu:///system destroy "$NOMBRE" >/dev/null 2>&1
     ok "apagada — lista para que la instales cuando quieras"
   else
     mal "arrancó pero se detuvo sola"
-    echo "      Mira qué pasó:"
+    printf "      Estado ahora: %s\n" "$(estado_vm "$NOMBRE")"
+    echo "      Mira la razón:"
     echo "         sudo virsh domstate $NOMBRE --reason"
+    # Que no se quede encendida por un fallo de la comprobación
+    virsh -c qemu:///system destroy "$NOMBRE" >/dev/null 2>&1
   fi
 else
   mal "este equipo NO puede arrancar la máquina"
