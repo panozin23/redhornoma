@@ -164,8 +164,8 @@ OPCIONES
 fi
 
 case "$PAPEL" in
-  servidor) ok "será el SERVIDOR del centro"; MULT_DISCO=2 ;;
-  puesto)   ok "será un PUESTO DE TRABAJO";   MULT_DISCO=1 ;;
+  servidor) ok "será el SERVIDOR del centro" ;;
+  puesto)   ok "será un PUESTO DE TRABAJO"   ;;
   *) mal "papel no reconocido: «$PAPEL» (servidor o puesto)"; exit 1 ;;
 esac
 
@@ -231,12 +231,32 @@ if [ "$RAM_MB" -gt "$RAM_MAX_VM" ]; then
   echo "      Se usarán $(( RAM_MB / 1024 )) GB. Funcionará, pero irá justo."
 fi
 
-DISCO_GB=$(( DISCO_BASE * MULT_DISCO ))
+# El Windows del servidor NO es más grande que el de un puesto: es el mismo
+# Windows con los mismos programas. Lo que el servidor necesita de más es
+# sitio para los respaldos, y esos van a un disco externo y a otra
+# computadora del centro, nunca al mismo disco que la base de datos.
+DISCO_GB=$DISCO_BASE
 NECESARIO=$(( DISCO_GB / 2 + 10 ))   # qcow2 crece según se usa, no de golpe
+
 if [ "$LIBRE_GB" -lt "$NECESARIO" ]; then
   mal "hacen falta al menos $NECESARIO GB libres y hay $LIBRE_GB"
-  echo "      Libera espacio y vuelve a intentarlo."
+  echo
+  echo "      $ETIQUETA necesita un disco de ${DISCO_GB} GB. Aunque crece poco"
+  echo "      a poco, conviene tener sitio para que lo haga."
+  echo
+  echo "      ${AZ}Qué puedes hacer${V}"
+  echo "         · Liberar espacio en este equipo"
+  [ "$VERSION" = "11" ] && echo "         · Instalar Windows 10, que pide menos disco"
+  echo "         · Usar otro equipo con más espacio"
+  echo
   exit 1
+fi
+
+if [ "$PAPEL" = "servidor" ] && [ "$LIBRE_GB" -lt $(( NECESARIO + 60 )) ]; then
+  avi "queda justo para un servidor: $LIBRE_GB GB libres"
+  echo "      Los respaldos del centro tendrán que ir por fuerza a un disco"
+  echo "      externo. Que es lo recomendable de todos modos, pero aquí"
+  echo "      dejará de ser una opción."
 fi
 
 # ═════════════════════════════════════════════════════════════════════
@@ -301,6 +321,45 @@ AYUDA
 fi
 [ -r "${ISO_WIN:-}" ] || { mal "no puedo leer «$ISO_WIN»"; exit 1; }
 ok "Windows: $(basename "$ISO_WIN")  ($(du -h "$ISO_WIN" | cut -f1))"
+
+# ── ¿La imagen es de la versión que se eligió? ────────────────────────
+# Elegir Windows 10 y montar una imagen de Windows 11 deja una máquina que
+# no arranca la instalación: al 11 le falta el Arranque Seguro, que el
+# perfil del 10 no activa. El nombre del archivo casi siempre lo delata.
+case "$(basename "$ISO_WIN")" in
+  *[Ww][Ii][Nn]*11*) ISO_VER=11 ;;
+  *[Ww][Ii][Nn]*10*) ISO_VER=10 ;;
+  *[Ww][Ii][Nn]*8*)  ISO_VER=8  ;;
+  *[Ww][Ii][Nn]*7*)  ISO_VER=7  ;;
+  *) ISO_VER="" ;;
+esac
+
+if [ -n "$ISO_VER" ] && [ "$ISO_VER" != "$VERSION" ]; then
+  echo
+  avi "elegiste Windows $VERSION pero la imagen parece de Windows $ISO_VER"
+  cat <<AVISO
+
+      Eso importa: cada versión necesita un hardware virtual distinto.
+      Windows 11 no se instala sin Arranque Seguro, y el perfil de
+      Windows $VERSION no lo activa.
+
+      ${AZ}Escribe $ISO_VER${V} para usar el perfil correcto para esa imagen,
+      o pulsa Enter para seguir con Windows $VERSION de todos modos.
+
+AVISO
+  printf "   ¿Qué hago? "
+  read -r CORREGIR
+  if [ "$CORREGIR" = "$ISO_VER" ]; then
+    echo
+    ok "cambiando al perfil de Windows $ISO_VER — vuelve a ejecutar el asistente"
+    echo "      Es más seguro empezar de nuevo que cambiar a mitad."
+    echo
+    echo "         sudo redhornoma-windows --version $ISO_VER --iso \"$ISO_WIN\""
+    echo
+    exit 0
+  fi
+  avi "se sigue con Windows $VERSION bajo tu responsabilidad"
+fi
 
 # ═════════════════════════════════════════════════════════════════════
 titulo "5 · CÓMO SE VA A LLAMAR"
@@ -474,6 +533,78 @@ if ! SALIDA=$(virsh -c qemu:///system define "$XML" 2>&1); then
   exit 1
 fi
 ok "máquina «$NOMBRE» registrada"
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "8 · PRUEBA DE ARRANQUE EN ESTE EQUIPO"
+
+# Que libvirt acepte la configuración no significa que QEMU pueda
+# arrancarla: eso solo se sabe intentándolo. Es la clase de fallo que en
+# cursalialinux se descubría veinte minutos después, ya con el usuario
+# delante. Aquí se enciende unos segundos y se apaga.
+#
+# Es seguro: Windows todavía no está instalado, no hay nada que perder.
+
+echo "   Encendiéndola unos segundos para comprobar que este equipo"
+echo "   puede realmente con ella…"
+echo
+
+ARRANCA=0
+if ARRANQUE=$(virsh -c qemu:///system start "$NOMBRE" 2>&1); then
+  sleep 6
+  if [ "$(virsh -c qemu:///system domstate "$NOMBRE" 2>/dev/null)" = "running" ]; then
+    ARRANCA=1
+    ok "arranca correctamente en este equipo"
+    virsh -c qemu:///system destroy "$NOMBRE" >/dev/null 2>&1
+    ok "apagada — lista para que la instales cuando quieras"
+  else
+    mal "arrancó pero se detuvo sola"
+    echo "      Mira qué pasó:"
+    echo "         sudo virsh domstate $NOMBRE --reason"
+  fi
+else
+  mal "este equipo NO puede arrancar la máquina"
+  echo
+  echo "$ARRANQUE" | sed 's/^/      /'
+  cat <<PROBLEMA
+
+      ${AZ}Qué suele significar${V}
+
+      La configuración es válida en general, pero algo de este equipo
+      concreto no la admite. Lo más habitual:
+
+         · El procesador no admite alguna función pedida
+         · Falta un componente de QEMU para este tipo de máquina
+         · El firmware UEFI no está donde libvirt lo busca
+
+      La máquina queda registrada y apagada. Nada se ha perdido.
+
+      ${AZ}Para que lo mire${V}
+
+         redhornoma-informe --sin-color > ~/informe.txt
+
+      y mándame ese archivo junto con el mensaje de arriba.
+
+PROBLEMA
+fi
+
+# ── Anotarlo en el catálogo de equipos probados ───────────────────────
+# Cada máquina en la que se prueba deja constancia. Con el tiempo esto
+# dice qué hardware funciona y cuál da guerra, sin depender de la memoria
+# de nadie.
+CATALOGO=/var/lib/redhornoma
+mkdir -p "$CATALOGO" 2>/dev/null
+{
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(date '+%Y-%m-%d')" \
+    "$(cat /sys/class/dmi/id/sys_vendor 2>/dev/null | head -1 | tr '\t' ' ')" \
+    "$(cat /sys/class/dmi/id/product_name 2>/dev/null | head -1 | tr '\t' ' ')" \
+    "$MARCA_CPU" \
+    "$ETIQUETA" \
+    "$PANTALLA/$VIDEO" \
+    "$([ "$ARRANCA" = "1" ] && echo 'ARRANCA' || echo 'FALLA')"
+} >> "$CATALOGO/equipos-probados.tsv" 2>/dev/null
+chmod 644 "$CATALOGO/equipos-probados.tsv" 2>/dev/null
+ok "anotado en el catálogo de equipos probados"
 
 if [ "$PAPEL" = "servidor" ]; then
   virsh -c qemu:///system autostart "$NOMBRE" >/dev/null 2>&1 \
