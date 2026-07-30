@@ -292,6 +292,28 @@ if [ -x /usr/sbin/avahi-daemon ] || command -v avahi-daemon >/dev/null 2>&1; the
     fi
   fi
 
+  # Que la máquina no solo diga cómo se llama, sino QUÉ ES. Así, quien
+  # administre el centro las descubre solas, con su papel puesto, sin
+  # tener que apuntar direcciones en ninguna parte.
+  mkdir -p /etc/avahi/services
+  cat > /etc/avahi/services/redhornoma.service <<AVAHI
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<!-- Generado por redhornoma-papel. No editar a mano. -->
+<service-group>
+  <name replace-wildcards="yes">%h</name>
+  <service>
+    <type>_redhornoma._tcp</type>
+    <port>22</port>
+    <txt-record>papel=$PAPEL</txt-record>
+    <txt-record>centro=$CENTRO</txt-record>
+    <txt-record>nombre=$NOMBRE</txt-record>
+  </service>
+</service-group>
+AVAHI
+  chmod 644 /etc/avahi/services/redhornoma.service
+  ok "se anuncia como «$PAPEL» del centro «$CENTRO»"
+
   # Avahi lee el nombre UNA SOLA VEZ, al arrancar. Como acabamos de
   # cambiarlo, hay que reiniciarlo o seguiría anunciando el anterior.
   systemctl enable avahi-daemon >/dev/null 2>&1

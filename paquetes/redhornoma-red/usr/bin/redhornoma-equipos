@@ -1,0 +1,462 @@
+#!/bin/bash
+# redhornoma-equipos — Todas las computadoras del centro, en una ventana.
+#
+# Quien mantiene un centro de salud no debería tener que sentarse delante
+# de cada máquina. Desde aquí se ve el estado de todas y se actúa sobre
+# cualquiera con el ratón, sin escribir un solo comando.
+#
+# Lo que enseña de cada una:
+#   · si está encendida y si se puede entrar
+#   · qué es: servidor, puesto o administración
+#   · si su Windows está en marcha
+#   · CUÁNDO FUE SU ÚLTIMO RESPALDO  ← lo que de verdad importa
+#
+# Las máquinas se descubren solas: cada una se anuncia en la red con su
+# nombre, su papel y su centro. No hay que apuntar direcciones.
+#
+# Uso:  redhornoma-equipos
+#       No necesita sudo. La primera vez pide una contraseña por equipo,
+#       para dejarle la llave; después nunca más.
+set -u
+
+# yad en Wayland avisa de un identificador X11 que ahí no existe. Por
+# XWayland la llamada es válida y no ensucia la terminal.
+export GDK_BACKEND=x11
+
+CONF="$HOME/.config/redhornoma"
+EQUIPOS="$CONF/equipos.conf"          # nombre|usuario|direccion
+SELF="$(readlink -f "$0")"
+mkdir -p "$CONF"
+
+MIYO=$(cat /proc/sys/kernel/hostname 2>/dev/null || uname -n)
+MICENTRO=$(grep -oP '^centro=\K.*' /etc/redhornoma/centro.conf 2>/dev/null)
+MICENTRO="${MICENTRO:-sin centro}"
+
+for c in /usr/share/pixmaps/redhornoma.png /usr/share/pixmaps/redhornoma-96.png; do
+  [ -f "$c" ] && { LOGO="$c"; break; }
+done
+LOGO="${LOGO:-network-workgroup}"
+GTKRC=""
+[ -f /usr/share/redhornoma/centro.css ] && GTKRC="--gtkrc=/usr/share/redhornoma/centro.css"
+
+sola(){ pkill -f 'class=rhequipos' 2>/dev/null; sleep 0.15; }
+
+aviso(){ yad --class=rhequipos $GTKRC --borders=14 --title="Equipos en Red" \
+    --center --width=520 --window-icon="$LOGO" --image="${2:-dialog-information}" \
+    --text="$1" --button="Entendido:0" 2>/dev/null; }
+
+pregunta(){ yad --class=rhequipos $GTKRC --borders=14 --title="Equipos en Red" \
+    --center --width=520 --window-icon="$LOGO" --image=dialog-question \
+    --text="$1" --button="Cancelar:1" --button="Sí, adelante:0" 2>/dev/null; }
+
+ssh_a(){ ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new "$@"; }
+
+# ═════════════════════════════════════════════════════════════════════
+#  LA LIBRETA DE EQUIPOS
+# ═════════════════════════════════════════════════════════════════════
+usuario_de(){ awk -F'|' -v n="$1" '$1==n{print $2}' "$EQUIPOS" 2>/dev/null | head -1; }
+guardar_equipo(){  # nombre usuario direccion
+  touch "$EQUIPOS"
+  grep -v "^$1|" "$EQUIPOS" > "$EQUIPOS.tmp" 2>/dev/null || true
+  printf '%s|%s|%s\n' "$1" "$2" "$3" >> "$EQUIPOS.tmp"
+  sort "$EQUIPOS.tmp" -o "$EQUIPOS"; rm -f "$EQUIPOS.tmp"
+}
+olvidar_equipo(){ grep -v "^$1|" "$EQUIPOS" > "$EQUIPOS.tmp" 2>/dev/null; mv "$EQUIPOS.tmp" "$EQUIPOS"; }
+
+# ═════════════════════════════════════════════════════════════════════
+#  DESCUBRIR: cada máquina se anuncia con su papel y su centro
+# ═════════════════════════════════════════════════════════════════════
+descubrir(){
+  command -v avahi-browse >/dev/null 2>&1 || return
+  # Formato de avahi-browse -pt: campos separados por punto y coma
+  timeout 10 avahi-browse -prt _redhornoma._tcp 2>/dev/null \
+    | awk -F';' '$1=="=" && $3=="IPv4" {print $7"|"$8"|"$10}' | sort -u
+}
+
+# ── Estado de un equipo ───────────────────────────────────────────────
+# Cuatro situaciones que conviene no confundir:
+#   apagado      no responde a nada
+#   cortafuegos  responde pero cierra la puerta
+#   sin-permiso  la puerta está abierta pero aún no tiene nuestra llave
+#   listo        se puede entrar
+estado_de(){
+  local d="$1" u="$2"
+  ping -c1 -W2 "$d" >/dev/null 2>&1 || { echo apagado; return; }
+  timeout 3 bash -c "echo > /dev/tcp/$d/22" 2>/dev/null || { echo cortafuegos; return; }
+  timeout 8 ssh_a "$u@$d" 'exit' >/dev/null 2>&1 && echo listo || echo sin-permiso
+}
+icono_de(){ case "$1" in listo) echo 🟢;; sin-permiso) echo 🔴;; cortafuegos) echo 🟠;; *) echo ⚪;; esac; }
+texto_de(){ case "$1" in listo) echo Listo;; sin-permiso) echo "Falta permiso";; cortafuegos) echo Cortafuegos;; *) echo Apagada;; esac; }
+
+# ── Qué cuenta cada máquina de sí misma ───────────────────────────────
+# Una sola conexión por equipo: preguntar cinco veces es cinco veces más
+# lento y en un centro con cinco puestos se nota.
+datos_de(){  # nombre usuario direccion  →  papel|windows|respaldo|aviso
+  local u="$2" d="$3"
+  timeout 20 ssh_a "$u@$d" '
+    P=$(cat /etc/redhornoma/papel 2>/dev/null || echo "?")
+    W=$(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -cv "^$")
+    T=$(LC_ALL=C virsh -c qemu:///system list --all --name 2>/dev/null | grep -cv "^$")
+    U=$(ls -d /var/lib/redhornoma/respaldos/20* 2>/dev/null | sort | tail -1)
+    if [ -n "$U" ]; then
+      H=$(( ( $(date +%s) - $(stat -c %Y "$U") ) / 3600 ))
+      V=$([ -f "$U/CORRECTO" ] && echo "sí" || echo "no")
+      R="$H|$V"
+    else
+      R="-|-"
+    fi
+    printf "%s|%s de %s|%s\n" "$P" "$W" "$T" "$R"
+  ' 2>/dev/null
+}
+
+# ── Cómo se lee el respaldo de un vistazo ─────────────────────────────
+resumen_respaldo(){  # horas verificado
+  local h="$1" v="$2"
+  [ "$h" = "-" ] && { echo "⚪ nunca"; return; }
+  local etiqueta
+  if   [ "$h" -lt 30 ]; then etiqueta="🟢 hoy"
+  elif [ "$h" -lt 54 ]; then etiqueta="🟡 ayer"
+  elif [ "$h" -lt 200 ]; then etiqueta="🟠 hace $((h/24)) días"
+  else etiqueta="🔴 hace $((h/24)) días"
+  fi
+  [ "$v" = "no" ] && etiqueta="$etiqueta (sin verificar)"
+  echo "$etiqueta"
+}
+
+# ═════════════════════════════════════════════════════════════════════
+#  BUSCAR EQUIPOS NUEVOS
+# ═════════════════════════════════════════════════════════════════════
+buscar(){
+  sola
+  local encontrados
+  encontrados=$( ( echo "20"; echo "# Escuchando quién se anuncia en la red…"
+                   descubrir > /tmp/rh-equipos-vistos
+                   echo "100" ) | \
+    yad --class=rhequipos $GTKRC --progress --pulsate --auto-close --center \
+        --width=460 --title="Buscando" --window-icon="$LOGO" \
+        --text="Buscando computadoras de RedHornoma…" --no-buttons 2>/dev/null
+    cat /tmp/rh-equipos-vistos 2>/dev/null )
+
+  local nuevos=0 args=()
+  while IFS='|' read -r nom dir txt; do
+    [ -z "$nom" ] && continue
+    nom="${nom%%.local}"
+    [ "$nom" = "$MIYO" ] && continue
+    grep -q "^$nom|" "$EQUIPOS" 2>/dev/null && continue
+    local papel centro
+    papel=$(echo "$txt" | grep -oP 'papel=\K[^"]*' | head -1)
+    centro=$(echo "$txt" | grep -oP 'centro=\K[^"]*' | head -1)
+    nuevos=$((nuevos+1))
+    args+=(TRUE "$nom" "${papel:-?}" "${centro:-?}" "$dir")
+  done <<< "$encontrados"
+
+  if [ "$nuevos" = "0" ]; then
+    aviso "<b>No encontré computadoras nuevas.</b>
+
+Para que una máquina aparezca aquí, tiene que tener RedHornoma y
+haber pasado por su configuración:
+
+<tt>   sudo redhornoma-papel --configurar</tt>
+
+Si la que buscas ya está configurada, comprueba que esté encendida
+y en la misma red." dialog-information
+    menu; return
+  fi
+
+  local sel
+  sel=$(yad --class=rhequipos $GTKRC --list --checklist --center \
+    --width=680 --height=380 --title="Computadoras encontradas" \
+    --window-icon="$LOGO" --image="$LOGO" --image-on-top \
+    --text="<b>Encontré $nuevos computadora(s) de RedHornoma.</b>
+
+Marca las que quieras administrar desde aquí." \
+    --column="" --column="Nombre" --column="Es" --column="Centro" --column="Dirección" \
+    "${args[@]}" --button="Cancelar:1" --button="Añadir las marcadas:0" 2>/dev/null)
+
+  [ -z "$sel" ] && { menu; return; }
+  echo "$sel" | tr '|' '\n' | paste -d'|' - - - - - 2>/dev/null | while IFS='|' read -r m nom es cen dir; do
+    [ "$m" = "TRUE" ] || continue
+    local u
+    u=$(yad --class=rhequipos $GTKRC --entry --center --width=460 \
+        --title="Usuario de $nom" --window-icon="$LOGO" \
+        --text="<b>¿Con qué usuario se entra en «$nom»?</b>
+
+Es el nombre que aparece al iniciar sesión en esa computadora." \
+        --entry-text="$USER" --button="Cancelar:1" --button="Guardar:0" 2>/dev/null)
+    [ -n "$u" ] && guardar_equipo "$nom" "$u" "${dir:-$nom.local}"
+  done
+  menu
+}
+
+# ═════════════════════════════════════════════════════════════════════
+#  DAR LA LLAVE A UN EQUIPO
+# ═════════════════════════════════════════════════════════════════════
+dar_llave(){  # nombre
+  local nom="$1" u d
+  u=$(usuario_de "$nom"); d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
+  [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N '' -q -f "$HOME/.ssh/id_ed25519"
+
+  pregunta "<b>Dar permiso a «$nom»</b>
+
+Se va a copiar tu llave a esa computadora. Te pedirá <b>una vez</b>
+la contraseña de <tt>$u</tt>, y después nunca más.
+
+Se abrirá una terminal para que puedas escribirla." || { menu; return; }
+
+  for t in konsole gnome-terminal xfce4-terminal xterm; do
+    command -v "$t" >/dev/null 2>&1 && { TERM_APP="$t"; break; }
+  done
+  case "${TERM_APP:-}" in
+    konsole)        konsole -e bash -c "ssh-copy-id $u@$d; echo; echo 'Pulsa Enter para cerrar'; read" ;;
+    gnome-terminal) gnome-terminal -- bash -c "ssh-copy-id $u@$d; echo; read -p 'Pulsa Enter'" ;;
+    xfce4-terminal) xfce4-terminal -e "bash -c 'ssh-copy-id $u@$d; read -p Enter'" ;;
+    xterm)          xterm -e bash -c "ssh-copy-id $u@$d; read -p 'Enter'" ;;
+    *)  aviso "No encontré ninguna terminal para pedirte la contraseña.
+
+Ábrela tú y escribe:
+
+<tt>   ssh-copy-id $u@$d</tt>" dialog-warning ;;
+  esac
+  menu
+}
+
+# ═════════════════════════════════════════════════════════════════════
+#  ACCIONES SOBRE UN EQUIPO
+# ═════════════════════════════════════════════════════════════════════
+ver_windows(){
+  local nom="$1" u d; u=$(usuario_de "$nom")
+  d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
+  local vms; vms=$(timeout 15 ssh_a "$u@$d" 'virsh -c qemu:///system list --all --name 2>/dev/null | grep -v "^$"' 2>/dev/null)
+  if [ -z "$vms" ]; then
+    aviso "<b>«$nom» no tiene ninguna máquina de Windows.</b>
+
+Se crea desde esa computadora con:
+
+<tt>   sudo redhornoma-windows</tt>" dialog-information
+    equipo "$nom"; return
+  fi
+  local vm; vm=$(echo "$vms" | head -1)
+  if [ "$(echo "$vms" | wc -l)" -gt 1 ]; then
+    vm=$(yad --class=rhequipos $GTKRC --list --center --width=420 --height=300 \
+      --title="Máquinas de $nom" --window-icon="$LOGO" \
+      --text="<b>¿Cuál quieres ver?</b>" --column="Máquina" $vms \
+      --button="Cancelar:1" --button="Abrir:0" 2>/dev/null | cut -d'|' -f1)
+    [ -z "$vm" ] && { equipo "$nom"; return; }
+  fi
+  # Se enciende sola si estaba apagada: es lo que uno quiere al pulsar «ver»
+  timeout 20 ssh_a "$u@$d" "virsh -c qemu:///system start '$vm' 2>/dev/null" >/dev/null 2>&1
+  setsid virt-viewer --connect "qemu+ssh://$u@$d/system" "$vm" >/dev/null 2>&1 &
+  sleep 1
+}
+
+ver_informe(){
+  local nom="$1" u d; u=$(usuario_de "$nom")
+  d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
+  local txt
+  txt=$( ( echo "30"; echo "# Preguntándole a $nom…"
+           timeout 60 ssh_a "$u@$d" 'redhornoma-informe --sin-color 2>/dev/null || bash ~/redhornoma/redhornoma-informe --sin-color 2>/dev/null' > /tmp/rh-informe.txt
+           echo "100" ) | \
+    yad --class=rhequipos $GTKRC --progress --pulsate --auto-close --center \
+        --width=420 --title="Informe" --window-icon="$LOGO" \
+        --text="Preparando el informe de $nom…" --no-buttons 2>/dev/null
+    cat /tmp/rh-informe.txt 2>/dev/null )
+  [ -z "$txt" ] && txt="No se pudo obtener el informe.
+¿Está RedHornoma instalado en esa computadora?"
+  echo "$txt" | yad --class=rhequipos $GTKRC --text-info --center \
+    --width=760 --height=620 --title="Informe de $nom" --window-icon="$LOGO" \
+    --fontname="monospace 10" --button="⬅ Volver:bash -c '$SELF'" --button="Cerrar:1" 2>/dev/null
+}
+
+respaldar_ahora(){
+  local nom="$1" u d; u=$(usuario_de "$nom")
+  d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
+  pregunta "<b>Hacer el respaldo de «$nom» ahora</b>
+
+Se sacará la información de su Windows sin apagarlo ni cerrar
+ningún programa. Tarda medio minuto." || { equipo "$nom"; return; }
+
+  local salida
+  salida=$( ( echo "20"; echo "# Sacando la información…"
+              timeout 300 ssh_a -t "$u@$d" 'sudo -n redhornoma-respaldo --silencioso 2>&1 || sudo -n bash ~/redhornoma/redhornoma-respaldo --silencioso 2>&1' > /tmp/rh-respaldo.txt 2>&1
+              echo "100" ) | \
+    yad --class=rhequipos $GTKRC --progress --pulsate --auto-close --center \
+        --width=460 --title="Respaldo" --window-icon="$LOGO" \
+        --text="Respaldando $nom…" --no-buttons 2>/dev/null
+    cat /tmp/rh-respaldo.txt 2>/dev/null )
+
+  if echo "$salida" | grep -q 'RESPALDO HECHO'; then
+    aviso "<b>Respaldo hecho en «$nom».</b>
+
+$(echo "$salida" | grep -E 'Pacientes:|Prestaciones:|Archivos:' | sed 's/^ *//')"
+  else
+    echo "$salida" | yad --class=rhequipos $GTKRC --text-info --center \
+      --width=700 --height=460 --title="El respaldo no salió bien" \
+      --window-icon="$LOGO" --fontname="monospace 10" --button="Cerrar:0" 2>/dev/null
+  fi
+  menu
+}
+
+enviar_archivos(){
+  local nom="$1" u d; u=$(usuario_de "$nom")
+  d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
+  local archivos
+  archivos=$(yad --class=rhequipos $GTKRC --file --multiple --center \
+    --width=760 --height=520 --title="Enviar archivos a $nom" \
+    --window-icon="$LOGO" --separator='\n' \
+    --button="Cancelar:1" --button="Enviar:0" 2>/dev/null)
+  [ -z "$archivos" ] && { equipo "$nom"; return; }
+
+  local destino
+  destino=$(timeout 15 ssh_a "$u@$d" 'xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME"' 2>/dev/null)
+  destino="${destino:-.}"
+  ( echo "20"; echo "# Enviando…"
+    echo "$archivos" | while read -r f; do
+      [ -n "$f" ] && scp -q "$f" "$u@$d:$destino/" 2>/dev/null
+    done
+    echo "100" ) | \
+  yad --class=rhequipos $GTKRC --progress --pulsate --auto-close --center \
+      --width=460 --title="Enviando" --window-icon="$LOGO" \
+      --text="Enviando a $nom…" --no-buttons 2>/dev/null
+  aviso "<b>Enviado a «$nom».</b>
+
+Los archivos están en el escritorio de esa computadora."
+  menu
+}
+
+abrir_terminal(){
+  local nom="$1" u d; u=$(usuario_de "$nom")
+  d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
+  for t in konsole gnome-terminal xfce4-terminal xterm; do
+    command -v "$t" >/dev/null 2>&1 && { TERM_APP="$t"; break; }
+  done
+  case "${TERM_APP:-}" in
+    konsole)        setsid konsole -e ssh "$u@$d" >/dev/null 2>&1 & ;;
+    gnome-terminal) setsid gnome-terminal -- ssh "$u@$d" >/dev/null 2>&1 & ;;
+    xfce4-terminal) setsid xfce4-terminal -e "ssh $u@$d" >/dev/null 2>&1 & ;;
+    *)              setsid xterm -e ssh "$u@$d" >/dev/null 2>&1 & ;;
+  esac
+  sleep 1
+}
+
+# ═════════════════════════════════════════════════════════════════════
+#  QUÉ HACER CON UN EQUIPO
+# ═════════════════════════════════════════════════════════════════════
+equipo(){
+  sola
+  local nom="$1" u d est
+  u=$(usuario_de "$nom"); d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
+  est=$(estado_de "$d" "$u")
+
+  if [ "$est" = "sin-permiso" ]; then dar_llave "$nom"; return; fi
+  if [ "$est" != "listo" ]; then
+    aviso "<b>«$nom» no responde.</b>
+
+$(texto_de "$est"). Comprueba que esté encendida y en la misma red." dialog-warning
+    menu; return
+  fi
+
+  local info papel win resp
+  info=$(datos_de "$nom" "$u" "$d")
+  papel=$(echo "$info" | cut -d'|' -f1); win=$(echo "$info" | cut -d'|' -f2)
+  resp=$(resumen_respaldo "$(echo "$info" | cut -d'|' -f3)" "$(echo "$info" | cut -d'|' -f4)")
+
+  local r
+  yad --class=rhequipos $GTKRC --center --width=560 --borders=14 \
+    --title="$nom" --window-icon="$LOGO" --image="$LOGO" --image-on-top \
+    --text="<big><b>$nom</b></big>
+<i>$papel · $u@$d</i>
+
+Windows en marcha:  <b>$win</b>
+Último respaldo:  <b>$resp</b>
+
+<b>¿Qué quieres hacer?</b>" \
+    --form --columns=1 \
+    --field="🪟  Ver su Windows:FBTN"        "bash -c '$SELF ver-windows \"$nom\"'" \
+    --field="💾  Respaldar ahora:FBTN"        "bash -c '$SELF respaldar \"$nom\"'" \
+    --field="🔍  Ver su informe:FBTN"         "bash -c '$SELF informe \"$nom\"'" \
+    --field="📤  Enviarle archivos:FBTN"      "bash -c '$SELF enviar \"$nom\"'" \
+    --field="⌨️   Abrir una terminal:FBTN"     "bash -c '$SELF terminal \"$nom\"'" \
+    --field="🗑️   Quitarla de la lista:FBTN"   "bash -c '$SELF olvidar \"$nom\"'" \
+    --button="⬅ Volver:bash -c '$SELF'" --button="Cerrar:1" 2>/dev/null
+}
+
+# ═════════════════════════════════════════════════════════════════════
+#  LA VENTANA PRINCIPAL
+# ═════════════════════════════════════════════════════════════════════
+menu(){
+  sola
+  local args=() n=0 alerta=0
+
+  if [ -s "$EQUIPOS" ]; then
+    # Preguntarle a cada máquina cómo está lleva unos segundos. Sin avisar,
+    # la ventana tarda en aparecer y parece que el programa no arrancó.
+    local tmp; tmp=$(mktemp -d)
+    ( while IFS='|' read -r nom u d; do
+        [ -z "$nom" ] && continue
+        # Todas a la vez: de una en una, con cinco equipos, se hace eterno
+        ( est=$(estado_de "$d" "$u")
+          if [ "$est" = "listo" ]; then
+            info=$(datos_de "$nom" "$u" "$d")
+            printf '%s|%s|%s|%s|%s\n' "$nom" "$est" \
+              "$(echo "$info" | cut -d'|' -f1)" "$(echo "$info" | cut -d'|' -f2)" \
+              "$(resumen_respaldo "$(echo "$info" | cut -d'|' -f3)" "$(echo "$info" | cut -d'|' -f4)")" \
+              > "$tmp/$nom"
+          else
+            printf '%s|%s|||\n' "$nom" "$est" > "$tmp/$nom"
+          fi ) &
+      done < "$EQUIPOS"
+      wait ) | \
+    yad --class=rhequipos $GTKRC --progress --pulsate --auto-close --center \
+        --width=440 --title="Equipos en Red" --window-icon="$LOGO" \
+        --text="Preguntándole a las computadoras del centro cómo están…" \
+        --no-buttons 2>/dev/null
+
+    for f in "$tmp"/*; do
+      [ -e "$f" ] || continue
+      IFS='|' read -r nom est papel win resp < "$f"
+      n=$((n+1))
+      case "$resp" in *🔴*|*⚪*) alerta=1 ;; esac
+      args+=(--field="$(icono_de "$est")  <b>$nom</b>
+<i>${papel:-$(texto_de "$est")}</i>${win:+ · Windows: $win}${resp:+
+Respaldo: $resp}:FBTN" "bash -c '$SELF equipo \"$nom\"'")
+    done
+    rm -rf "$tmp"
+  fi
+
+  local cabecera
+  if [ "$n" = "0" ]; then
+    cabecera="<big><b>Todavía no hay ninguna computadora</b></big>
+
+Pulsa <b>Buscar</b> y aparecerán las que tengan RedHornoma
+configurado en esta misma red."
+  else
+    cabecera="<big><b>Centro: $MICENTRO</b></big>
+<i>$n computadora(s) · esta es «$MIYO»</i>"
+    [ "$alerta" = "1" ] && cabecera="$cabecera
+
+<b>⚠️  Alguna lleva demasiado sin respaldo.</b>"
+  fi
+
+  yad --class=rhequipos $GTKRC --center --width=580 --borders=14 \
+    --title="Equipos en Red" --window-icon="$LOGO" \
+    --image="$LOGO" --image-on-top --text="$cabecera" \
+    --form --columns=1 "${args[@]}" \
+    --button="🔍 Buscar computadoras:bash -c '$SELF buscar'" \
+    --button="Cerrar:1" 2>/dev/null
+}
+
+# ═════════════════════════════════════════════════════════════════════
+case "${1:-}" in
+  buscar)      buscar ;;
+  equipo)      equipo "${2:-}" ;;
+  ver-windows) ver_windows "${2:-}"; equipo "${2:-}" ;;
+  informe)     ver_informe "${2:-}" ;;
+  respaldar)   respaldar_ahora "${2:-}" ;;
+  enviar)      enviar_archivos "${2:-}" ;;
+  terminal)    abrir_terminal "${2:-}"; equipo "${2:-}" ;;
+  olvidar)     pregunta "<b>Quitar «${2:-}» de la lista</b>
+
+Solo se olvida aquí. En esa computadora no se cambia nada." \
+                 && olvidar_equipo "${2:-}"; menu ;;
+  *)           menu ;;
+esac
