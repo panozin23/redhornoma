@@ -164,36 +164,67 @@ buscar_salmi(){
 # Se lee en trozos y se comprueba el tamaño al final. Si algo se corta a
 # medias, el archivo no se da por bueno.
 sacar_archivo(){  # ruta_en_windows  destino_en_linux
-  python3 - "$VM" "$1" "$2" <<'PY'
-import base64, json, subprocess, sys
+  python3 - "$VM" "$1" "$2" leer <<'PY'
+import base64, json, sys, libvirt, libvirt_qemu
 
-vm, origen, destino = sys.argv[1], sys.argv[2], sys.argv[3]
+# Se habla con libvirt directamente, no llamando a «virsh» por cada
+# trozo. Escribir así fallaba: el dato viajaba como argumento de un
+# comando, y medio mega en texto supera con creces el límite del sistema
+# para un solo argumento. Leer funcionaba porque el dato vuelve como
+# salida, no como argumento — por eso el fallo solo se veía al escribir.
+# Los tamaños NO son arbitrarios, están medidos contra este canal:
+#   leer    512 KB  →  bien
+#   escribir 64 KB  →  bien
+#   escribir 256 KB →  el agente no contesta a tiempo y se cae
+# El canal entre Linux y Windows es estrecho, y al escribir se llena
+# antes. Subirlos «para ir más rápido» rompe el rescate.
+vm, origen, destino, modo = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+con = libvirt.open("qemu:///system")
+dom = con.lookupByName(vm)
 
 def agente(orden):
-    r = subprocess.run(["virsh", "-c", "qemu:///system", "qemu-agent-command", vm,
-                        json.dumps(orden)], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(r.stderr.strip()[:120])
-    return json.loads(r.stdout)["return"]
+    r = json.loads(libvirt_qemu.qemuAgentCommand(dom, json.dumps(orden), 60, 0))
+    if "error" in r:
+        raise RuntimeError(str(r["error"])[:150])
+    return r["return"]
 
-h = agente({"execute": "guest-file-open",
-            "arguments": {"path": origen, "mode": "rb"}})
-try:
-    total = 0
-    with open(destino, "wb") as f:
-        while True:
-            # Trozos de medio mega: pasan holgados por el canal del agente
-            r = agente({"execute": "guest-file-read",
-                        "arguments": {"handle": h, "count": 524288}})
-            datos = base64.b64decode(r.get("buf-b64", ""))
-            if datos:
-                f.write(datos); total += len(datos)
-            if r.get("eof") or not datos:
-                break
-    print(total)
-finally:
-    try: agente({"execute": "guest-file-close", "arguments": {"handle": h}})
-    except Exception: pass
+if modo == "leer":
+    h = agente({"execute": "guest-file-open",
+                "arguments": {"path": origen, "mode": "rb"}})
+    try:
+        total = 0
+        with open(destino, "wb") as f:
+            while True:
+                r = agente({"execute": "guest-file-read",
+                            "arguments": {"handle": h, "count": 524288}})
+                datos = base64.b64decode(r.get("buf-b64", ""))
+                if datos:
+                    f.write(datos); total += len(datos)
+                if r.get("eof") or not datos:
+                    break
+        print(total)
+    finally:
+        try: agente({"execute": "guest-file-close", "arguments": {"handle": h}})
+        except Exception: pass
+else:
+    # origen es el archivo de Linux, destino la ruta dentro de Windows
+    h = agente({"execute": "guest-file-open",
+                "arguments": {"path": destino, "mode": "wb"}})
+    try:
+        total = 0
+        with open(origen, "rb") as f:
+            while True:
+                trozo = f.read(65536)
+                if not trozo:
+                    break
+                r = agente({"execute": "guest-file-write",
+                            "arguments": {"handle": h,
+                                          "buf-b64": base64.b64encode(trozo).decode()}})
+                total += r.get("count", 0)
+        print(total)
+    finally:
+        try: agente({"execute": "guest-file-close", "arguments": {"handle": h}})
+        except Exception: pass
 PY
 }
 
@@ -263,17 +294,18 @@ comparar_con_anterior(){  # tablas registros pacientes prestaciones
 # El camino de vuelta: se escribe por trozos a través del agente, igual
 # que se saca. Sin pendrives, sin que nadie abra nada.
 meter_archivo(){  # origen_en_linux  ruta_en_windows
-  python3 - "$VM" "$1" "$2" <<'PY'
-import base64, json, subprocess, sys
-
-vm, origen, destino = sys.argv[1], sys.argv[2], sys.argv[3]
+  # Misma maquinaria que sacar_archivo, en sentido contrario
+  python3 - "$VM" "$1" "$2" escribir <<'PY'
+import base64, json, sys, libvirt, libvirt_qemu
+vm, origen, destino, modo = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+con = libvirt.open("qemu:///system")
+dom = con.lookupByName(vm)
 
 def agente(orden):
-    r = subprocess.run(["virsh", "-c", "qemu:///system", "qemu-agent-command", vm,
-                        json.dumps(orden)], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(r.stderr.strip()[:120])
-    return json.loads(r.stdout)["return"]
+    r = json.loads(libvirt_qemu.qemuAgentCommand(dom, json.dumps(orden), 60, 0))
+    if "error" in r:
+        raise RuntimeError(str(r["error"])[:150])
+    return r["return"]
 
 h = agente({"execute": "guest-file-open",
             "arguments": {"path": destino, "mode": "wb"}})
@@ -281,7 +313,7 @@ try:
     total = 0
     with open(origen, "rb") as f:
         while True:
-            trozo = f.read(524288)
+            trozo = f.read(65536)
             if not trozo:
                 break
             r = agente({"execute": "guest-file-write",
@@ -633,6 +665,27 @@ AVISO
     mal "no se pudo comprobar el resultado"
   fi
   rm -f "$COMP"
+
+  # Si no se escribió nada, NO se puede decir que fue bien. Que los
+  # números coincidan puede significar solo que los datos ya eran los
+  # mismos: no prueba que la escritura ocurriera.
+  if [ "$PUESTOS" = "0" ]; then
+    titulo "❌ EL RESCATE NO SE HIZO"
+    cat <<FIN
+
+   No se pudo escribir ningún archivo dentro de Windows.
+
+   ${AM}Tus datos NO se han tocado.${V} Lo que había sigue estando, y
+   además hay una copia en:
+      $SEGURO
+
+   Si arriba salieron números que coincidían, era porque los datos ya
+   eran los mismos — no porque se escribiera nada.
+
+FIN
+    anota "RESCATE FALLIDO: no se escribió ningún archivo en $VM"
+    exit 1
+  fi
 
   titulo "✅ RESCATE TERMINADO"
   cat <<FIN
