@@ -1,0 +1,201 @@
+#!/bin/bash
+# redhornoma-carpeta-compartida — Una carpeta que ven Linux y Windows.
+#
+# Pasar un archivo al Windows virtual no debería obligar a grabar un CD ni
+# a buscar un pendrive. Esta carpeta aparece en Windows como una unidad de
+# red y en Linux como una carpeta normal.
+#
+# Para qué sirve en un centro de salud:
+#   · sacar los respaldos de SALMI hacia el disco externo
+#   · meter los catálogos que manda el Ministerio
+#   · llevar informes a imprimir
+#
+# Uso:
+#   redhornoma-carpeta-compartida              mira e informa
+#   sudo redhornoma-carpeta-compartida --crear
+#
+# La carpeta NO se abre a internet: solo la ven las máquinas virtuales de
+# este equipo y, si se pide, las computadoras del centro.
+set -u
+
+CARPETA=/var/lib/libvirt/compartido
+USUARIO_SMB=redhornoma
+CONF_SMB=/etc/samba/smb.conf
+RESP=/var/backups/redhornoma
+
+CREAR=0; ABRIR_CENTRO=0
+for a in "$@"; do
+  case "$a" in
+    --crear) CREAR=1 ;;
+    --tambien-el-centro) ABRIR_CENTRO=1 ;;
+    --ayuda|-h) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  esac
+done
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+          printf "${AZ} %s${V}\n" "$1"
+          printf "${AZ}══════════════════════════════════════════════════════${V}\n"; }
+ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+d(){   printf "   %-24s %s\n" "$1" "$2"; }
+
+titulo "CARPETA COMPARTIDA CON WINDOWS"
+
+# ── Dónde llegarán las máquinas virtuales ─────────────────────────────
+# Cada máquina virtual ve a su anfitrión en la red interna de libvirt,
+# normalmente en 192.168.122.1. Esa es la dirección que hay que darle a
+# Windows, no la del equipo en la red del centro.
+IP_VIRT=$(ip -4 -o addr show virbr0 2>/dev/null | grep -oP 'inet \K[\d.]+')
+RT=$(ip route get 1.1.1.1 2>/dev/null | head -1)
+IP_LAN=$(echo "$RT" | grep -oP 'src \K\S+')
+RED_LAN=$(echo "$IP_LAN" | cut -d. -f1-3)
+
+d "Carpeta:" "$CARPETA"
+[ -n "$IP_VIRT" ] && d "La verán en:" "\\\\$IP_VIRT\\compartido" \
+                  || avi "no hay red virtual (virbr0) — ¿está libvirt encendido?"
+d "Este equipo en el centro:" "${IP_LAN:-sin red}"
+
+# ── Estado actual ─────────────────────────────────────────────────────
+echo
+[ -d "$CARPETA" ] && ok "la carpeta existe" || avi "la carpeta todavía no existe"
+
+if ! command -v smbd >/dev/null 2>&1 && [ ! -x /usr/sbin/smbd ]; then
+  avi "falta Samba, que es lo que la hace visible desde Windows"
+  echo "         sudo apt install samba"
+  FALTA_SAMBA=1
+else
+  FALTA_SAMBA=0
+  systemctl is-active smbd >/dev/null 2>&1 && ok "Samba en marcha" || avi "Samba parado"
+  grep -q '^\[compartido\]' "$CONF_SMB" 2>/dev/null \
+    && ok "la carpeta ya está publicada" \
+    || avi "la carpeta aún no está publicada"
+fi
+
+if [ "$CREAR" = "0" ]; then
+  titulo "PARA CREARLA"
+  cat <<FIN
+   Ejecuta lo mismo añadiendo --crear:
+
+      ${AZ}sudo redhornoma-carpeta-compartida --crear${V}
+
+   Y si además quieres que la vean las otras computadoras del centro
+   —no solo las máquinas virtuales de este equipo—:
+
+      ${AZ}sudo redhornoma-carpeta-compartida --crear --tambien-el-centro${V}
+
+FIN
+  exit 0
+fi
+
+[ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
+[ "$FALTA_SAMBA" = "1" ] && { mal "instala Samba primero: sudo apt install samba"; exit 1; }
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "CREANDO"
+
+mkdir -p "$CARPETA" "$RESP"
+chmod 2775 "$CARPETA"
+# Que el usuario del escritorio pueda dejar archivos ahí sin sudo
+DUENO="${SUDO_USER:-root}"
+chown "$DUENO":"$DUENO" "$CARPETA" 2>/dev/null
+ok "carpeta lista en $CARPETA"
+
+# ── La contraseña de acceso ───────────────────────────────────────────
+# Sin contraseña, cualquiera de la red entra. Con datos de pacientes
+# dentro, eso no es aceptable.
+echo
+printf "   ${AZ}Contraseña para entrar desde Windows${V}\n"
+echo "      Se escribe una sola vez: Windows la recuerda."
+echo
+printf "   Contraseña para el usuario «%s»: " "$USUARIO_SMB"
+read -rs CLAVE; echo
+[ ${#CLAVE} -ge 4 ] || { mal "muy corta — al menos 4 caracteres"; exit 1; }
+
+id "$USUARIO_SMB" >/dev/null 2>&1 || \
+  useradd -M -s /usr/sbin/nologin "$USUARIO_SMB" 2>/dev/null
+printf '%s\n%s\n' "$CLAVE" "$CLAVE" | smbpasswd -s -a "$USUARIO_SMB" >/dev/null 2>&1 \
+  && ok "usuario «$USUARIO_SMB» listo" || { mal "no se pudo crear el usuario"; exit 1; }
+unset CLAVE
+
+# ── Publicar la carpeta ───────────────────────────────────────────────
+echo
+cp -f "$CONF_SMB" "$RESP/smb.conf.antes-de-$(date '+%Y%m%d-%H%M')" 2>/dev/null
+sed -i '/^\[compartido\]/,/^$/d' "$CONF_SMB" 2>/dev/null
+
+PERMITIDOS="192.168.122. 127."
+[ "$ABRIR_CENTRO" = "1" ] && [ -n "$RED_LAN" ] && PERMITIDOS="$PERMITIDOS $RED_LAN."
+
+cat >> "$CONF_SMB" <<CFG
+
+[compartido]
+   comment = Carpeta compartida de RedHornoma
+   path = $CARPETA
+   browseable = yes
+   read only = no
+   valid users = $USUARIO_SMB
+   force group = $DUENO
+   create mask = 0664
+   directory mask = 2775
+   hosts allow = $PERMITIDOS
+   hosts deny = 0.0.0.0/0
+CFG
+ok "carpeta publicada"
+d "Solo la ven:" "$PERMITIDOS"
+
+if testparm -s >/dev/null 2>&1; then
+  ok "la configuración de Samba es correcta"
+else
+  mal "la configuración de Samba tiene un error"
+  echo "      Se restaura la anterior."
+  cp -f "$RESP/smb.conf.antes-de-"* "$CONF_SMB" 2>/dev/null
+  exit 1
+fi
+
+systemctl enable --now smbd >/dev/null 2>&1
+systemctl restart smbd >/dev/null 2>&1
+sleep 2
+systemctl is-active smbd >/dev/null 2>&1 && ok "Samba en marcha" || avi "revisa: systemctl status smbd"
+
+# El cortafuegos, si está puesto
+if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"; then
+  ufw allow in on virbr0 to any port 445 proto tcp >/dev/null 2>&1
+  [ "$ABRIR_CENTRO" = "1" ] && ufw allow from "$RED_LAN.0/24" to any port 445 proto tcp >/dev/null 2>&1
+  ok "cortafuegos ajustado"
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "✅ LISTA — CÓMO SE USA"
+
+cat <<FIN
+
+   ${AZ}En Linux${V}
+
+      Es una carpeta normal:  $CARPETA
+      Deja ahí lo que quieras pasar a Windows.
+
+   ${AZ}En Windows${V}
+
+      1. Abre el Explorador de archivos
+      2. Clic derecho en «Este equipo» → «Conectar a unidad de red»
+      3. Unidad:  Z:
+      4. Carpeta: ${AZ}\\\\$IP_VIRT\\compartido${V}
+      5. Marca «Conectar de nuevo al iniciar sesión»
+      6. Usuario:  $USUARIO_SMB
+         Contraseña: la que acabas de poner
+
+      A partir de ahí, la unidad Z: aparece sola cada vez.
+
+   ${AZ}Para qué la vas a usar${V}
+
+      · Sacar los respaldos de SALMI hacia el disco externo
+      · Meter los catálogos que manda el Ministerio
+      · Pasar informes de un lado a otro
+
+   ${AM}Para quitarla${V}
+
+      sudo sed -i '/^\[compartido\]/,/^\$/d' $CONF_SMB
+      sudo systemctl restart smbd
+
+FIN

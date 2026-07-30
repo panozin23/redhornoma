@@ -581,6 +581,32 @@ if grep -q evmcs "$XML"; then
   fi
 fi
 
+# La pantalla viaja por la red hasta quien la mira, y de fábrica va SIN
+# comprimir. En la misma computadora no se nota; desde otra, cada ventana
+# que se mueve se arrastra. Esto lo arregla, y de paso deja el
+# portapapeles y el envío de archivos funcionando.
+if [ "$PANTALLA" = "spice" ]; then
+  python3 - "$XML" <<'PY' 2>/dev/null
+import re,sys
+f=sys.argv[1]; s=open(f).read()
+extra = ("""<graphics type="spice" autoport="yes" listen="127.0.0.1">
+      <listen type="address" address="127.0.0.1"/>
+      <image compression="auto_glz"/>
+      <jpeg compression="auto"/>
+      <zlib compression="auto"/>
+      <playback compression="on"/>
+      <streaming mode="filter"/>
+      <clipboard copypaste="yes"/>
+      <filetransfer enable="yes"/>
+    </graphics>""")
+s = re.sub(r"<graphics type=.spice.*?</graphics>|<graphics type=.spice.*?/>", extra, s, flags=re.S)
+open(f,"w").write(s)
+PY
+  grep -q 'auto_glz' "$XML" \
+    && ok "pantalla comprimida — se verá suelta también desde otra computadora" \
+    || avi "no se pudo ajustar la compresión de pantalla"
+fi
+
 # Que dos personas puedan mirar la misma pantalla a la vez. Sirve para
 # ayudar a distancia sin echar a quien está trabajando.
 if [ "$PANTALLA" = "vnc" ]; then
