@@ -235,18 +235,22 @@ for par in "WSearch:el buscador deja de indexar el disco" \
   esac
 done
 
-# ── Que los cambios se vean sin cerrar sesión ────────────────────────
-printf "\n   ${AZ}Aplicando${V}\n"
-en_win "taskkill /f /im explorer.exe" >/dev/null 2>&1
-sleep 2
-en_win "start explorer.exe" >/dev/null 2>&1
-sleep 3
-ok "escritorio reiniciado — los cambios ya se ven"
+# ── Cómo se ven los cambios ──────────────────────────────────────────
+# NO se reinicia el escritorio de Windows. El agente corre como servicio,
+# en una sesión distinta a la del usuario: puede MATAR explorer.exe pero
+# no puede volver a arrancarlo en la sesión de nadie. Resultado: pantalla
+# negra y el usuario sin escritorio. Pasó una vez; no vuelve a pasar.
+printf "\n   ${AZ}Para que se vean${V}\n"
+echo "      Cierra la sesión de Windows y vuelve a entrar."
+echo "      Los servicios ya están apagados; lo demás entra al reabrir."
 
 # ═════════════════════════════════════════════════════════════════════
 titulo "✅ LISTO — $CAMBIOS AJUSTES"
 
 cat <<FIN
+
+   ${AM}Cierra la sesión de Windows y vuelve a entrar${V} para ver el cambio.
+   Inicio → tu nombre de usuario → Cerrar sesión.
 
    Windows se verá más soso y responderá más rápido. En una pantalla
    que viaja por la red, eso es lo que más se nota.
