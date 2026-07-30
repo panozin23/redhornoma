@@ -6,7 +6,15 @@ yad
 zenity
 xdg-utils
 
-# Comprimir y descomprimir
+# Comprimir y descomprimir.
+#
+# El Ministerio manda sus actualizaciones y catálogos en RAR, y ni Debian
+# ni Windows los abren de fábrica. Sin esto, un centro que reciba la
+# actualización de enero se queda sin poder abrirla. Los lectores de RAR
+# de siempre están en la sección non-free; estos dos hacen el trabajo y
+# son software libre.
+unrar-free
+libarchive-tools
 p7zip-full
 unzip
 zip
