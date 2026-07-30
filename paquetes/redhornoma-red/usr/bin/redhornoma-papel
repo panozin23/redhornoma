@@ -273,8 +273,13 @@ printf "\n   ${AZ}Encontrarse en la red${V}\n"
 # avahi-daemon vive en /usr/sbin, que no está en el PATH de un usuario
 # normal. Buscarlo con «command -v» hace creer que falta cuando sí está.
 if [ -x /usr/sbin/avahi-daemon ] || command -v avahi-daemon >/dev/null 2>&1; then
-  systemctl enable --now avahi-daemon >/dev/null 2>&1 \
-    && ok "se anunciará como «$NOMBRE.local»" \
+  # Avahi lee el nombre UNA SOLA VEZ, al arrancar. Como acabamos de
+  # cambiarlo, hay que reiniciarlo o seguiría anunciando el anterior.
+  systemctl enable avahi-daemon >/dev/null 2>&1
+  systemctl restart avahi-daemon >/dev/null 2>&1
+  sleep 2
+  systemctl is-active avahi-daemon >/dev/null 2>&1 \
+    && ok "se anuncia como «$NOMBRE.local»" \
     || avi "no se pudo encender el anuncio en la red"
 else
   avi "falta avahi-daemon"
@@ -284,8 +289,21 @@ fi
 # ── Administración a distancia ────────────────────────────────────────
 printf "\n   ${AZ}Administración a distancia${V}\n"
 systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1
-( systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1 ) \
-  && ok "SSH encendido" || avi "revisa SSH a mano"
+if systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1; then
+  ok "se puede entrar en ella a distancia"
+elif ! dpkg-query -W openssh-server >/dev/null 2>&1; then
+  # Un puesto o un servidor lo necesitan para que se pueda entrar en
+  # ellos. La computadora de administración solo sale hacia fuera, así
+  # que ahí es opcional.
+  if [ "$PAPEL" = "administracion" ]; then
+    d "Entrar a distancia:" "no instalado — no hace falta para administrar"
+  else
+    avi "no se puede entrar en esta computadora a distancia"
+    echo "         Instálalo con:  sudo apt install openssh-server"
+  fi
+else
+  avi "el programa está pero no arranca — mira: systemctl status ssh"
+fi
 
 if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "^Status: active"; then
   ufw allow from "$RED.0/24" to any port 22 proto tcp >/dev/null 2>&1 \
