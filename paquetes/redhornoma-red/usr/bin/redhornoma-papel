@@ -21,12 +21,13 @@ CONF=/etc/redhornoma
 ARCHIVO_PAPEL="$CONF/papel"
 RESP=/var/backups/redhornoma
 
-CONFIGURAR=0; PAPEL=""; NOMBRE=""
+CONFIGURAR=0; PAPEL=""; NOMBRE=""; CENTRO=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --configurar) CONFIGURAR=1; shift ;;
     --papel)  PAPEL="${2:-}";  shift 2 ;;
     --nombre) NOMBRE="${2:-}"; shift 2 ;;
+    --centro) CENTRO="${2:-}"; shift 2 ;;
     --ayuda|-h) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Opción desconocida: $1"; exit 1 ;;
   esac
@@ -60,6 +61,8 @@ fi
 # ═════════════════════════════════════════════════════════════════════
 titulo "1 · CÓMO ESTÁ AHORA"
 
+CENTRO_ACTUAL=$(grep -oP '^centro=\K.*' "$CONF/centro.conf" 2>/dev/null)
+d "Centro:" "${CENTRO_ACTUAL:-sin asignar}"
 PAPEL_ACTUAL=$(cat "$ARCHIVO_PAPEL" 2>/dev/null)
 d "Papel asignado:" "${PAPEL_ACTUAL:-ninguno todavía}"
 
@@ -175,7 +178,34 @@ fi
 ok "será: $PAPEL"
 
 # ═════════════════════════════════════════════════════════════════════
-titulo "3 · CÓMO SE VA A LLAMAR"
+titulo "3 · A QUÉ CENTRO PERTENECE"
+
+# Cada centro de salud es una isla: su servidor, su base de datos, su
+# gente. Los centros no se hablan entre sí y no hay ninguno «central».
+#
+# Anotar a cuál pertenece cada computadora evita el error que de verdad
+# ocurre: creer que estás en un sitio y estar en otro. Con varios centros
+# a cargo, es cuestión de tiempo.
+if [ -z "$CENTRO" ]; then
+  cat <<CENTROS
+
+   Cada centro guarda lo suyo y no se comunica con los demás. Esto sirve
+   para saber siempre dónde estás cuando administres varios.
+
+   Ejemplos: centro-capinota, hospital-capinota, casa, pruebas.
+
+CENTROS
+  printf "   Nombre del centro [%s]: " "${CENTRO_ACTUAL:-centro}"
+  read -r CENTRO
+  CENTRO="${CENTRO:-${CENTRO_ACTUAL:-centro}}"
+fi
+CENTRO=$(echo "$CENTRO" | tr 'A-ZÁÉÍÓÚÑ' 'a-záéíóúñ' \
+         | sed 'y/áéíóúñ/aeioun/' | tr -c 'a-z0-9-' '-' | sed 's/-*$//;s/^-*//')
+[ -n "$CENTRO" ] || CENTRO=centro
+ok "pertenece al centro «$CENTRO»"
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "4 · CÓMO SE VA A LLAMAR"
 
 if [ -z "$NOMBRE" ]; then
   case "$PAPEL" in
@@ -205,7 +235,7 @@ NOMBRE=$(echo "$NOMBRE" | tr 'A-ZÁÉÍÓÚÑ' 'a-záéíóúñ' \
 ok "se llamará «$NOMBRE» y responderá a «$NOMBRE.local»"
 
 # ═════════════════════════════════════════════════════════════════════
-titulo "4 · APLICANDO"
+titulo "5 · APLICANDO"
 
 mkdir -p "$CONF" "$RESP"
 
@@ -348,8 +378,8 @@ fi
 
 # ── Dejarlo escrito ───────────────────────────────────────────────────
 echo "$PAPEL" > "$ARCHIVO_PAPEL"
-{ printf 'papel=%s\nnombre=%s\nfecha=%s\nred=%s\n' \
-    "$PAPEL" "$NOMBRE" "$(date '+%Y-%m-%d %H:%M')" "${RED:-?}.0/24"; } > "$CONF/centro.conf"
+{ printf 'centro=%s\npapel=%s\nnombre=%s\nfecha=%s\nred=%s\n' \
+    "$CENTRO" "$PAPEL" "$NOMBRE" "$(date '+%Y-%m-%d %H:%M')" "${RED:-?}.0/24"; } > "$CONF/centro.conf"
 chmod 644 "$ARCHIVO_PAPEL" "$CONF/centro.conf"
 printf "\n"
 ok "papel anotado en $ARCHIVO_PAPEL"
@@ -359,7 +389,8 @@ titulo "✅ LISTA"
 
 cat <<FIN
 
-   Esta computadora es ahora ${AZ}$NOMBRE${V}, con papel de ${AZ}$PAPEL${V}.
+   Esta computadora es ahora ${AZ}$NOMBRE${V}, con papel de ${AZ}$PAPEL${V},
+   dentro del centro ${AZ}$CENTRO${V}.
 
    Desde cualquier otra del centro se llega escribiendo:
 
