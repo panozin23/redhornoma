@@ -144,9 +144,19 @@ Probado en las dos máquinas. Ya se llaman entre ellas por su nombre:
 ssh flora@maquina-servidor.local     en vez de     ssh flora@192.168.0.110
 ```
 
-Falta: trasladar *Equipos en Red* —la herramienta gráfica para administrar
-las demás computadoras— y la prueba final de la fase, que es dos máquinas
-compartiendo la base de datos de SALMI.
+`redhornoma-equipos` enseña todas las computadoras del centro en una ventana,
+con su papel, si su Windows está en marcha y **cuándo fue su último respaldo**.
+Se descubren solas: cada una se anuncia en la red con su nombre, su papel y su
+centro, así que no hay direcciones que apuntar en ninguna parte.
+
+Desde ahí, sobre cualquier máquina y sin entrar en ella: ver su Windows,
+respaldarla, leer su informe, enviarle archivos o abrirle una terminal.
+
+Con cinco consultorios, ver de un golpe cuál lleva ocho días sin copia es la
+diferencia entre enterarse hoy o en diciembre.
+
+Falta solo la prueba final de la fase: dos máquinas compartiendo la base de
+datos de SALMI, que necesita un segundo Windows.
 
 El plan completo, con las siete fases, está en [PLAN.md](PLAN.md).
 
