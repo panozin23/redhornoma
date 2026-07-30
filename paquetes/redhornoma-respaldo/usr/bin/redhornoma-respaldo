@@ -242,7 +242,7 @@ if [ "$ACCION" = "mirar" ]; then
   echo
   if systemctl is-enabled redhornoma-respaldo.timer >/dev/null 2>&1 ||
      [ -f /etc/cron.d/redhornoma-respaldo ]; then
-    ok "está programado para hacerse solo cada noche"
+    ok "programado: se hace solo, y se recupera si el equipo estaba apagado"
   else
     avi "NO está programado — hay que acordarse a mano"
     printf "         ${AZ}sudo redhornoma-respaldo --programar${V}\n"
@@ -541,8 +541,17 @@ if [ -n "$NUBE" ]; then
     TOCA=1
     if [ -f "$MARCA" ]; then
       DIAS=$(( ( $(date +%s) - $(stat -c %Y "$MARCA") ) / 86400 ))
-      [ "$DIAS" -lt "$NUBE_CADA" ] && TOCA=0 && \
-        d "Nube:" "toca dentro de $((NUBE_CADA - DIAS)) día(s)"
+      if [ "$DIAS" -lt "$NUBE_CADA" ]; then
+        TOCA=0
+        # La copia de la nube sigue siendo reciente: eso protege igual,
+        # así que no se debe avisar como si no hubiera nada fuera.
+        PROTEGIDO_NUBE=1
+        if [ "$DIAS" = "0" ]; then
+          d "Nube:" "ya hay copia de hoy; la próxima en $NUBE_CADA días"
+        else
+          d "Nube:" "última copia hace $DIAS día(s); la próxima en $((NUBE_CADA - DIAS))"
+        fi
+      fi
     fi
     if [ "$TOCA" = "1" ]; then
       printf "      subiendo a la nube… "
@@ -565,7 +574,19 @@ if [ -n "$NUBE" ]; then
 fi
 
 echo
-if [ "$FUERA" = "0" ]; then
+PROTEGIDO_NUBE="${PROTEGIDO_NUBE:-0}"
+if [ "$FUERA" -gt 0 ]; then
+  if [ "$CERCA" -gt 0 ]; then
+    ok "$FUERA copia(s) fuera del equipo, más $CERCA en otro disco de aquí"
+  else
+    ok "$FUERA copia(s) fuera de este equipo"
+  fi
+elif [ "$PROTEGIDO_NUBE" = "1" ]; then
+  # Este respaldo no ha salido, pero hay uno reciente en la nube. La
+  # información está protegida: decir lo contrario asusta sin motivo.
+  ok "hay copia reciente en la nube — la información está fuera del edificio"
+  [ "$CERCA" -gt 0 ] && ok "y $CERCA copia(s) en otro disco de este equipo"
+else
   avi "NINGUNA copia salió de esta computadora"
   echo "      Si se estropea o la roban, la información se va con ella."
   echo
@@ -573,10 +594,6 @@ if [ "$FUERA" = "0" ]; then
   echo "         carpeta_extra=/ruta/de/otro/disco"
   echo "         otra_computadora=usuario@equipo.local:/ruta"
   echo "         nube=drive:B-SALMI26"
-elif [ "$CERCA" -gt 0 ]; then
-  ok "$FUERA copia(s) fuera del equipo, más $CERCA en otro disco de aquí"
-else
-  ok "$FUERA copia(s) fuera de este equipo"
 fi
 
 # ── Comprobar que sirve ───────────────────────────────────────────────
