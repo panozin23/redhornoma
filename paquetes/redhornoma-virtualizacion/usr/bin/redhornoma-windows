@@ -219,16 +219,25 @@ case "$VERSION" in 8.1) VERSION=8 ;; esac
 case "$VERSION" in
   7)  ETIQUETA="Windows 7";    OSINFO=win7;   MAQUINA=pc;  FIRMWARE=bios
       TPM=no;  RAM_BASE=4096; DISCO_BASE=40; USB=ehci;      DRIVERS=w7
-      SOPORTE="Sin actualizaciones de seguridad desde enero de 2020" ;;
+      SIN_PARCHES=si
+      SOPORTE="Sin parches de seguridad desde 2020, ni siquiera de pago" ;;
   8)  ETIQUETA="Windows 8.1";  OSINFO=win8.1; MAQUINA=q35; FIRMWARE=uefi
       TPM=no;  RAM_BASE=4096; DISCO_BASE=40; USB=qemu-xhci; DRIVERS=w8.1
-      SOPORTE="Sin actualizaciones de seguridad desde enero de 2023" ;;
+      SIN_PARCHES=si
+      SOPORTE="Sin parches de seguridad desde 2023, ni siquiera de pago" ;;
   10) ETIQUETA="Windows 10";   OSINFO=win10;  MAQUINA=q35; FIRMWARE=uefi
       TPM=si;  RAM_BASE=4096; DISCO_BASE=64; USB=qemu-xhci; DRIVERS=w10
-      SOPORTE="Sin actualizaciones de seguridad desde octubre de 2025" ;;
+      # Terminó su soporte normal en octubre de 2025, pero Microsoft
+      # mantiene parches de seguridad: un año más para uso doméstico y
+      # hasta 2028 para instituciones que lo contraten. No está
+      # abandonado, pero tiene fecha de caducidad.
+      SIN_PARCHES=no
+      SOPORTE="Recibe parches de seguridad prorrogados. Fin previsto: 2026 en
+   el hogar, hasta 2028 para instituciones que lo contraten" ;;
   11) ETIQUETA="Windows 11";   OSINFO=win11;  MAQUINA=q35; FIRMWARE=uefi-secure
       TPM=si;  RAM_BASE=6144; DISCO_BASE=80; USB=qemu-xhci; DRIVERS=w11
-      SOPORTE="Con soporte actual del fabricante" ;;
+      SIN_PARCHES=no
+      SOPORTE="Con soporte completo del fabricante" ;;
   *)  mal "versión no reconocida: «$VERSION»"; echo "      Válidas: 7, 8, 10, 11"; exit 1 ;;
 esac
 
@@ -480,11 +489,15 @@ d "Controladores:"  "viostor\\$DRIVERS\\amd64 y NetKVM\\$DRIVERS\\amd64"
 echo
 printf "   ${AZ}Soporte del fabricante${V}\n"
 printf "   %s\n" "$SOPORTE"
-if [ "$VERSION" != "11" ]; then
+if [ "$SIN_PARCHES" = "si" ]; then
   echo
   avi "$ETIQUETA ya no recibe parches de seguridad"
   echo "      Úsalo solo para el programa que lo necesita. Al final te"
   echo "      explico cómo dejarlo sin internet si hace falta."
+elif [ "$VERSION" = "10" ]; then
+  echo
+  printf "   ${AZ}Mantenlo actualizado.${V} Los parches prorrogados hay que\n"
+  echo "   activarlos: Configuración → Actualización y seguridad."
 fi
 
 cat <<LICENCIA
@@ -723,12 +736,12 @@ cat <<SERVIDOR
    Y para que los demás consultorios lo vean, este equipo necesita la
    red en puente:
 
-      sudo redhornoma-modo-servidor
+      sudo redhornoma-papel --configurar --papel servidor
 
 SERVIDOR
 fi
 
-if [ "$VERSION" != "11" ]; then
+if [ "$SIN_PARCHES" = "si" ]; then
 cat <<VIEJO
    ${AM}Sobre la seguridad de $ETIQUETA${V}
 
