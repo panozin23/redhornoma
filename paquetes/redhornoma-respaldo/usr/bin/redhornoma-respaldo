@@ -1,5 +1,5 @@
 #!/bin/bash
-# redhornoma-respaldo — Guarda la información del centro, sola, cada noche.
+# redhornoma-respaldo — Guarda la información del centro, sola, cada día.
 #
 # La información de un centro de salud no se puede volver a escribir. Si se
 # pierde, se perdió. Por eso esta es la pieza más importante del sistema.
@@ -12,7 +12,7 @@
 # Uso:
 #   redhornoma-respaldo               qué hay y cuándo fue el último
 #   sudo redhornoma-respaldo --ahora
-#   sudo redhornoma-respaldo --programar     lo deja hecho cada noche
+#   sudo redhornoma-respaldo --programar     lo deja hecho cada día
 #   sudo redhornoma-respaldo --verificar     comprueba que el último sirve
 #
 # Un respaldo que nunca se ha restaurado no es un respaldo: es una esperanza.
@@ -240,7 +240,7 @@ if [ "$ACCION" = "mirar" ]; then
   done
 
   echo
-  if crontab -l 2>/dev/null | grep -q redhornoma-respaldo || \
+  if systemctl is-enabled redhornoma-respaldo.timer >/dev/null 2>&1 ||
      [ -f /etc/cron.d/redhornoma-respaldo ]; then
     ok "está programado para hacerse solo cada noche"
   else
@@ -255,24 +255,72 @@ fi
 #  PROGRAMAR
 # ═════════════════════════════════════════════════════════════════════
 if [ "$ACCION" = "programar" ]; then
-  titulo "QUE SE HAGA SOLO CADA NOCHE"
+  titulo "QUE EL RESPALDO SE HAGA SOLO"
   [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
 
-  cat > /etc/cron.d/redhornoma-respaldo <<'CRON'
-# Respaldo de la información del centro. A las tres de la madrugada,
-# cuando nadie está usando los programas.
-SHELL=/bin/bash
-PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-0 3 * * *  root  /usr/bin/redhornoma-respaldo --silencioso
-CRON
-  chmod 644 /etc/cron.d/redhornoma-respaldo
-  ok "programado: cada día a las 3:00 de la madrugada"
+  # Un centro de salud atiende de 8 a 14 y después apaga las computadoras.
+  # Programarlo de madrugada —lo que se hace en una oficina— significa que
+  # NO SE HACE NUNCA, y nadie se entera durante meses.
+  #
+  # Por eso: poco antes de cerrar, cuando el día ya está registrado. Y si
+  # ese día la computadora se apagó antes, se hace en cuanto se encienda
+  # la próxima vez. Ningún día se queda sin copia.
+  HORA=${HORA:-13:30}
+  cat > /etc/systemd/system/redhornoma-respaldo.service <<'UNIDAD'
+[Unit]
+Description=Respaldo de la información del centro
+After=libvirtd.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/redhornoma-respaldo --silencioso
+UNIDAD
+
+  cat > /etc/systemd/system/redhornoma-respaldo.timer <<UNIDAD
+[Unit]
+Description=Respaldo diario, antes de cerrar el centro
+
+[Timer]
+# Poco antes de terminar la jornada, con el día ya registrado
+OnCalendar=*-*-* $HORA:00
+# Si ese día la computadora estaba apagada a esa hora, se hace en
+# cuanto se encienda. Esto es lo que salva a un centro que cierra a las 14.
+Persistent=true
+# Un rato después de arrancar, para dar tiempo a que Windows despierte
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+UNIDAD
+
+  rm -f /etc/cron.d/redhornoma-respaldo 2>/dev/null
+  systemctl daemon-reload
+  systemctl enable --now redhornoma-respaldo.timer >/dev/null 2>&1
+
+  if systemctl is-enabled redhornoma-respaldo.timer >/dev/null 2>&1; then
+    ok "programado para las $HORA de cada día"
+    ok "y si ese día estaba apagada, se hace al encenderla"
+  else
+    mal "no se pudo programar"; exit 1
+  fi
+
   echo
-  echo "      A esa hora nadie usa los programas, así que la copia sale"
-  echo "      limpia y no molesta a nadie."
+  printf "   ${AZ}Por qué a las %s y no de madrugada${V}\n\n" "$HORA"
+  cat <<POR
+      El centro atiende de 8 a 14 y después se apagan las máquinas.
+      Un respaldo de madrugada no se haría nunca, y nadie lo notaría
+      hasta el día que hiciera falta.
+
+      A las $HORA el día ya está registrado y la computadora sigue
+      encendida. Y si algún día se apaga antes, la copia se hace en
+      cuanto vuelva a encenderse.
+
+POR
+  printf "   Próxima vez:  %s\n" "$(systemctl list-timers redhornoma-respaldo.timer --no-pager 2>/dev/null | awk 'NR==2{print $1" "$2" "$3}')"
   echo
-  printf "      Para quitarlo:  ${AM}sudo rm /etc/cron.d/redhornoma-respaldo${V}\n\n"
-  anota "programado a las 3:00"
+  printf "      Cambiar la hora:  ${AZ}sudo HORA=12:45 redhornoma-respaldo --programar${V}\n"
+  printf "      Quitarlo:         ${AM}sudo systemctl disable --now redhornoma-respaldo.timer${V}\n\n"
+  anota "programado a las $HORA, con recuperación al encender"
   exit 0
 fi
 
@@ -317,8 +365,20 @@ titulo "RESPALDO DE LA INFORMACIÓN DEL CENTRO"
 elegir_maquina || { anota "FALLÓ: no se pudo elegir la máquina"; exit 1; }
 ok "máquina: $VM"
 
+# Cuando el respaldo se hace al encender la computadora, Windows todavía
+# está arrancando y su agente tarda un par de minutos en responder. Se le
+# da tiempo en vez de darlo por muerto.
+if ! agente '{"execute":"guest-info"}' >/dev/null 2>&1; then
+  printf "   esperando a que Windows despierte"
+  for _ in $(seq 1 30); do
+    printf "."
+    sleep 10
+    agente '{"execute":"guest-info"}' >/dev/null 2>&1 && break
+  done
+  echo
+fi
 agente '{"execute":"guest-info"}' >/dev/null 2>&1 || {
-  mal "el agente invitado no responde"
+  mal "el agente invitado no responde después de cinco minutos"
   echo "      Sin él no se puede sacar nada sin apagar la máquina."
   echo "      Instálalo dentro de Windows: guest-agent\\qemu-ga-x86_64.msi"
   anota "FALLÓ: el agente no responde en $VM"; exit 1; }
