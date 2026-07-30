@@ -193,6 +193,68 @@ finally:
 PY
 }
 
+# ── Abrir la base y contar lo que hay dentro ──────────────────────────
+# Que el archivo exista y pese algo no significa nada. Aquí se abre de
+# verdad, se cuentan las tablas y los registros, y se mira lo que a un
+# centro de salud le importa: cuántos pacientes y cuántas prestaciones.
+#
+# Tarda un segundo. Por eso se hace después de CADA respaldo y no una vez
+# por semana: sale gratis.
+HISTORIAL="$BASE/verificacion.tsv"
+
+analizar_base(){  # archivo  →  "tablas registros pacientes prestaciones"
+  local f="$1" tablas=0 total=0 pac=0 pres=0 n
+  command -v mdb-tables >/dev/null 2>&1 || { echo "0 0 0 0"; return 1; }
+  while read -r t; do
+    [ -z "$t" ] && continue
+    tablas=$((tablas+1))
+    n=$(timeout 30 mdb-count "$f" "$t" 2>/dev/null | grep -oP '^\s*\K[0-9]+' | head -1)
+    n=${n:-0}
+    total=$((total+n))
+    case "$t" in
+      TblPacientes)     pac=$n ;;
+      TblPrestaciones)  pres=$n ;;
+    esac
+  done < <(timeout 60 mdb-tables -1 "$f" 2>/dev/null)
+  echo "$tablas $total $pac $pres"
+}
+
+# ── Comparar con la vez anterior ──────────────────────────────────────
+# La información de un centro solo crece. Si baja, algo pasó: alguien
+# borró, una restauración salió mal, o el archivo se está corrompiendo.
+# Enterarse el mismo día es la diferencia entre un susto y un desastre.
+comparar_con_anterior(){  # tablas registros pacientes prestaciones
+  local t="$1" r="$2" p="$3" pr="$4"
+  local ant_t ant_r ant_p ant_pr linea
+  [ -f "$HISTORIAL" ] || return 0
+  linea=$(grep -v '^#' "$HISTORIAL" | tail -1)
+  [ -n "$linea" ] || return 0
+  read -r _ _ ant_t ant_r ant_p ant_pr <<< "$linea"
+  local aviso=0
+  if [ "${ant_p:-0}" -gt 0 ] && [ "$p" -lt "$ant_p" ]; then
+    mal "HAY MENOS PACIENTES QUE LA VEZ ANTERIOR: $p, antes $ant_p"; aviso=1
+  fi
+  if [ "${ant_pr:-0}" -gt 0 ] && [ "$pr" -lt "$ant_pr" ]; then
+    mal "HAY MENOS PRESTACIONES QUE LA VEZ ANTERIOR: $pr, antes $ant_pr"; aviso=1
+  fi
+  if [ "${ant_t:-0}" -gt 0 ] && [ "$t" -lt "$ant_t" ]; then
+    mal "FALTAN TABLAS: $t, antes $ant_t"; aviso=1
+  fi
+  if [ "$aviso" = "1" ]; then
+    echo
+    echo "      Esto NO es un fallo del respaldo: el respaldo copió bien lo"
+    echo "      que había. Es la información la que tiene menos que antes."
+    echo
+    echo "      Alguien pudo borrar registros, o una restauración pudo"
+    echo "      devolver una versión vieja. ${AM}Míralo hoy mismo${V}: los"
+    echo "      respaldos anteriores siguen guardados y aún se puede volver."
+    echo
+    anota "ALERTA: la información bajó — pacientes $ant_p→$p, prestaciones $ant_pr→$pr"
+    return 1
+  fi
+  return 0
+}
+
 # ── ¿Es un archivo de Access de verdad? ───────────────────────────────
 # No basta con que exista y pese algo: se mira su firma. Un archivo
 # cortado a medias tiene el tamaño casi bien y no sirve para nada.
@@ -337,19 +399,50 @@ if [ "$ACCION" = "verificar" ]; then
   for f in "$ULT"/*.sal "$ULT"/*.mdb; do
     [ -e "$f" ] || continue
     if es_base_valida "$f"; then
-      ok "$(basename "$f")  —  $(du -h "$f" | cut -f1), es una base de datos de verdad"
+      ok "$(basename "$f")  —  $(du -h "$f" | cut -f1)"
     else
       mal "$(basename "$f")  —  no es una base de datos válida"
       BIEN=0
     fi
   done
+
+  PRINCIPAL=$(ls "$ULT"/*.sal 2>/dev/null | head -1)
+  if [ -n "$PRINCIPAL" ] && command -v mdb-tables >/dev/null 2>&1; then
+    printf "\n   ${AZ}Abriendo la base de datos${V}\n"
+    read -r N_TABLAS N_REG N_PAC N_PRES <<< "$(analizar_base "$PRINCIPAL")"
+    if [ "${N_TABLAS:-0}" -gt 0 ]; then
+      ok "se abre correctamente"
+      d "Tablas:" "$N_TABLAS"
+      d "Registros en total:" "$N_REG"
+      d "Pacientes:" "$N_PAC"
+      d "Prestaciones:" "$N_PRES"
+      echo
+      comparar_con_anterior "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES" \
+        && ok "la información no ha menguado desde la vez anterior" || BIEN=0
+    else
+      mal "no se pudo abrir como base de datos"; BIEN=0
+    fi
+  else
+    avi "falta mdbtools: solo se pudo comprobar la firma"
+    echo "         sudo apt install mdbtools"
+  fi
+
+  # Cómo ha ido creciendo la información del centro
+  if [ -f "$HISTORIAL" ] && [ "$(grep -cv '^#' "$HISTORIAL")" -gt 1 ]; then
+    printf "\n   ${AZ}Cómo ha ido creciendo${V}\n\n"
+    printf "      %-18s %10s %14s\n" "FECHA" "PACIENTES" "PRESTACIONES"
+    grep -v '^#' "$HISTORIAL" | tail -6 | while read -r f _ _ _ p pr; do
+      printf "      %-18s %10s %14s\n" "$f" "$p" "$pr"
+    done
+  fi
+
   echo
   if [ "$BIEN" = "1" ]; then
     touch "$ULT/CORRECTO"
-    ok "el respaldo sirve"
+    ok "EL RESPALDO SIRVE"
     anota "verificado correcto: $(basename "$ULT")"
   else
-    mal "ESTE RESPALDO NO SIRVE — haz otro cuanto antes"
+    mal "ESTE RESPALDO NO ESTÁ CONFIRMADO"
     anota "VERIFICACIÓN FALLIDA: $(basename "$ULT")"
     exit 1
   fi
@@ -603,11 +696,34 @@ for f in "$CARPETA_DEST"/*.sal "$CARPETA_DEST"/*.mdb; do
   [ -e "$f" ] || continue
   es_base_valida "$f" || { mal "$(basename "$f") no es una base de datos válida"; BIEN=0; }
 done
+[ "$BIEN" = "1" ] && ok "los archivos son bases de datos de verdad, no copias a medias"
+
+# Abrir la base y contar lo que hay dentro. Esto es lo que distingue un
+# respaldo comprobado de una carpeta con archivos dentro.
+PRINCIPAL="$CARPETA_DEST/${FECHA}_respaldo.sal"
+if [ -f "$PRINCIPAL" ] && command -v mdb-tables >/dev/null 2>&1; then
+  read -r N_TABLAS N_REG N_PAC N_PRES <<< "$(analizar_base "$PRINCIPAL")"
+  if [ "${N_TABLAS:-0}" -gt 0 ]; then
+    ok "se abre y tiene $N_TABLAS tablas con $N_REG registros"
+    d "Pacientes:" "$N_PAC"
+    d "Prestaciones:" "$N_PRES"
+    comparar_con_anterior "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES" || BIEN=0
+    { [ -f "$HISTORIAL" ] || printf '#fecha\tarchivo\ttablas\tregistros\tpacientes\tprestaciones\n' > "$HISTORIAL"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d_%H%M')" "$FECHA" \
+             "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES"; } >> "$HISTORIAL"
+  else
+    mal "el archivo no se pudo abrir como base de datos"
+    BIEN=0
+  fi
+else
+  avi "sin mdbtools solo se comprueba la firma del archivo"
+  echo "         sudo apt install mdbtools    ← comprueba también el contenido"
+fi
+
 if [ "$BIEN" = "1" ]; then
   touch "$CARPETA_DEST/CORRECTO"
-  ok "los archivos son bases de datos de verdad, no copias a medias"
 else
-  mal "algún archivo salió mal"
+  mal "ESTE RESPALDO NO ESTÁ CONFIRMADO — míralo antes de fiarte de él"
 fi
 
 # ── Tirar los viejos ──────────────────────────────────────────────────
