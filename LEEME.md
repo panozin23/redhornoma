@@ -112,6 +112,25 @@ ausente de la receta, y la caída a VNC funcionando de verdad.
 
 Cada prueba se anota sola en `/var/lib/redhornoma/equipos-probados.tsv`.
 
+**Fase 3 — Respaldo: cerrada el 30 de julio de 2026.** 🥇
+
+La pieza más importante del proyecto, probada con datos reales del centro
+Hornoma: 2.193 pacientes y 17.086 prestaciones sacados de Windows,
+verificados, devueltos, y comprobados por un humano dentro de SALMI.
+
+| | |
+|---|---|
+| **Sacar** | congela el disco un instante, saca los tres archivos, sin que nadie abra nada |
+| **Verificar** | abre la base, cuenta 80 tablas, y avisa si la información menguó |
+| **Devolver** | compara, avisa de lo que se perdería, guarda lo anterior, escribe y comprueba |
+| **Solo** | a las 13:30, o al encender si ese día el centro estaba cerrado |
+| **Fuera** | disco externo, otra computadora del centro, Google Drive |
+
+Lo que más costó: escribir dentro de Windows. Los datos viajaban como
+argumento de un comando y medio mega en texto supera el límite del
+sistema. Leer funcionaba porque el dato vuelve como salida — por eso el
+fallo solo aparecía en la mitad de vuelta.
+
 **Fase 2 — Red del centro: en curso.**
 
 `redhornoma-papel` define de una vez qué es cada computadora del centro
