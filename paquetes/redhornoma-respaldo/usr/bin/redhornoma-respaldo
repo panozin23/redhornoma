@@ -14,6 +14,7 @@
 #   sudo redhornoma-respaldo --ahora
 #   sudo redhornoma-respaldo --programar     lo deja hecho cada día
 #   sudo redhornoma-respaldo --verificar     comprueba que el último sirve
+#   sudo redhornoma-respaldo --rescatar      devuelve un respaldo a Windows
 #
 # Un respaldo que nunca se ha restaurado no es un respaldo: es una esperanza.
 set -u
@@ -32,13 +33,16 @@ while [ $# -gt 0 ]; do
     --ahora)     ACCION=ahora; shift ;;
     --programar) ACCION=programar; shift ;;
     --verificar) ACCION=verificar; shift ;;
+    --rescatar)  ACCION=rescatar; CUAL="${2:-}"
+                 case "$CUAL" in --*|"") CUAL="" ; shift ;; *) shift 2 ;; esac ;;
+    --confirmo)  CONFIRMADO=1; shift ;;
     --maquina)   VM="${2:-}"; shift 2 ;;
     --silencioso) ACCION=ahora; SILENCIO=1; shift ;;
     --ayuda|-h)  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Opción desconocida: $1"; exit 1 ;;
   esac
 done
-SILENCIO="${SILENCIO:-0}"
+SILENCIO="${SILENCIO:-0}"; CUAL="${CUAL:-}"; CONFIRMADO="${CONFIRMADO:-0}"
 
 if [ -t 1 ] && [ "$SILENCIO" = "0" ]; then
   V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
@@ -255,6 +259,49 @@ comparar_con_anterior(){  # tablas registros pacientes prestaciones
   return 0
 }
 
+# ── Meter un archivo DENTRO de Windows ────────────────────────────────
+# El camino de vuelta: se escribe por trozos a través del agente, igual
+# que se saca. Sin pendrives, sin que nadie abra nada.
+meter_archivo(){  # origen_en_linux  ruta_en_windows
+  python3 - "$VM" "$1" "$2" <<'PY'
+import base64, json, subprocess, sys
+
+vm, origen, destino = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def agente(orden):
+    r = subprocess.run(["virsh", "-c", "qemu:///system", "qemu-agent-command", vm,
+                        json.dumps(orden)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip()[:120])
+    return json.loads(r.stdout)["return"]
+
+h = agente({"execute": "guest-file-open",
+            "arguments": {"path": destino, "mode": "wb"}})
+try:
+    total = 0
+    with open(origen, "rb") as f:
+        while True:
+            trozo = f.read(524288)
+            if not trozo:
+                break
+            r = agente({"execute": "guest-file-write",
+                        "arguments": {"handle": h,
+                                      "buf-b64": base64.b64encode(trozo).decode()}})
+            total += r.get("count", 0)
+    print(total)
+finally:
+    try: agente({"execute": "guest-file-close", "arguments": {"handle": h}})
+    except Exception: pass
+PY
+}
+
+# ── ¿Está SALMI abierto en este momento? ──────────────────────────────
+# Escribir sobre su base de datos mientras la tiene abierta la corrompe.
+salmi_abierto(){
+  prog_win tasklist.exe /fi "imagename eq SalmiDis.exe" 2>/dev/null \
+    | grep -qi 'SalmiDis.exe'
+}
+
 # ── ¿Es un archivo de Access de verdad? ───────────────────────────────
 # No basta con que exista y pese algo: se mira su firma. Un archivo
 # cortado a medias tiene el tamaño casi bien y no sirve para nada.
@@ -446,6 +493,157 @@ if [ "$ACCION" = "verificar" ]; then
     anota "VERIFICACIÓN FALLIDA: $(basename "$ULT")"
     exit 1
   fi
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+#  RESCATAR — devolver un respaldo a Windows
+# ═════════════════════════════════════════════════════════════════════
+if [ "$ACCION" = "rescatar" ]; then
+  titulo "DEVOLVER UN RESPALDO A WINDOWS"
+  [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
+
+  # ── Cuál ────────────────────────────────────────────────────────────
+  if [ -z "$CUAL" ]; then
+    echo
+    echo "   Respaldos guardados, del más nuevo al más viejo:"
+    echo
+    printf "      %-20s %10s %10s %14s\n" "CUÁNDO" "TAMAÑO" "PACIENTES" "PRESTACIONES"
+    find "$DESTINO" -maxdepth 1 -type d -name '20*' 2>/dev/null | sort -r | head -12 | while read -r c; do
+      N=$(basename "$c")
+      DAT=$(grep -P "\t$N\t" "$HISTORIAL" 2>/dev/null | tail -1)
+      P=$(echo "$DAT" | cut -f5); PR=$(echo "$DAT" | cut -f6)
+      printf "      %-20s %10s %10s %14s  %s\n" "$N" \
+        "$(du -sh "$c" 2>/dev/null | cut -f1)" "${P:-?}" "${PR:-?}" \
+        "$([ -f "$c/CORRECTO" ] && echo '✅')"
+    done
+    echo
+    printf "   Escribe la fecha del que quieres devolver: "
+    read -r CUAL
+  fi
+
+  ORIGEN="$DESTINO/$CUAL"
+  [ -d "$ORIGEN" ] || { mal "no encuentro el respaldo «$CUAL»"; exit 1; }
+  SAL=$(ls "$ORIGEN"/*.sal 2>/dev/null | head -1)
+  [ -n "$SAL" ] || { mal "ese respaldo no tiene el archivo principal"; exit 1; }
+
+  # ── Comprobarlo ANTES de tocar nada ─────────────────────────────────
+  printf "\n   ${AZ}Comprobando el respaldo antes de usarlo${V}\n"
+  es_base_valida "$SAL" || { mal "ese respaldo no es una base de datos válida"; exit 1; }
+  read -r R_TAB R_REG R_PAC R_PRES <<< "$(analizar_base "$SAL")"
+  [ "${R_TAB:-0}" -gt 0 ] || { mal "ese respaldo no se puede abrir"; exit 1; }
+  ok "se abre: $R_TAB tablas, $R_PAC pacientes, $R_PRES prestaciones"
+
+  elegir_maquina || exit 1
+  agente '{"execute":"guest-info"}' >/dev/null 2>&1 || { mal "el agente no responde"; exit 1; }
+  CARPETA=$(buscar_salmi) || { mal "no encuentro SALMI en esa máquina"; exit 1; }
+  ok "SALMI está en: $CARPETA"
+
+  # ── Qué hay ahora, para que se vea lo que se pierde ─────────────────
+  printf "\n   ${AZ}Comparando con lo que hay ahora${V}\n"
+  AHORA="/tmp/redhornoma-actual-$$.mdb"
+  if sacar_archivo "$CARPETA\\bdSalmiDis.mdb" "$AHORA" >/dev/null 2>&1 \
+     && es_base_valida "$AHORA"; then
+    read -r A_TAB A_REG A_PAC A_PRES <<< "$(analizar_base "$AHORA")"
+    printf "\n      %-16s %12s %14s\n" "" "PACIENTES" "PRESTACIONES"
+    printf "      %-16s %12s %14s\n" "ahora en Windows" "$A_PAC" "$A_PRES"
+    printf "      %-16s %12s %14s\n" "el respaldo" "$R_PAC" "$R_PRES"
+    echo
+    if [ "${A_PAC:-0}" -gt "${R_PAC:-0}" ]; then
+      avi "el respaldo tiene MENOS pacientes que lo que hay ahora"
+      echo "         Se perderían $(( A_PAC - R_PAC )) pacientes y"
+      echo "         $(( A_PRES - R_PRES )) prestaciones registradas después."
+    else
+      ok "el respaldo está igual o más completo que lo que hay ahora"
+    fi
+  else
+    avi "no se pudo leer lo que hay ahora en Windows para comparar"
+  fi
+  rm -f "$AHORA"
+
+  # ── SALMI no puede estar abierto ────────────────────────────────────
+  if salmi_abierto; then
+    echo
+    mal "SALMI ESTÁ ABIERTO en ese Windows"
+    echo "      Escribir sobre su base de datos mientras la tiene abierta"
+    echo "      la corrompe. Ciérralo y vuelve a intentarlo."
+    exit 1
+  fi
+  ok "SALMI está cerrado"
+
+  # ── Confirmación explícita ──────────────────────────────────────────
+  if [ "$CONFIRMADO" != "1" ]; then
+    cat <<AVISO
+
+   ${RO}════════════════════════════════════════════════${V}
+   ${RO} ESTO REEMPLAZA LA INFORMACIÓN QUE HAY AHORA${V}
+   ${RO}════════════════════════════════════════════════${V}
+
+      Se va a escribir el respaldo del ${AZ}$CUAL${V} sobre la base de
+      datos que Windows está usando.
+
+      Antes se guardará una copia de lo actual, así que se puede
+      volver atrás. Pero conviene estar seguro.
+
+AVISO
+    printf "   Para continuar escribe exactamente  ${AZ}RESCATAR${V}  y pulsa Enter: "
+    read -r R
+    [ "$R" = "RESCATAR" ] || { echo; echo "   Cancelado. No se tocó nada."; exit 0; }
+  fi
+
+  # ── Guardar lo actual antes de pisarlo ──────────────────────────────
+  printf "\n   ${AZ}Guardando lo que hay ahora, por si acaso${V}\n"
+  SEGURO="$DESTINO/antes-del-rescate-$(date '+%Y-%m-%d_%H%M')"
+  mkdir -p "$SEGURO"
+  for a in bdSalmiDis.mdb bdPrescripcion.mdb bdExterna.mdb; do
+    sacar_archivo "$CARPETA\\$a" "$SEGURO/$a" >/dev/null 2>&1 && printf "      %s\n" "$a"
+  done
+  ok "guardado en $SEGURO"
+
+  # ── Devolver los archivos ───────────────────────────────────────────
+  printf "\n   ${AZ}Devolviendo el respaldo a Windows${V}\n"
+  PUESTOS=0
+  for par in "$SAL:bdSalmiDis.mdb" \
+             "$ORIGEN/bdPrescripcion.mdb:bdPrescripcion.mdb" \
+             "$ORIGEN/bdExterna.mdb:bdExterna.mdb"; do
+    F="${par%%:*}"; DEST="${par##*:}"
+    [ -f "$F" ] || continue
+    printf "      %-22s " "$DEST"
+    if meter_archivo "$F" "$CARPETA\\$DEST" >/dev/null 2>&1; then
+      printf "${VE}hecho${V}\n"; PUESTOS=$((PUESTOS+1))
+    else
+      printf "${RO}falló${V}\n"
+    fi
+  done
+
+  # ── Comprobar que quedó bien ────────────────────────────────────────
+  printf "\n   ${AZ}Comprobando lo que quedó dentro${V}\n"
+  COMP="/tmp/redhornoma-comp-$$.mdb"
+  if sacar_archivo "$CARPETA\\bdSalmiDis.mdb" "$COMP" >/dev/null 2>&1 \
+     && es_base_valida "$COMP"; then
+    read -r C_TAB C_REG C_PAC C_PRES <<< "$(analizar_base "$COMP")"
+    if [ "$C_PAC" = "$R_PAC" ] && [ "$C_PRES" = "$R_PRES" ]; then
+      ok "coincide con el respaldo: $C_PAC pacientes, $C_PRES prestaciones"
+    else
+      mal "lo que quedó dentro NO coincide con el respaldo"
+      echo "      dentro: $C_PAC pacientes / respaldo: $R_PAC"
+      echo "      Vuelve a intentarlo, o restaura desde $SEGURO"
+    fi
+  else
+    mal "no se pudo comprobar el resultado"
+  fi
+  rm -f "$COMP"
+
+  titulo "✅ RESCATE TERMINADO"
+  cat <<FIN
+
+   Se devolvieron $PUESTOS archivos. Abre SALMI y compruébalo.
+
+   ${AM}Si algo no cuadra${V}, lo de antes está guardado en:
+      $SEGURO
+
+FIN
+  anota "rescate: $CUAL devuelto a $VM ($PUESTOS archivos)"
   exit 0
 fi
 
