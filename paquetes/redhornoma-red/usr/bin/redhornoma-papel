@@ -310,7 +310,10 @@ printf "\n   ${AZ}Administración a distancia${V}\n"
 systemctl enable --now ssh >/dev/null 2>&1 || systemctl enable --now sshd >/dev/null 2>&1
 if systemctl is-active ssh >/dev/null 2>&1 || systemctl is-active sshd >/dev/null 2>&1; then
   ok "se puede entrar en ella a distancia"
-elif ! dpkg-query -W openssh-server >/dev/null 2>&1; then
+# Hay que mirar el ESTADO, no si dpkg conoce el nombre. Un paquete que se
+# instaló y se quitó sigue apareciendo en la base de datos como
+# «unknown ok not-installed», y «dpkg-query -W» devuelve cero igual.
+elif ! dpkg-query -W -f='${Status}' openssh-server 2>/dev/null | grep -q 'ok installed'; then
   # Un puesto o un servidor lo necesitan para que se pueda entrar en
   # ellos. La computadora de administración solo sale hacia fuera, así
   # que ahí es opcional.
