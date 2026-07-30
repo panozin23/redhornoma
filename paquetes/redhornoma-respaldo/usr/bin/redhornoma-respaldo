@@ -455,6 +455,28 @@ if [ -n "$NUBE" ]; then
     avi "la nube está configurada pero falta rclone"
     echo "         sudo apt install rclone"
   else
+    # El permiso de la nube lo guarda rclone en la carpeta personal de
+    # quien lo configuró. De noche esto corre como administrador del
+    # sistema, que no tiene esa carpeta: hay que decirle dónde mirar.
+    RCONF=$(leer_conf nube_permiso)
+    if [ -z "$RCONF" ]; then
+      for posible in /etc/redhornoma/rclone.conf \
+                     "/home/${SUDO_USER:-nadie}/.config/rclone/rclone.conf" \
+                     /root/.config/rclone/rclone.conf; do
+        [ -r "$posible" ] && RCONF="$posible" && break
+      done
+    fi
+    if [ -n "$RCONF" ]; then
+      export RCLONE_CONFIG="$RCONF"
+    else
+      avi "no encuentro el permiso de la nube"
+      echo "         Guárdalo donde el sistema lo vea:"
+      echo "            sudo install -m 600 -D ~/.config/rclone/rclone.conf \\"
+      echo "                /etc/redhornoma/rclone.conf"
+      NUBE=""
+    fi
+  fi
+  if [ -n "$NUBE" ]; then
     MARCA="$BASE/ultima-subida-nube"
     TOCA=1
     if [ -f "$MARCA" ]; then
