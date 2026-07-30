@@ -486,6 +486,51 @@ corregir.
 
 ---
 
+## 6-bis. Cómo se monta SALMI para varios consultorios
+
+**Confirmado el 30 de julio de 2026**, no supuesto: euflo trabajó en un centro
+montado así y lo describió. Si apagaban la computadora del consultorio 1,
+**nadie más podía trabajar**.
+
+```
+   🖥️ Consultorio 1  ←── tiene SALMI instalado y la base de datos
+        │                 comparte su carpeta por la red
+        │
+   ┌────┴────┬─────────┐
+   │         │         │
+  🖥️ C2     🖥️ C3     🖥️ C4
+   Abren el MISMO programa desde esa carpeta compartida
+```
+
+Es el despliegue clásico de un programa de Visual Basic 6 con Access. **SALMI no
+tiene ninguna configuración de red que tocar** — se buscó en su base de datos, en
+el registro de Windows, en archivos `.ini` y dentro del propio ejecutable. La
+ruta a la base es relativa a donde esté el programa, y por eso funciona al
+ejecutarlo desde la carpeta compartida.
+
+Los permisos los distingue **el usuario con el que cada uno entra**, no la
+máquina. SALMI trae su propia tabla de usuarios.
+
+### Los cuatro pasos
+
+| | Dónde | Qué |
+|---|---|---|
+| 1 | El servidor, en Linux | Poner su Windows en red en puente |
+| 2 | El servidor, en Windows | Dirección fija y compartir la carpeta de SALMI |
+| 3 | Cada puesto, en Windows | Instalar SALMI (para sus bibliotecas) |
+| 4 | Cada puesto, en Windows | Acceso directo a la carpeta compartida |
+
+### Lo que hay que asumir
+
+Una base de datos Access compartida por red **se puede corromper** si la red
+parpadea o se va la luz mientras alguien graba. No es una posibilidad teórica:
+es la causa número uno de desastres en sistemas así.
+
+Con el respaldo diario de la Fase 3 el riesgo es asumible. **Sin él no lo
+sería.** Por eso la Fase 3 va antes que esta.
+
+---
+
 ## 7. La prueba piloto, en detalle
 
 Es la fase que decide si el proyecto sirve. Merece cuidado.
