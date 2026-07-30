@@ -49,7 +49,11 @@ pregunta(){ yad --class=rhequipos $GTKRC --borders=14 --title="Equipos en Red" \
     --center --width=520 --window-icon="$LOGO" --image=dialog-question \
     --text="$1" --button="Cancelar:1" --button="Sí, adelante:0" 2>/dev/null; }
 
-ssh_a(){ ssh -o BatchMode=yes -o ConnectTimeout=6 -o StrictHostKeyChecking=accept-new "$@"; }
+# El tiempo máximo va DENTRO de la función. «timeout» ejecuta programas,
+# no funciones del propio guion: escribir «timeout 8 ssh_a …» falla con
+# «no such file or directory» y el guion lo toma por «no se puede entrar».
+ssh_a(){ timeout "${ESPERA:-20}" ssh -o BatchMode=yes -o ConnectTimeout=6 \
+           -o StrictHostKeyChecking=accept-new "$@"; }
 
 # ═════════════════════════════════════════════════════════════════════
 #  LA LIBRETA DE EQUIPOS
@@ -83,7 +87,7 @@ estado_de(){
   local d="$1" u="$2"
   ping -c1 -W2 "$d" >/dev/null 2>&1 || { echo apagado; return; }
   timeout 3 bash -c "echo > /dev/tcp/$d/22" 2>/dev/null || { echo cortafuegos; return; }
-  timeout 8 ssh_a "$u@$d" 'exit' >/dev/null 2>&1 && echo listo || echo sin-permiso
+  ESPERA=8 ssh_a "$u@$d" 'exit' >/dev/null 2>&1 && echo listo || echo sin-permiso
 }
 icono_de(){ case "$1" in listo) echo 🟢;; sin-permiso) echo 🔴;; cortafuegos) echo 🟠;; *) echo ⚪;; esac; }
 texto_de(){ case "$1" in listo) echo Listo;; sin-permiso) echo "Falta permiso";; cortafuegos) echo Cortafuegos;; *) echo Apagada;; esac; }
@@ -93,7 +97,7 @@ texto_de(){ case "$1" in listo) echo Listo;; sin-permiso) echo "Falta permiso";;
 # lento y en un centro con cinco puestos se nota.
 datos_de(){  # nombre usuario direccion  →  papel|windows|respaldo|aviso
   local u="$2" d="$3"
-  timeout 20 ssh_a "$u@$d" '
+  ESPERA=20 ssh_a "$u@$d" '
     P=$(cat /etc/redhornoma/papel 2>/dev/null || echo "?")
     W=$(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -cv "^$")
     T=$(LC_ALL=C virsh -c qemu:///system list --all --name 2>/dev/null | grep -cv "^$")
@@ -226,7 +230,7 @@ Se abrirá una terminal para que puedas escribirla." || { menu; return; }
 ver_windows(){
   local nom="$1" u d; u=$(usuario_de "$nom")
   d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
-  local vms; vms=$(timeout 15 ssh_a "$u@$d" 'virsh -c qemu:///system list --all --name 2>/dev/null | grep -v "^$"' 2>/dev/null)
+  local vms; vms=$(ESPERA=15 ssh_a "$u@$d" 'virsh -c qemu:///system list --all --name 2>/dev/null | grep -v "^$"' 2>/dev/null)
   if [ -z "$vms" ]; then
     aviso "<b>«$nom» no tiene ninguna máquina de Windows.</b>
 
@@ -244,7 +248,7 @@ Se crea desde esa computadora con:
     [ -z "$vm" ] && { equipo "$nom"; return; }
   fi
   # Se enciende sola si estaba apagada: es lo que uno quiere al pulsar «ver»
-  timeout 20 ssh_a "$u@$d" "virsh -c qemu:///system start '$vm' 2>/dev/null" >/dev/null 2>&1
+  ESPERA=20 ssh_a "$u@$d" "virsh -c qemu:///system start '$vm' 2>/dev/null" >/dev/null 2>&1
   setsid virt-viewer --connect "qemu+ssh://$u@$d/system" "$vm" >/dev/null 2>&1 &
   sleep 1
 }
@@ -254,7 +258,7 @@ ver_informe(){
   d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
   local txt
   txt=$( ( echo "30"; echo "# Preguntándole a $nom…"
-           timeout 60 ssh_a "$u@$d" 'redhornoma-informe --sin-color 2>/dev/null || bash ~/redhornoma/redhornoma-informe --sin-color 2>/dev/null' > /tmp/rh-informe.txt
+           ESPERA=60 ssh_a "$u@$d" 'redhornoma-informe --sin-color 2>/dev/null || bash ~/redhornoma/redhornoma-informe --sin-color 2>/dev/null' > /tmp/rh-informe.txt
            echo "100" ) | \
     yad --class=rhequipos $GTKRC --progress --pulsate --auto-close --center \
         --width=420 --title="Informe" --window-icon="$LOGO" \
@@ -277,7 +281,7 @@ ningún programa. Tarda medio minuto." || { equipo "$nom"; return; }
 
   local salida
   salida=$( ( echo "20"; echo "# Sacando la información…"
-              timeout 300 ssh_a -t "$u@$d" 'sudo -n redhornoma-respaldo --silencioso 2>&1 || sudo -n bash ~/redhornoma/redhornoma-respaldo --silencioso 2>&1' > /tmp/rh-respaldo.txt 2>&1
+              ESPERA=300 ssh_a -t "$u@$d" 'sudo -n redhornoma-respaldo --silencioso 2>&1 || sudo -n bash ~/redhornoma/redhornoma-respaldo --silencioso 2>&1' > /tmp/rh-respaldo.txt 2>&1
               echo "100" ) | \
     yad --class=rhequipos $GTKRC --progress --pulsate --auto-close --center \
         --width=460 --title="Respaldo" --window-icon="$LOGO" \
@@ -307,7 +311,7 @@ enviar_archivos(){
   [ -z "$archivos" ] && { equipo "$nom"; return; }
 
   local destino
-  destino=$(timeout 15 ssh_a "$u@$d" 'xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME"' 2>/dev/null)
+  destino=$(ESPERA=15 ssh_a "$u@$d" 'xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME"' 2>/dev/null)
   destino="${destino:-.}"
   ( echo "20"; echo "# Enviando…"
     echo "$archivos" | while read -r f; do
