@@ -1,0 +1,560 @@
+#!/bin/bash
+# redhornoma-respaldo — Guarda la información del centro, sola, cada noche.
+#
+# La información de un centro de salud no se puede volver a escribir. Si se
+# pierde, se perdió. Por eso esta es la pieza más importante del sistema.
+#
+# Cómo funciona: SALMI guarda todo en tres archivos dentro de Windows. Esta
+# herramienta congela un instante el disco de la máquina virtual, saca esos
+# archivos SIN QUE NADIE ABRA NADA, comprueba que sirven, y los deja en
+# varios sitios.
+#
+# Uso:
+#   redhornoma-respaldo               qué hay y cuándo fue el último
+#   sudo redhornoma-respaldo --ahora
+#   sudo redhornoma-respaldo --programar     lo deja hecho cada noche
+#   sudo redhornoma-respaldo --verificar     comprueba que el último sirve
+#
+# Un respaldo que nunca se ha restaurado no es un respaldo: es una esperanza.
+set -u
+
+BASE=/var/lib/redhornoma
+DESTINO="$BASE/respaldos"
+CONF="$BASE/respaldo.conf"
+REGISTRO="$BASE/respaldo.log"
+
+# Cuántos se conservan
+DIARIOS=7; SEMANALES=4; MENSUALES=12
+
+VM=""; ACCION="mirar"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ahora)     ACCION=ahora; shift ;;
+    --programar) ACCION=programar; shift ;;
+    --verificar) ACCION=verificar; shift ;;
+    --maquina)   VM="${2:-}"; shift 2 ;;
+    --silencioso) ACCION=ahora; SILENCIO=1; shift ;;
+    --ayuda|-h)  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Opción desconocida: $1"; exit 1 ;;
+  esac
+done
+SILENCIO="${SILENCIO:-0}"
+
+if [ -t 1 ] && [ "$SILENCIO" = "0" ]; then
+  V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+else
+  V=""; AZ=""; VE=""; RO=""; AM=""
+fi
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+          printf "${AZ} %s${V}\n" "$1"
+          printf "${AZ}══════════════════════════════════════════════════════${V}\n"; }
+ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+d(){   printf "   %-28s %s\n" "$1" "$2"; }
+anota(){ mkdir -p "$BASE"; printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" >> "$REGISTRO"; }
+
+VIRSH="virsh -c qemu:///system"
+# Las órdenes al agente llevan tiempo de sobra: congelar el disco en
+# Windows tarda varios segundos y virsh, por defecto, se cansa antes y
+# devuelve error AUNQUE la orden haya funcionado.
+agente(){ $VIRSH qemu-agent-command --timeout 60 "$VM" "$1" 2>/dev/null; }
+
+# ── Congelar y descongelar, con la verdad por delante ─────────────────
+# Nunca se cree lo que devuelve el comando: se pregunta el estado. Y el
+# descongelado se reintenta hasta confirmarlo, porque un disco que se
+# queda congelado deja Windows clavado.
+estado_congelado(){
+  $VIRSH qemu-agent-command --timeout 30 "$VM" '{"execute":"guest-fsfreeze-status"}' 2>/dev/null \
+    | grep -oP '"return":"\K[a-z]+'
+}
+descongelar_seguro(){
+  local i estado
+  for i in 1 2 3 4 5; do
+    estado=$(estado_congelado)
+    [ "$estado" = "thawed" ] && return 0
+    $VIRSH qemu-agent-command --timeout 60 "$VM" '{"execute":"guest-fsfreeze-thaw"}' >/dev/null 2>&1
+    sleep 2
+  done
+  [ "$(estado_congelado)" = "thawed" ]
+}
+
+# ── Elegir la máquina ─────────────────────────────────────────────────
+elegir_maquina(){
+  [ -n "$VM" ] && return 0
+  local encendidas n
+  encendidas=$($VIRSH list --name 2>/dev/null | grep -v '^$')
+  n=$(echo "$encendidas" | grep -c .)
+  if   [ "$n" = "1" ]; then VM="$encendidas"
+  elif [ "$n" = "0" ]; then
+    mal "no hay ninguna máquina encendida"
+    echo "      El respaldo se saca con la máquina en marcha, sin apagarla."
+    return 1
+  else
+    mal "hay varias máquinas — elige una con --maquina"
+    echo "$encendidas" | sed 's/^/         /'
+    return 1
+  fi
+}
+
+# ── Ejecutar un programa de Windows y recoger su salida ───────────────
+# Se llama al programa directamente, con cada argumento aparte: al pasar
+# por cmd.exe, una ruta con espacios pierde las comillas y falla.
+prog_win(){
+  local prog="$1"; shift
+  local pet pid r
+  pet=$(python3 -c '
+import json,sys
+print(json.dumps({"execute":"guest-exec","arguments":{
+  "path":sys.argv[1],"arg":sys.argv[2:],"capture-output":True}}))' "$prog" "$@")
+  pid=$(agente "$pet" | grep -oP '"pid":\K[0-9]+')
+  [ -z "$pid" ] && return 1
+  # Hasta minuto y medio: algunas consultas al registro tardan
+  for _ in $(seq 1 90); do
+    r=$(agente "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}")
+    echo "$r" | grep -q '"exited":true' && break
+    sleep 1
+  done
+  python3 -c '
+import json,sys,base64
+d=json.loads(sys.stdin.read()).get("return",{})
+for k in ("out-data","err-data"):
+    if d.get(k): print(base64.b64decode(d[k]).decode("cp850","replace"))' <<< "$r" | tr -d '\r'
+}
+
+# ── ¿Existe este archivo dentro de Windows? ───────────────────────────
+existe_en_win(){
+  local h
+  h=$(agente "$(python3 -c '
+import json,sys
+print(json.dumps({"execute":"guest-file-open","arguments":{"path":sys.argv[1],"mode":"rb"}}))' "$1")")
+  local id; id=$(echo "$h" | grep -oP '"return":\K[0-9]+')
+  [ -z "$id" ] && return 1
+  agente "{\"execute\":\"guest-file-close\",\"arguments\":{\"handle\":$id}}" >/dev/null 2>&1
+  return 0
+}
+
+# ── Encontrar dónde vive SALMI dentro de Windows ──────────────────────
+# Se le pregunta a Windows dónde lo instaló, que es instantáneo y seguro.
+# Rebuscar por todo el disco tarda minutos y el agente se cansa antes.
+buscar_salmi(){
+  local ruta
+  # 1) Lo que anotó el propio instalador
+  ruta=$(prog_win reg.exe query \
+         'HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall' \
+         /s /f SALMI 2>/dev/null \
+         | grep -i 'InstallLocation' | grep -oP 'REG_SZ\s+\K.*' \
+         | sed 's/[[:space:]]*$//;s|\\$||' | head -1)
+  if [ -n "$ruta" ] && existe_en_win "$ruta\\bdSalmiDis.mdb"; then
+    echo "$ruta"; return 0
+  fi
+  # 2) Los sitios de siempre
+  for r in 'C:\SALMI-PN_Dispensacion_BO' 'C:\SALMI' \
+           'C:\Program Files (x86)\SALMI' 'C:\Program Files\SALMI'; do
+    existe_en_win "$r\\bdSalmiDis.mdb" && { echo "$r"; return 0; }
+  done
+  return 1
+}
+
+# ── Sacar un archivo de dentro de Windows ─────────────────────────────
+# Se lee en trozos y se comprueba el tamaño al final. Si algo se corta a
+# medias, el archivo no se da por bueno.
+sacar_archivo(){  # ruta_en_windows  destino_en_linux
+  python3 - "$VM" "$1" "$2" <<'PY'
+import base64, json, subprocess, sys
+
+vm, origen, destino = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def agente(orden):
+    r = subprocess.run(["virsh", "-c", "qemu:///system", "qemu-agent-command", vm,
+                        json.dumps(orden)], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip()[:120])
+    return json.loads(r.stdout)["return"]
+
+h = agente({"execute": "guest-file-open",
+            "arguments": {"path": origen, "mode": "rb"}})
+try:
+    total = 0
+    with open(destino, "wb") as f:
+        while True:
+            # Trozos de medio mega: pasan holgados por el canal del agente
+            r = agente({"execute": "guest-file-read",
+                        "arguments": {"handle": h, "count": 524288}})
+            datos = base64.b64decode(r.get("buf-b64", ""))
+            if datos:
+                f.write(datos); total += len(datos)
+            if r.get("eof") or not datos:
+                break
+    print(total)
+finally:
+    try: agente({"execute": "guest-file-close", "arguments": {"handle": h}})
+    except Exception: pass
+PY
+}
+
+# ── ¿Es un archivo de Access de verdad? ───────────────────────────────
+# No basta con que exista y pese algo: se mira su firma. Un archivo
+# cortado a medias tiene el tamaño casi bien y no sirve para nada.
+es_base_valida(){
+  [ -s "$1" ] || return 1
+  head -c 30 "$1" | grep -q 'Standard Jet DB\|Standard ACE DB'
+}
+
+# ═════════════════════════════════════════════════════════════════════
+#  MIRAR
+# ═════════════════════════════════════════════════════════════════════
+if [ "$ACCION" = "mirar" ]; then
+  titulo "RESPALDOS DE LA INFORMACIÓN DEL CENTRO"
+
+  if [ ! -d "$DESTINO" ] || [ -z "$(ls -A "$DESTINO" 2>/dev/null)" ]; then
+    avi "todavía no hay ningún respaldo"
+    echo
+    echo "      La información de un centro de salud no se puede volver a"
+    echo "      escribir. Si se pierde, se perdió."
+    echo
+    printf "      ${AZ}sudo redhornoma-respaldo --ahora${V}       hacer uno ahora\n"
+    printf "      ${AZ}sudo redhornoma-respaldo --programar${V}   cada noche, solo\n\n"
+    exit 0
+  fi
+
+  N=$(find "$DESTINO" -maxdepth 1 -type d -name '20*' | wc -l)
+  ULT=$(find "$DESTINO" -maxdepth 1 -type d -name '20*' | sort | tail -1)
+  d "Respaldos guardados:" "$N"
+  if [ -n "$ULT" ]; then
+    d "El último:" "$(basename "$ULT")"
+    d "Ocupa:" "$(du -sh "$ULT" 2>/dev/null | cut -f1)"
+    HORAS=$(( ( $(date +%s) - $(stat -c %Y "$ULT") ) / 3600 ))
+    if   [ "$HORAS" -lt 26 ]; then ok "hecho hace $HORAS horas"
+    elif [ "$HORAS" -lt 72 ]; then avi "hecho hace $HORAS horas"
+    else mal "hecho hace $((HORAS/24)) días — demasiado tiempo"; fi
+  fi
+  d "Ocupan en total:" "$(du -sh "$DESTINO" 2>/dev/null | cut -f1)"
+
+  echo
+  printf "   ${AZ}Los últimos${V}\n"
+  find "$DESTINO" -maxdepth 1 -type d -name '20*' | sort -r | head -6 | while read -r c; do
+    printf "      %-22s %8s   %s\n" "$(basename "$c")" \
+      "$(du -sh "$c" 2>/dev/null | cut -f1)" \
+      "$([ -f "$c/CORRECTO" ] && echo '✅ verificado' || echo '')"
+  done
+
+  echo
+  if crontab -l 2>/dev/null | grep -q redhornoma-respaldo || \
+     [ -f /etc/cron.d/redhornoma-respaldo ]; then
+    ok "está programado para hacerse solo cada noche"
+  else
+    avi "NO está programado — hay que acordarse a mano"
+    printf "         ${AZ}sudo redhornoma-respaldo --programar${V}\n"
+  fi
+  echo
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+#  PROGRAMAR
+# ═════════════════════════════════════════════════════════════════════
+if [ "$ACCION" = "programar" ]; then
+  titulo "QUE SE HAGA SOLO CADA NOCHE"
+  [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
+
+  cat > /etc/cron.d/redhornoma-respaldo <<'CRON'
+# Respaldo de la información del centro. A las tres de la madrugada,
+# cuando nadie está usando los programas.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+0 3 * * *  root  /usr/bin/redhornoma-respaldo --silencioso
+CRON
+  chmod 644 /etc/cron.d/redhornoma-respaldo
+  ok "programado: cada día a las 3:00 de la madrugada"
+  echo
+  echo "      A esa hora nadie usa los programas, así que la copia sale"
+  echo "      limpia y no molesta a nadie."
+  echo
+  printf "      Para quitarlo:  ${AM}sudo rm /etc/cron.d/redhornoma-respaldo${V}\n\n"
+  anota "programado a las 3:00"
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+#  VERIFICAR
+# ═════════════════════════════════════════════════════════════════════
+if [ "$ACCION" = "verificar" ]; then
+  titulo "COMPROBAR QUE EL ÚLTIMO RESPALDO SIRVE"
+  ULT=$(find "$DESTINO" -maxdepth 1 -type d -name '20*' 2>/dev/null | sort | tail -1)
+  [ -n "$ULT" ] || { mal "no hay ningún respaldo que comprobar"; exit 1; }
+  d "Comprobando:" "$(basename "$ULT")"
+  echo
+  BIEN=1
+  for f in "$ULT"/*.sal "$ULT"/*.mdb; do
+    [ -e "$f" ] || continue
+    if es_base_valida "$f"; then
+      ok "$(basename "$f")  —  $(du -h "$f" | cut -f1), es una base de datos de verdad"
+    else
+      mal "$(basename "$f")  —  no es una base de datos válida"
+      BIEN=0
+    fi
+  done
+  echo
+  if [ "$BIEN" = "1" ]; then
+    touch "$ULT/CORRECTO"
+    ok "el respaldo sirve"
+    anota "verificado correcto: $(basename "$ULT")"
+  else
+    mal "ESTE RESPALDO NO SIRVE — haz otro cuanto antes"
+    anota "VERIFICACIÓN FALLIDA: $(basename "$ULT")"
+    exit 1
+  fi
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+#  HACER EL RESPALDO
+# ═════════════════════════════════════════════════════════════════════
+titulo "RESPALDO DE LA INFORMACIÓN DEL CENTRO"
+[ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
+
+elegir_maquina || { anota "FALLÓ: no se pudo elegir la máquina"; exit 1; }
+ok "máquina: $VM"
+
+agente '{"execute":"guest-info"}' >/dev/null 2>&1 || {
+  mal "el agente invitado no responde"
+  echo "      Sin él no se puede sacar nada sin apagar la máquina."
+  echo "      Instálalo dentro de Windows: guest-agent\\qemu-ga-x86_64.msi"
+  anota "FALLÓ: el agente no responde en $VM"; exit 1; }
+ok "el agente responde"
+
+CARPETA=$(buscar_salmi)
+[ -n "$CARPETA" ] || {
+  mal "no encuentro SALMI dentro de esa máquina"
+  echo "      Se buscó bdSalmiDis.mdb por todo el disco C:"
+  anota "FALLÓ: no se encontró SALMI en $VM"; exit 1; }
+ok "SALMI está en: $CARPETA"
+
+FECHA=$(date '+%Y-%m-%d_%H%M')
+CARPETA_DEST="$DESTINO/$FECHA"
+mkdir -p "$CARPETA_DEST"
+
+# ── Congelar el disco un instante ─────────────────────────────────────
+# Windows termina lo que estaba escribiendo y se detiene. La copia sale
+# entera en vez de a medio escribir. Dura menos de un segundo.
+# Pase lo que pase a partir de aquí —error, corte, Ctrl+C— el disco se
+# descongela. Un disco congelado deja Windows clavado y a la gente sin
+# poder trabajar.
+trap 'descongelar_seguro >/dev/null 2>&1' EXIT INT TERM
+
+agente '{"execute":"guest-fsfreeze-freeze"}' >/dev/null 2>&1
+CONGELADO=$(estado_congelado)
+if [ "$CONGELADO" = "frozen" ]; then
+  ok "disco congelado un instante — la copia saldrá entera"
+else
+  avi "no se pudo congelar el disco; se copia igual"
+  echo "      Si alguien está usando SALMI en este momento, la copia"
+  echo "      podría salir a medias. A las 3 de la madrugada no pasa."
+fi
+
+# Mientras está congelado, el agente bloquea leer archivos. Hay que
+# descongelar ANTES de sacarlos: la copia sigue siendo buena porque
+# Windows ya volcó al disco todo lo que tenía pendiente.
+if [ "$CONGELADO" = "frozen" ]; then
+  if descongelar_seguro; then
+    ok "disco descongelado — todo lo pendiente quedó escrito"
+  else
+    mal "EL DISCO SIGUE CONGELADO — Windows se quedará clavado"
+    echo "      Descongélalo a mano ahora mismo:"
+    echo "         sudo virsh qemu-agent-command --timeout 60 $VM '{\"execute\":\"guest-fsfreeze-thaw\"}'"
+    anota "GRAVE: el disco de $VM quedó congelado"
+    exit 1
+  fi
+fi
+
+# ── Sacar los archivos ────────────────────────────────────────────────
+printf "\n   ${AZ}Sacando los archivos${V}\n"
+COPIADOS=0; FALLIDOS=0
+for archivo in bdSalmiDis.mdb bdPrescripcion.mdb bdExterna.mdb; do
+  # El principal se guarda como .sal: así SALMI lo restaura tal cual
+  case "$archivo" in
+    bdSalmiDis.mdb) SALIDA="$CARPETA_DEST/${FECHA}_respaldo.sal" ;;
+    *)              SALIDA="$CARPETA_DEST/$archivo" ;;
+  esac
+  printf "      %-22s " "$archivo"
+  if BYTES=$(sacar_archivo "$CARPETA\\$archivo" "$SALIDA" 2>/dev/null) && es_base_valida "$SALIDA"; then
+    printf "${VE}%s${V}\n" "$(numfmt --to=iec "$BYTES" 2>/dev/null || echo "$BYTES bytes")"
+    COPIADOS=$((COPIADOS+1))
+  else
+    printf "${RO}falló${V}\n"; rm -f "$SALIDA"; FALLIDOS=$((FALLIDOS+1))
+  fi
+done
+
+trap - EXIT INT TERM
+
+if [ "$COPIADOS" = "0" ]; then
+  mal "no se pudo copiar nada"
+  rmdir "$CARPETA_DEST" 2>/dev/null
+  anota "FALLÓ: no se copió ningún archivo de $VM"
+  exit 1
+fi
+
+# ── Dejar constancia ──────────────────────────────────────────────────
+{
+  printf 'Respaldo de RedHornoma\n'
+  printf 'Fecha:    %s\n' "$(date '+%d de %B de %Y, %H:%M')"
+  printf 'Equipo:   %s\n' "$(cat /proc/sys/kernel/hostname)"
+  printf 'Centro:   %s\n' "$(grep -oP '^centro=\K.*' /etc/redhornoma/centro.conf 2>/dev/null || echo '?')"
+  printf 'Máquina:  %s\n' "$VM"
+  printf 'Origen:   %s\n\n' "$CARPETA"
+  printf 'Para restaurarlo: dentro de SALMI, Administración -> Restaurar,\n'
+  printf 'y apuntar al archivo terminado en .sal\n'
+} > "$CARPETA_DEST/LEEME.txt"
+
+# ── Repartir las copias ───────────────────────────────────────────────
+# Cada sitio protege de algo distinto. Ninguno sobra:
+#   otra carpeta de este equipo  → si se estropea el disco del sistema
+#   disco externo                → si se estropea o roban la computadora
+#   otra computadora del centro  → lo mismo, y sin depender de nadie
+#   la nube                      → si arde o se inunda el edificio
+printf "\n   ${AZ}Repartiendo las copias${V}\n"
+CERCA=0; FUERA=0
+leer_conf(){ [ -f "$CONF" ] && grep -oP "^$1=\K.*" "$CONF" 2>/dev/null | head -1; }
+
+# 1) Otra carpeta de este mismo equipo (el «disco D» de toda la vida)
+EXTRA=$(leer_conf carpeta_extra)
+if [ -n "$EXTRA" ]; then
+  if mkdir -p "$EXTRA" 2>/dev/null && cp -r "$CARPETA_DEST" "$EXTRA/" 2>/dev/null; then
+    ok "copiado a $EXTRA"; CERCA=$((CERCA+1))
+  else
+    avi "no se pudo copiar a $EXTRA"
+  fi
+fi
+
+# 2) Cualquier disco externo que esté enchufado
+for m in /media/*/* /run/media/*/*; do
+  [ -d "$m" ] && [ -w "$m" ] || continue
+  RUTA="$m/B-SALMI26"
+  if mkdir -p "$RUTA" 2>/dev/null && cp -r "$CARPETA_DEST" "$RUTA/" 2>/dev/null; then
+    ok "copiado al disco externo: $m"; FUERA=$((FUERA+1)); break
+  fi
+done
+
+# 3) Otra computadora del centro
+OTRA=$(leer_conf otra_computadora)
+if [ -n "$OTRA" ]; then
+  if rsync -a --timeout=60 "$CARPETA_DEST" "$OTRA/" 2>/dev/null; then
+    ok "copiado a $OTRA"; FUERA=$((FUERA+1))
+  else
+    avi "no se pudo copiar a $OTRA — ¿está encendida?"
+  fi
+fi
+
+# 4) La nube, cada tantos días
+NUBE=$(leer_conf nube)
+NUBE_CADA=$(leer_conf nube_cada_dias); NUBE_CADA=${NUBE_CADA:-3}
+NUBE_GUARDA=$(leer_conf nube_conservar); NUBE_GUARDA=${NUBE_GUARDA:-10}
+if [ -n "$NUBE" ]; then
+  if ! command -v rclone >/dev/null 2>&1; then
+    avi "la nube está configurada pero falta rclone"
+    echo "         sudo apt install rclone"
+  else
+    MARCA="$BASE/ultima-subida-nube"
+    TOCA=1
+    if [ -f "$MARCA" ]; then
+      DIAS=$(( ( $(date +%s) - $(stat -c %Y "$MARCA") ) / 86400 ))
+      [ "$DIAS" -lt "$NUBE_CADA" ] && TOCA=0 && \
+        d "Nube:" "toca dentro de $((NUBE_CADA - DIAS)) día(s)"
+    fi
+    if [ "$TOCA" = "1" ]; then
+      printf "      subiendo a la nube… "
+      if rclone copy --transfers 2 --retries 3 \
+           "$CARPETA_DEST" "$NUBE/$FECHA" >/dev/null 2>&1; then
+        printf "${VE}hecho${V}\n"; touch "$MARCA"; FUERA=$((FUERA+1))
+        # Dejar solo las últimas: en la nube el sitio se paga
+        VIEJAS=$(rclone lsf --dirs-only "$NUBE" 2>/dev/null | sort -r | tail -n +$((NUBE_GUARDA+1)))
+        BORR=0
+        for v in $VIEJAS; do
+          rclone purge "$NUBE/$v" >/dev/null 2>&1 && BORR=$((BORR+1))
+        done
+        [ "$BORR" -gt 0 ] && ok "$BORR respaldos antiguos borrados de la nube"
+      else
+        printf "${RO}falló${V}\n"
+        avi "revisa la conexión, o prueba: rclone lsd ${NUBE%%:*}:"
+      fi
+    fi
+  fi
+fi
+
+echo
+if [ "$FUERA" = "0" ]; then
+  avi "NINGUNA copia salió de esta computadora"
+  echo "      Si se estropea o la roban, la información se va con ella."
+  echo
+  echo "      Configura los destinos en:  $CONF"
+  echo "         carpeta_extra=/ruta/de/otro/disco"
+  echo "         otra_computadora=usuario@equipo.local:/ruta"
+  echo "         nube=drive:B-SALMI26"
+elif [ "$CERCA" -gt 0 ]; then
+  ok "$FUERA copia(s) fuera del equipo, más $CERCA en otro disco de aquí"
+else
+  ok "$FUERA copia(s) fuera de este equipo"
+fi
+
+# ── Comprobar que sirve ───────────────────────────────────────────────
+printf "\n   ${AZ}Comprobando que sirve${V}\n"
+BIEN=1
+for f in "$CARPETA_DEST"/*.sal "$CARPETA_DEST"/*.mdb; do
+  [ -e "$f" ] || continue
+  es_base_valida "$f" || { mal "$(basename "$f") no es una base de datos válida"; BIEN=0; }
+done
+if [ "$BIEN" = "1" ]; then
+  touch "$CARPETA_DEST/CORRECTO"
+  ok "los archivos son bases de datos de verdad, no copias a medias"
+else
+  mal "algún archivo salió mal"
+fi
+
+# ── Tirar los viejos ──────────────────────────────────────────────────
+# Se conservan los últimos días, las últimas semanas y los últimos meses.
+# Así se puede volver a ayer, a hace un mes o a hace un año.
+printf "\n   ${AZ}Limpiando los antiguos${V}\n"
+BORRADOS=0
+mapfile -t TODOS < <(find "$DESTINO" -maxdepth 1 -type d -name '20*' | sort -r)
+declare -A GUARDAR
+i=0
+for c in "${TODOS[@]}"; do
+  i=$((i+1)); [ "$i" -le "$DIARIOS" ] && GUARDAR["$c"]=1
+done
+# Se lleva la cuenta con variables normales en vez de preguntarle el
+# tamaño a la lista: con «set -u», una lista declarada y todavía vacía
+# se toma por variable sin asignar y el guion se queja.
+declare -A VISTA_SEM=() VISTA_MES=()
+N_SEM=0; N_MES=0
+for c in "${TODOS[@]}"; do
+  F=$(basename "$c" | cut -d_ -f1)
+  SEM=$(date -d "$F" '+%G-%V' 2>/dev/null); MES=$(date -d "$F" '+%Y-%m' 2>/dev/null)
+  if [ -n "$SEM" ] && [ -z "${VISTA_SEM[$SEM]:-}" ] && [ "$N_SEM" -lt "$SEMANALES" ]; then
+    VISTA_SEM[$SEM]=1; N_SEM=$((N_SEM+1)); GUARDAR["$c"]=1; fi
+  if [ -n "$MES" ] && [ -z "${VISTA_MES[$MES]:-}" ] && [ "$N_MES" -lt "$MENSUALES" ]; then
+    VISTA_MES[$MES]=1; N_MES=$((N_MES+1)); GUARDAR["$c"]=1; fi
+done
+for c in "${TODOS[@]}"; do
+  [ -n "${GUARDAR[$c]:-}" ] || { rm -rf "$c"; BORRADOS=$((BORRADOS+1)); }
+done
+[ "$BORRADOS" -gt 0 ] && ok "$BORRADOS respaldos antiguos borrados" \
+                      || ok "no había ninguno que sobrara"
+
+# ═════════════════════════════════════════════════════════════════════
+titulo "✅ RESPALDO HECHO"
+printf "\n"
+d "Guardado en:" "$CARPETA_DEST"
+d "Archivos:" "$COPIADOS de 3"
+d "Ocupa:" "$(du -sh "$CARPETA_DEST" | cut -f1)"
+d "Copias fuera del equipo:" "$FUERA"
+d "Se conservan:" "$(find "$DESTINO" -maxdepth 1 -type d -name '20*' | wc -l) respaldos"
+printf "\n"
+cat <<FIN
+   ${AZ}Para devolverlo a Windows${V}
+
+      Dentro de SALMI:  Administración → Restaurar
+      y apuntar al archivo terminado en ${AZ}.sal${V}
+
+FIN
+anota "OK: $FECHA, $COPIADOS archivos, $FUERA copias fuera"

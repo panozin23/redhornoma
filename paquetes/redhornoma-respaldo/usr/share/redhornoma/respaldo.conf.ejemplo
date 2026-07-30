@@ -1,0 +1,23 @@
+# Dónde se guardan las copias de la información del centro.
+# Este archivo va en /var/lib/redhornoma/respaldo.conf
+#
+# Cada sitio protege de algo distinto. Ninguno sobra.
+
+# ── Otro disco de esta misma computadora ─────────────────────────────
+# El «disco D» de toda la vida. Protege si se estropea el disco del
+# sistema, pero NO si se estropea o roban la computadora entera.
+#carpeta_extra=/media/datos/B-SALMI26
+
+# ── Otra computadora del centro ──────────────────────────────────────
+# Hace falta que la llave SSH esté copiada: ssh-copy-id usuario@equipo
+#otra_computadora=flora@consultorio1.local:/home/flora/B-SALMI26
+
+# ── La nube ──────────────────────────────────────────────────────────
+# Lo único que sobrevive a un incendio o una inundación.
+# Antes hay que configurarla una vez:   rclone config
+#nube=drive:B-SALMI26
+#nube_cada_dias=3
+#nube_conservar=10
+
+# Los discos externos que estén enchufados se detectan solos: se crea
+# en ellos una carpeta B-SALMI26 y se copia ahí.
