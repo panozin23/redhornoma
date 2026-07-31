@@ -131,7 +131,14 @@ argumento de un comando y medio mega en texto supera el límite del
 sistema. Leer funcionaba porque el dato vuelve como salida — por eso el
 fallo solo aparecía en la mitad de vuelta.
 
-**Fase 2 — Red del centro: en curso.**
+**Fase 2 — Red del centro: cerrada el 30 de julio de 2026.**
+
+Probada de verdad: dos computadoras con SALMI abierto a la vez, sobre la misma
+base de datos, viendo a la misma paciente. Es la pregunta con la que empezó el
+proyecto.
+
+El procedimiento completo, paso a paso y con los fallos que uno se encuentra,
+está en [documentacion/SALMI-EN-RED.md](documentacion/SALMI-EN-RED.md).
 
 `redhornoma-papel` define de una vez qué es cada computadora del centro
 —servidor, puesto o administración— y aplica todo lo que ese papel implica:
