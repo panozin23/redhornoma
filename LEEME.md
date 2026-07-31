@@ -58,7 +58,7 @@ La ISO queda en `isos/` con su versión, su fecha y su huella SHA-256.
 
 ## Qué hay en la receta
 
-137 programas declarados, agrupados por para qué sirven:
+146 programas declarados, agrupados por para qué sirven:
 
 | Lista | Para qué |
 |---|---|
@@ -161,9 +161,6 @@ respaldarla, leer su informe, enviarle archivos o abrirle una terminal.
 
 Con cinco consultorios, ver de un golpe cuál lleva ocho días sin copia es la
 diferencia entre enterarse hoy o en diciembre.
-
-Falta solo la prueba final de la fase: dos máquinas compartiendo la base de
-datos de SALMI, que necesita un segundo Windows.
 
 El plan completo, con las siete fases, está en [PLAN.md](PLAN.md).
 
