@@ -1,0 +1,21 @@
+Package: redhornoma-virtualizacion
+Version: 1.0.3
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.0), libvirt-clients, libvirt-daemon-system,
+ virtinst, qemu-system-x86, qemu-utils, qemu-system-modules-spice,
+ ovmf, swtpm, swtpm-tools
+Recommends: virt-viewer, virt-manager, xorriso, libarchive-tools, libbde-utils
+Description: Windows dentro de RedHornoma, adaptado a cada máquina
+ Los programas del Ministerio —SALMI, SNIS, SOAPS— solo existen para
+ Windows. Estas herramientas lo alojan sin que el centro tenga que
+ renunciar a Linux.
+ .
+ Soporta Windows 7, 8.1, 10 y 11. Antes de crear nada le pregunta a
+ libvirt qué acepta ESTE equipo concreto y ajusta memoria, procesadores
+ y firmware a lo que de verdad hay.
+ .
+ Incluye una prueba que responde «¿puede esta computadora ejecutar
+ Windows?» sin necesitar imagen ni licencia.

@@ -1,0 +1,16 @@
+Package: redhornoma-completo
+Version: 1.0.6
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.0), redhornoma-virtualizacion (>= 1.0.3),
+ redhornoma-red (>= 1.0.0), redhornoma-respaldo (>= 1.0.2),
+ redhornoma-perifericos (>= 1.0.0)
+Description: RedHornoma entero, en un solo paquete
+ Instala las cinco piezas de RedHornoma: el informe del equipo, la
+ virtualización de Windows, la red del centro, el respaldo automático y
+ los periféricos.
+ .
+ Es lo que debe declarar la receta de la ISO. Un centro que instale este
+ paquete tiene el sistema completo.

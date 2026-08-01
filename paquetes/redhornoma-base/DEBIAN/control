@@ -1,0 +1,15 @@
+Package: redhornoma-base
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: iproute2, usbutils, pciutils, procps, util-linux
+Recommends: yad, libvirt-clients
+Description: Radiografía de un equipo de RedHornoma
+ Examina una computadora y da un veredicto: qué papel puede desempeñar
+ dentro de un centro de salud —servidor, puesto o ninguno.
+ .
+ No modifica nada. Solo mira e informa. Es la base sobre la que se apoyan
+ las demás herramientas de RedHornoma, y el primer principio del proyecto:
+ preguntar a la máquina, nunca suponer.

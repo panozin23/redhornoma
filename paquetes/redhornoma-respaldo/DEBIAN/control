@@ -1,0 +1,20 @@
+Package: redhornoma-respaldo
+Version: 1.0.2
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.0), libvirt-clients, python3,
+ python3-libvirt, mdbtools, rsync
+Recommends: rclone, smbclient, cifs-utils
+Description: Guarda la información del centro, sola, cada día
+ La información de un centro de salud no se puede volver a escribir. Si
+ se pierde, se perdió.
+ .
+ Congela un instante el disco de la máquina virtual, saca los archivos de
+ SALMI sin que nadie abra nada, abre la base de datos para comprobar que
+ sirve, avisa si la información menguó respecto al día anterior, y deja
+ copia en el disco externo, en otra computadora del centro y en la nube.
+ .
+ Se ejecuta a las 13:30. Si ese día el centro estuvo cerrado, lo hace al
+ encender.

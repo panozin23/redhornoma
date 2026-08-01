@@ -1,0 +1,15 @@
+Package: redhornoma-perifericos
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.0), samba, samba-common-bin
+Recommends: cups, sane-utils
+Description: Una carpeta que ven Linux y Windows a la vez
+ Pasar un archivo al Windows virtual no debería obligar a grabar un CD ni
+ a buscar un pendrive. Esta carpeta aparece en Windows como una unidad de
+ red y en Linux como una carpeta normal.
+ .
+ Sirve para sacar los respaldos de SALMI hacia el disco externo, meter los
+ catálogos que manda el Ministerio y llevar informes a imprimir.

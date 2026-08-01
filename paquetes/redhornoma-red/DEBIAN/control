@@ -1,0 +1,22 @@
+Package: redhornoma-red
+Version: 1.0.0
+Section: admin
+Priority: optional
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.0), avahi-daemon, avahi-utils,
+ openssh-client, openssh-server, libvirt-clients, iproute2
+Recommends: yad, virt-viewer, samba-common-bin
+Description: La red interna de un centro de salud
+ Define de una vez qué es cada computadora —servidor, puesto o
+ administración— y aplica todo lo que ese papel implica: nombre propio,
+ anuncio en la red, acceso remoto, y si es el servidor también la red en
+ puente, el arranque automático de su Windows y el bloqueo de la
+ suspensión.
+ .
+ Las máquinas se descubren solas: cada una se anuncia con su nombre, su
+ papel y su centro, así que no hay direcciones que apuntar en ninguna
+ parte.
+ .
+ Incluye una ventana con todas las computadoras del centro, su estado y
+ —lo que de verdad importa— cuándo fue el último respaldo de cada una.
