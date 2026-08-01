@@ -1,6 +1,35 @@
 # Dónde se guardan las copias de la información del centro.
 # Este archivo va en /var/lib/redhornoma/respaldo.conf
+
+# ══════════════════════════════════════════════════════════════════════
+#  DE DÓNDE SE SACA LA INFORMACIÓN
+# ══════════════════════════════════════════════════════════════════════
+
+# Si no se pone nada, se busca una máquina virtual de Windows en este
+# mismo equipo y se habla con su agente invitado. Es lo mejor: permite
+# congelar el disco un instante para que la copia salga entera.
+
+# ── Windows que NO es máquina virtual ────────────────────────────────
+# Para proteger una computadora que ya estaba en el centro, con SOAPS y
+# SALMI trabajando, SIN tocarla ni reinstalar nada. Solo hay que pedirle
+# que comparta su carpeta de SALMI por la red.
 #
+# En esa computadora, una sola vez:
+#   · marcar la red como PRIVADA
+#   · compartir C:\SALMI-PN_Dispensacion_BO con permiso de escritura
+#   · crear una cuenta para el acceso (por ejemplo «salmired»)
+#
+#windows_red=//192.168.1.50/SALMI
+#windows_credenciales=/etc/redhornoma/windows.credenciales
+
+# Ese archivo de credenciales lleva tres líneas y permisos 600:
+#   username = salmired
+#   password = LACLAVE
+#   domain   = WORKGROUP
+
+# ══════════════════════════════════════════════════════════════════════
+#  DÓNDE SE GUARDAN LAS COPIAS
+# ══════════════════════════════════════════════════════════════════════
 # Cada sitio protege de algo distinto. Ninguno sobra.
 
 # ── Otro disco de esta misma computadora ─────────────────────────────

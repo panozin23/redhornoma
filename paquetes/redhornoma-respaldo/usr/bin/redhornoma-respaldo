@@ -64,6 +64,29 @@ VIRSH="virsh -c qemu:///system"
 # devuelve error AUNQUE la orden haya funcionado.
 agente(){ $VIRSH qemu-agent-command --timeout 60 "$VM" "$1" 2>/dev/null; }
 
+# ═════════════════════════════════════════════════════════════════════
+#  DOS FORMAS DE LLEGAR A LOS ARCHIVOS DE WINDOWS
+# ═════════════════════════════════════════════════════════════════════
+# «virtual» — Windows es una máquina virtual de este equipo. Se habla con
+#             su agente invitado: se puede congelar el disco, mirar qué
+#             programas corren y apagarla con orden.
+#
+# «red»     — Windows es una computadora de verdad que ya estaba en el
+#             centro, con SOAPS y SALMI trabajando. No se toca: se entra
+#             por la red a una carpeta que ella comparte.
+#
+# El segundo modo es el que permite proteger un centro SIN cambiar sus
+# computadoras. Se pierde poder —no se puede congelar el disco— pero se
+# gana no interrumpir a nadie.
+leer_conf(){ [ -f "$CONF" ] && grep -oP "^$1=\K.*" "$CONF" 2>/dev/null | head -1; }
+
+WIN_RED=$(leer_conf windows_red)          # //192.168.1.50/SALMI
+WIN_CRED=$(leer_conf windows_credenciales) # archivo con usuario y clave
+WIN_CRED="${WIN_CRED:-/etc/redhornoma/windows.credenciales}"
+if [ -n "$WIN_RED" ]; then MODO=red; else MODO=virtual; fi
+
+smb(){ smbclient "$WIN_RED" -A "$WIN_CRED" -t 30 -c "$*" 2>&1; }
+
 # ── Congelar y descongelar, con la verdad por delante ─────────────────
 # Nunca se cree lo que devuelve el comando: se pregunta el estado. Y el
 # descongelado se reintenta hasta confirmarlo, porque un disco que se
@@ -128,6 +151,12 @@ for k in ("out-data","err-data"):
 
 # ── ¿Existe este archivo dentro de Windows? ───────────────────────────
 existe_en_win(){
+  if [ "$MODO" = "red" ]; then
+    # En red la carpeta compartida ES la de SALMI, así que solo interesa
+    # el nombre del archivo, no la ruta entera de Windows.
+    smb "ls $(basename "${1//\\//}")" | grep -qv 'NT_STATUS_NO_SUCH_FILE'
+    return
+  fi
   local h
   h=$(agente "$(python3 -c '
 import json,sys
@@ -142,6 +171,11 @@ print(json.dumps({"execute":"guest-file-open","arguments":{"path":sys.argv[1],"m
 # Se le pregunta a Windows dónde lo instaló, que es instantáneo y seguro.
 # Rebuscar por todo el disco tarda minutos y el agente se cansa antes.
 buscar_salmi(){
+  if [ "$MODO" = "red" ]; then
+    # La carpeta compartida apunta directamente a donde está SALMI
+    smb 'ls bdSalmiDis.mdb' | grep -q 'bdSalmiDis' && { echo "$WIN_RED"; return 0; }
+    return 1
+  fi
   local ruta
   # 1) Lo que anotó el propio instalador
   ruta=$(prog_win reg.exe query \
@@ -164,6 +198,13 @@ buscar_salmi(){
 # Se lee en trozos y se comprueba el tamaño al final. Si algo se corta a
 # medias, el archivo no se da por bueno.
 sacar_archivo(){  # ruta_en_windows  destino_en_linux
+  if [ "$MODO" = "red" ]; then
+    local nombre; nombre=$(basename "${1//\\//}")
+    rm -f "$2"
+    smb "get $nombre \"$2\"" >/dev/null 2>&1
+    [ -s "$2" ] && stat -c%s "$2" || return 1
+    return 0
+  fi
   python3 - "$VM" "$1" "$2" leer <<'PY'
 import base64, json, sys, libvirt, libvirt_qemu
 
@@ -294,6 +335,11 @@ comparar_con_anterior(){  # tablas registros pacientes prestaciones
 # El camino de vuelta: se escribe por trozos a través del agente, igual
 # que se saca. Sin pendrives, sin que nadie abra nada.
 meter_archivo(){  # origen_en_linux  ruta_en_windows
+  if [ "$MODO" = "red" ]; then
+    local nombre; nombre=$(basename "${2//\\//}")
+    smb "put \"$1\" $nombre" | grep -qiE 'putting file|kb/s' && stat -c%s "$1" || return 1
+    return 0
+  fi
   # Misma maquinaria que sacar_archivo, en sentido contrario
   python3 - "$VM" "$1" "$2" escribir <<'PY'
 import base64, json, sys, libvirt, libvirt_qemu
@@ -330,6 +376,13 @@ PY
 # ── ¿Está SALMI abierto en este momento? ──────────────────────────────
 # Escribir sobre su base de datos mientras la tiene abierta la corrompe.
 salmi_abierto(){
+  if [ "$MODO" = "red" ]; then
+    # Sin agente no se puede mirar qué programas corren. Pero Access deja
+    # un archivo .ldb junto a la base mientras alguien la tiene abierta:
+    # eso dice lo mismo y basta.
+    smb 'ls *.ldb' | grep -qi '\.ldb'
+    return
+  fi
   prog_win tasklist.exe /fi "imagename eq SalmiDis.exe" 2>/dev/null \
     | grep -qi 'SalmiDis.exe'
 }
@@ -706,6 +759,30 @@ fi
 titulo "RESPALDO DE LA INFORMACIÓN DEL CENTRO"
 [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
 
+if [ "$MODO" = "red" ]; then
+  # Windows es una computadora del centro, no una máquina virtual
+  d "Modo:" "por red, sin tocar esa computadora"
+  d "Carpeta compartida:" "$WIN_RED"
+  command -v smbclient >/dev/null 2>&1 || {
+    mal "falta smbclient para hablar con esa computadora"
+    echo "      sudo apt install smbclient"
+    anota "FALLÓ: falta smbclient"; exit 1; }
+  [ -r "$WIN_CRED" ] || {
+    mal "no encuentro el archivo con el usuario y la clave"
+    echo "      Debería estar en: $WIN_CRED"
+    echo "      con estas tres líneas y permisos 600:"
+    echo "         username = salmired"
+    echo "         password = LACLAVE"
+    echo "         domain   = WORKGROUP"
+    anota "FALLÓ: sin credenciales para $WIN_RED"; exit 1; }
+  smb 'ls' >/dev/null 2>&1 || {
+    mal "no se llega a esa computadora"
+    echo "      Comprueba que esté encendida y que comparta la carpeta."
+    smb 'ls' | head -2 | sed 's/^/      /'
+    anota "FALLÓ: no se llega a $WIN_RED"; exit 1; }
+  ok "se llega a la computadora del centro"
+else
+
 elegir_maquina || { anota "FALLÓ: no se pudo elegir la máquina"; exit 1; }
 ok "máquina: $VM"
 
@@ -727,6 +804,7 @@ agente '{"execute":"guest-info"}' >/dev/null 2>&1 || {
   echo "      Instálalo dentro de Windows: guest-agent\\qemu-ga-x86_64.msi"
   anota "FALLÓ: el agente no responde en $VM"; exit 1; }
 ok "el agente responde"
+fi
 
 CARPETA=$(buscar_salmi)
 [ -n "$CARPETA" ] || {
@@ -745,6 +823,27 @@ mkdir -p "$CARPETA_DEST"
 # Pase lo que pase a partir de aquí —error, corte, Ctrl+C— el disco se
 # descongela. Un disco congelado deja Windows clavado y a la gente sin
 # poder trabajar.
+if [ "$MODO" = "red" ]; then
+  # Sin agente no se puede pausar Windows. Se mira en su lugar si alguien
+  # tiene la base abierta: Access deja un archivo de bloqueo mientras se
+  # usa, y copiar en ese momento puede dar una copia a medias.
+  if salmi_abierto; then
+    avi "ALGUIEN ESTÁ USANDO SALMI EN ESE MOMENTO"
+    echo "      La copia podría salir a medias. Conviene esperar a que"
+    echo "      cierren el programa, o hacerlo al terminar la jornada."
+    echo
+    if [ "${CONFIRMADO:-0}" != "1" ] && [ "$SILENCIO" = "0" ]; then
+      printf "   ¿Copiar de todos modos? Escribe SI para seguir: "
+      read -r R; [ "$R" = "SI" ] || { echo "   Cancelado."; exit 0; }
+    else
+      anota "AVISO: se copió con SALMI abierto en $WIN_RED"
+    fi
+  else
+    ok "nadie está usando SALMI ahora mismo"
+  fi
+  CONGELADO=no
+else
+
 trap 'descongelar_seguro >/dev/null 2>&1' EXIT INT TERM
 
 agente '{"execute":"guest-fsfreeze-freeze"}' >/dev/null 2>&1
@@ -770,6 +869,7 @@ if [ "$CONGELADO" = "frozen" ]; then
     anota "GRAVE: el disco de $VM quedó congelado"
     exit 1
   fi
+fi
 fi
 
 # ── Sacar los archivos ────────────────────────────────────────────────
@@ -810,6 +910,82 @@ fi
   printf 'Para restaurarlo: dentro de SALMI, Administración -> Restaurar,\n'
   printf 'y apuntar al archivo terminado en .sal\n'
 } > "$CARPETA_DEST/LEEME.txt"
+
+# ── Comprobar que sirve ───────────────────────────────────────────────
+# Esto va ANTES de repartir, y no es un detalle de orden.
+#
+# La nube conserva un número fijo de copias: cada subida empuja fuera a la
+# más antigua. Si se subiera una copia mala, al cabo de unos días habría
+# empujado fuera todas las buenas y en la nube solo quedaría basura.
+#
+# Por eso: primero se abre la base y se cuenta lo que hay dentro. Si no
+# convence, no se reparte a ningún sitio y no se borra ningún respaldo
+# antiguo —los de antes pueden ser los únicos buenos que quedan—.
+printf "\n   ${AZ}Comprobando que sirve${V}\n"
+BIEN=1
+for f in "$CARPETA_DEST"/*.sal "$CARPETA_DEST"/*.mdb; do
+  [ -e "$f" ] || continue
+  es_base_valida "$f" || { mal "$(basename "$f") no es una base de datos válida"; BIEN=0; }
+done
+[ "$BIEN" = "1" ] && ok "los archivos son bases de datos de verdad, no copias a medias"
+
+# Abrir la base y contar lo que hay dentro. Esto es lo que distingue un
+# respaldo comprobado de una carpeta con archivos dentro.
+PRINCIPAL="$CARPETA_DEST/${FECHA}_respaldo.sal"
+if [ -f "$PRINCIPAL" ] && command -v mdb-tables >/dev/null 2>&1; then
+  read -r N_TABLAS N_REG N_PAC N_PRES <<< "$(analizar_base "$PRINCIPAL")"
+  if [ "${N_TABLAS:-0}" -gt 0 ]; then
+    ok "se abre y tiene $N_TABLAS tablas con $N_REG registros"
+    d "Pacientes:" "$N_PAC"
+    d "Prestaciones:" "$N_PRES"
+
+    # Un centro con un paciente y ninguna prestación no existe: eso es una
+    # instalación recién puesta, sin datos. Compararlo con el respaldo
+    # anterior no lo detecta cuando ESTE es el primero, que es justo cuando
+    # más fácil es equivocarse de máquina. Por eso se mira también a solas.
+    if [ "${N_PAC:-0}" -lt 10 ] && [ "${N_PRES:-0}" -lt 10 ]; then
+      mal "ESTA BASE ESTÁ PRÁCTICAMENTE VACÍA: $N_PAC pacientes, $N_PRES prestaciones"
+      echo "      Un centro en funcionamiento tiene miles de los dos."
+      echo "      Lo más probable es que esta máquina no sea la que guarda"
+      echo "      la información del centro, sino una instalación limpia."
+      BIEN=0
+    fi
+
+    comparar_con_anterior "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES" || BIEN=0
+    { [ -f "$HISTORIAL" ] || printf '#fecha\tarchivo\ttablas\tregistros\tpacientes\tprestaciones\n' > "$HISTORIAL"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d_%H%M')" "$FECHA" \
+             "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES"; } >> "$HISTORIAL"
+  else
+    mal "el archivo no se pudo abrir como base de datos"
+    BIEN=0
+  fi
+else
+  avi "sin mdbtools solo se comprueba la firma del archivo"
+  echo "         sudo apt install mdbtools    ← comprueba también el contenido"
+fi
+
+if [ "$BIEN" = "1" ]; then
+  touch "$CARPETA_DEST/CORRECTO"
+else
+  # Parar aquí es lo que protege lo que ya había guardado.
+  mal "ESTE RESPALDO NO ESTÁ CONFIRMADO"
+  anota "SIN CONFIRMAR: $FECHA — no se repartió ni se borró nada"
+  titulo "⚠️  RESPALDO HECHO, PERO NO ES DE FIAR"
+  printf "\n"
+  d "Quedó en:" "$CARPETA_DEST"
+  cat <<PARADA
+
+   ${AM}No se ha copiado a ningún sitio y no se ha borrado ningún respaldo
+   antiguo.${V} Los de antes pueden ser los únicos buenos que quedan.
+
+   Míralo antes de hacer nada:
+
+      sudo redhornoma-respaldo              qué hay guardado
+      No restaures desde este respaldo.
+
+PARADA
+  exit 1
+fi
 
 # ── Repartir las copias ───────────────────────────────────────────────
 # Cada sitio protege de algo distinto. Ninguno sobra:
@@ -940,43 +1116,6 @@ else
   echo "         nube=drive:B-SALMI26"
 fi
 
-# ── Comprobar que sirve ───────────────────────────────────────────────
-printf "\n   ${AZ}Comprobando que sirve${V}\n"
-BIEN=1
-for f in "$CARPETA_DEST"/*.sal "$CARPETA_DEST"/*.mdb; do
-  [ -e "$f" ] || continue
-  es_base_valida "$f" || { mal "$(basename "$f") no es una base de datos válida"; BIEN=0; }
-done
-[ "$BIEN" = "1" ] && ok "los archivos son bases de datos de verdad, no copias a medias"
-
-# Abrir la base y contar lo que hay dentro. Esto es lo que distingue un
-# respaldo comprobado de una carpeta con archivos dentro.
-PRINCIPAL="$CARPETA_DEST/${FECHA}_respaldo.sal"
-if [ -f "$PRINCIPAL" ] && command -v mdb-tables >/dev/null 2>&1; then
-  read -r N_TABLAS N_REG N_PAC N_PRES <<< "$(analizar_base "$PRINCIPAL")"
-  if [ "${N_TABLAS:-0}" -gt 0 ]; then
-    ok "se abre y tiene $N_TABLAS tablas con $N_REG registros"
-    d "Pacientes:" "$N_PAC"
-    d "Prestaciones:" "$N_PRES"
-    comparar_con_anterior "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES" || BIEN=0
-    { [ -f "$HISTORIAL" ] || printf '#fecha\tarchivo\ttablas\tregistros\tpacientes\tprestaciones\n' > "$HISTORIAL"
-      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d_%H%M')" "$FECHA" \
-             "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES"; } >> "$HISTORIAL"
-  else
-    mal "el archivo no se pudo abrir como base de datos"
-    BIEN=0
-  fi
-else
-  avi "sin mdbtools solo se comprueba la firma del archivo"
-  echo "         sudo apt install mdbtools    ← comprueba también el contenido"
-fi
-
-if [ "$BIEN" = "1" ]; then
-  touch "$CARPETA_DEST/CORRECTO"
-else
-  mal "ESTE RESPALDO NO ESTÁ CONFIRMADO — míralo antes de fiarte de él"
-fi
-
 # ── Tirar los viejos ──────────────────────────────────────────────────
 # Se conservan los últimos días, las últimas semanas y los últimos meses.
 # Así se puede volver a ayer, a hace un mes o a hace un año.
@@ -1008,7 +1147,13 @@ done
                       || ok "no había ninguno que sobrara"
 
 # ═════════════════════════════════════════════════════════════════════
-titulo "✅ RESPALDO HECHO"
+# El titular tiene que decir la verdad. Antes ponía «RESPALDO HECHO»
+# pasara lo que pasara, y quien lo lee de un vistazo se queda con eso.
+if [ "$BIEN" = "1" ]; then
+  titulo "✅ RESPALDO HECHO Y COMPROBADO"
+else
+  titulo "⚠️  RESPALDO HECHO, PERO NO ES DE FIAR"
+fi
 printf "\n"
 d "Guardado en:" "$CARPETA_DEST"
 d "Archivos:" "$COPIADOS de 3"
