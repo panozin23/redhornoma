@@ -41,6 +41,24 @@ La ISO queda en `isos/` con su versión, su fecha y su huella SHA-256.
 
 ---
 
+## Instalar las herramientas en un equipo
+
+Las cinco piezas de RedHornoma son paquetes `.deb`. Se construyen desde
+`paquetes/` y se instalan como cualquier programa de Debian:
+
+```bash
+bash scripts/construir-paquetes.sh          # quedan en paquetes/deb/
+sudo apt install ./paquetes/deb/*.deb samba-ad-dc-
+```
+
+El `samba-ad-dc-` del final, con el guion pegado atrás, le dice a apt que no
+instale el controlador de dominio de Active Directory que `samba` recomienda.
+Ningún centro de salud lo necesita, y son 25 paquetes menos.
+
+Un equipo que instale `redhornoma-completo` tiene el sistema entero.
+
+---
+
 ## Las carpetas
 
 | | |
@@ -108,6 +126,7 @@ ausente de la receta, y la caída a VNC funcionando de verdad.
 | `redhornoma-informe` | examina un equipo y da un veredicto |
 | `redhornoma-probar-equipo` | ¿puede ejecutar Windows? Sin necesitar imagen ni licencia |
 | `redhornoma-windows` | crea la máquina virtual, adaptada a lo que hay |
+| `redhornoma-importar` | devuelve a la vida un disco que ya existe |
 | `redhornoma-virtio-reducido` | deja el CD de controladores en ~50 MB |
 
 Cada prueba se anota sola en `/var/lib/redhornoma/equipos-probados.tsv`.
