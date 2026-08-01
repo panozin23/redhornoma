@@ -1,0 +1,468 @@
+#!/bin/bash
+# redhornoma-importar — Devuelve a la vida un disco de Windows que ya existe.
+#
+# Un disco qcow2 guarda Windows entero, pero NO guarda la máquina: el
+# chipset, la memoria, el firmware y el TPM viven en libvirt, no en el disco.
+# Cuando se reinstala el sistema, o cuando la computadora del centro muere y
+# se sustituye por otra, el disco sobrevive y la máquina no.
+#
+# Esta herramienta reconstruye la máquina alrededor del disco. Le pregunta al
+# propio disco qué Windows es y cómo arranca, en vez de suponerlo.
+#
+# redhornoma-windows no sirve para esto a propósito: se niega a tocar un
+# disco que ya existe, para no borrar información por error.
+#
+# Uso:
+#   sudo redhornoma-importar                     busca discos huérfanos e informa
+#   sudo redhornoma-importar --mirar DISCO        examina uno, sin tocar nada
+#   sudo redhornoma-importar --disco DISCO --nombre salud
+#
+# Mirar NO modifica nada: el disco se abre en modo solo lectura.
+set -u
+
+IMG=/var/lib/libvirt/images
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+          printf "${AZ} %s${V}\n" "$1"
+          printf "${AZ}══════════════════════════════════════════════════════${V}\n\n"; }
+ok(){  printf "   ${VE}●${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+d(){   printf "   %-24s %s\n" "$1" "$2"; }
+
+DISCO=""; NOMBRE=""; PAPEL=""; SOLO_MIRAR=0; VERSION_DICHA=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --mirar)   SOLO_MIRAR=1; DISCO="${2:-}"; [ -n "${2:-}" ] && shift 2 || shift ;;
+    --disco)   DISCO="${2:-}"; shift 2 ;;
+    --nombre)  NOMBRE="${2:-}"; shift 2 ;;
+    --papel)   PAPEL="${2:-}"; shift 2 ;;
+    --version) VERSION_DICHA="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) mal "no entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+[ "$(id -u)" = 0 ] || { mal "hace falta sudo — se abre un disco a bajo nivel"; exit 1; }
+
+# ═════════════════════════════════════════════════════════════════════
+# Sin disco: buscar los huérfanos y listarlos
+# ═════════════════════════════════════════════════════════════════════
+if [ -z "$DISCO" ]; then
+  titulo "DISCOS SIN MÁQUINA"
+
+  # Qué discos usan las máquinas que libvirt ya conoce
+  USADOS=$(for m in $(virsh -c qemu:///system list --all --name 2>/dev/null); do
+             virsh -c qemu:///system domblklist "$m" 2>/dev/null | awk '/qcow2|raw/{print $2}'
+           done)
+
+  HUERFANOS=0
+  for f in "$IMG"/*.qcow2; do
+    [ -e "$f" ] || continue
+    if echo "$USADOS" | grep -qxF "$f"; then
+      printf "   %-40s ya tiene máquina\n" "$(basename "$f")"
+    else
+      printf "   ${AM}%-40s${V} sin máquina  (%s)\n" "$(basename "$f")" "$(du -h "$f" | cut -f1)"
+      HUERFANOS=$((HUERFANOS+1))
+    fi
+  done
+
+  echo
+  if [ "$HUERFANOS" = 0 ]; then
+    ok "no hay discos huérfanos: todos tienen su máquina"
+  else
+    echo "   Para examinar uno sin tocarlo:"
+    printf "      ${AZ}sudo redhornoma-importar --mirar %s/NOMBRE.qcow2${V}\n" "$IMG"
+  fi
+  echo
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+# Examinar el disco — SIEMPRE en solo lectura
+# ═════════════════════════════════════════════════════════════════════
+[ -r "$DISCO" ] || { mal "no puedo leer «$DISCO»"; exit 1; }
+
+titulo "1 · EL DISCO"
+
+d "Archivo:"  "$(basename "$DISCO")"
+d "Ocupa:"    "$(du -h "$DISCO" | cut -f1)"
+FORMATO=$(qemu-img info "$DISCO" 2>/dev/null | awk -F': ' '/^file format/{print $2}')
+VIRTUAL=$(qemu-img info "$DISCO" 2>/dev/null | awk -F'[(]' '/virtual size/{print $1}' | cut -d: -f2 | tr -d ' ')
+d "Formato:"  "${FORMATO:-desconocido}"
+d "Tamaño:"   "${VIRTUAL:-desconocido}"
+
+if qemu-img check "$DISCO" >/dev/null 2>&1; then ok "el disco está sano"
+else avi "qemu-img check encontró algo — mira: qemu-img check '$DISCO'"; fi
+
+# ── Abrirlo en solo lectura ──────────────────────────────────────────
+titulo "2 · QUÉ HAY DENTRO"
+
+modprobe nbd max_part=16 2>/dev/null || true
+[ -e /dev/nbd0 ] || { mal "este núcleo no tiene el módulo nbd — no puedo mirar dentro"; exit 1; }
+
+NBD=""
+for n in /dev/nbd*; do
+  case "$n" in *p[0-9]*) continue;; esac
+  if [ "$(cat /sys/block/$(basename "$n")/size 2>/dev/null)" = "0" ]; then NBD="$n"; break; fi
+done
+[ -n "$NBD" ] || { mal "no hay ningún /dev/nbd libre"; exit 1; }
+
+MNT=$(mktemp -d)
+limpiar(){
+  mountpoint -q "$MNT" 2>/dev/null && umount "$MNT" 2>/dev/null
+  [ -n "${NBD:-}" ] && qemu-nbd --disconnect "$NBD" >/dev/null 2>&1
+  rmdir "$MNT" 2>/dev/null
+}
+trap limpiar EXIT
+
+qemu-nbd --read-only --connect="$NBD" "$DISCO" 2>/dev/null \
+  || { mal "no pude abrir el disco"; exit 1; }
+ok "abierto en solo lectura — no se modifica nada"
+udevadm settle 2>/dev/null; sleep 1
+
+ESQUEMA=$(lsblk -no PTTYPE "$NBD" 2>/dev/null | head -1)
+case "$ESQUEMA" in
+  gpt)  d "Particiones:" "GPT — propio de UEFI" ;;
+  dos)  d "Particiones:" "MBR — propio de BIOS antiguo" ;;
+  *)    d "Particiones:" "${ESQUEMA:-no reconocidas}" ;;
+esac
+
+echo
+lsblk -no NAME,SIZE,FSTYPE,LABEL "$NBD" | sed 's/^/     /'
+echo
+
+# ── Buscar la partición de arranque y la de Windows ──────────────────
+ESP=""; WIN=""; CIFRADA=""
+for p in "$NBD"p*; do
+  [ -b "$p" ] || continue
+  T=$(lsblk -no FSTYPE "$p" 2>/dev/null | head -1)
+  case "$T" in
+    vfat)       [ -z "$ESP" ] && ESP="$p" ;;
+    BitLocker)  CIFRADA="$p" ;;
+    ntfs)  # la de Windows es la que tiene la carpeta Windows dentro
+           if mount -o ro "$p" "$MNT" 2>/dev/null || mount -t ntfs3 -o ro "$p" "$MNT" 2>/dev/null; then
+             [ -n "$(find "$MNT" -maxdepth 1 -iname Windows -type d 2>/dev/null)" ] && WIN="$p"
+             umount "$MNT" 2>/dev/null
+           fi ;;
+  esac
+done
+
+# ── BitLocker: hay que decirlo antes que nada ────────────────────────
+# Un disco cifrado se abre con la llave que el TPM guardaba. Si el TPM no
+# se respaldó —y no se respalda— esa llave ya no existe, y solo queda la
+# clave de recuperación.
+LLAVE=""
+if [ -n "$CIFRADA" ]; then
+  echo
+  avi "la partición de Windows está cifrada con BitLocker"
+
+  # Preguntar de qué tipo es la llave en vez de suponer lo peor. bdeinfo
+  # solo lee la cabecera: no descifra nada y no pide ninguna contraseña.
+  if command -v bdeinfo >/dev/null 2>&1; then
+    SALIDA_BDE=$(bdeinfo "$CIFRADA" 2>/dev/null)
+    echo "$SALIDA_BDE" | grep -qi 'Clear key'         && LLAVE=clara
+    [ -z "$LLAVE" ] && echo "$SALIDA_BDE" | grep -qi 'Recovery password' && LLAVE=recuperacion
+    [ -z "$LLAVE" ] && echo "$SALIDA_BDE" | grep -qi 'TPM'               && LLAVE=tpm
+  else
+    LLAVE=sin_mirar
+  fi
+
+  echo
+  case "$LLAVE" in
+    clara)
+      ok "la llave está en el propio disco, en claro — se abrirá sola"
+      echo "      Que el TPM anterior se perdiera no importa en este caso."
+      echo
+      avi "pero eso también significa que cualquiera con este archivo"
+      echo "      puede leer lo que hay dentro. Tenlo presente si el disco"
+      echo "      viaja en un pendrive con información de pacientes." ;;
+    recuperacion)
+      avi "hará falta la clave de recuperación de 48 dígitos"
+      echo "         · en la cuenta Microsoft →  aka.ms/myrecoverykey"
+      echo "         · o en el papel o archivo que se guardó al activarla"
+      echo
+      echo "      Consíguela ANTES de encender la máquina." ;;
+    tpm)
+      mal "la llave estaba guardada en el TPM, y el TPM no se respaldó"
+      echo "      Sin clave de recuperación este disco no se puede abrir."
+      echo "      Mira en  aka.ms/myrecoverykey  antes de seguir." ;;
+    *)
+      avi "no puedo saber qué llave tiene sin bdeinfo"
+      printf "         ${AZ}sudo apt install libbde-utils${V}   y vuelve a mirar\n" ;;
+  esac
+  echo
+fi
+
+# ── Qué Windows es ───────────────────────────────────────────────────
+VERSION=""; ETIQUETA=""; COMPILACION=""
+if [ -n "$WIN" ]; then
+  if mount -o ro "$WIN" "$MNT" 2>/dev/null || mount -t ntfs3 -o ro "$WIN" "$MNT" 2>/dev/null; then
+    WD=$(find "$MNT" -maxdepth 1 -iname Windows -type d | head -1)
+    SV=$(find "$WD" -maxdepth 2 -ipath '*servicing/Version' -type d 2>/dev/null | head -1)
+    [ -n "$SV" ] && COMPILACION=$(ls -1 "$SV" 2>/dev/null | sort -V | tail -1)
+    umount "$MNT" 2>/dev/null
+  fi
+fi
+
+if [ -n "$COMPILACION" ]; then
+  B=$(echo "$COMPILACION" | cut -d. -f3)
+  if   [ "${B:-0}" -ge 22000 ] 2>/dev/null; then VERSION=11; ETIQUETA="Windows 11"
+  elif [ "${B:-0}" -ge 10240 ] 2>/dev/null; then VERSION=10; ETIQUETA="Windows 10"
+  elif [ "${B:-0}" -ge 9200  ] 2>/dev/null; then VERSION=8;  ETIQUETA="Windows 8.1"
+  elif [ "${B:-0}" -ge 7600  ] 2>/dev/null; then VERSION=7;  ETIQUETA="Windows 7"
+  fi
+fi
+
+if [ -n "$VERSION" ]; then
+  ok "es $ETIQUETA  (compilación $COMPILACION)"
+elif [ -n "$VERSION_DICHA" ]; then
+  VERSION="$VERSION_DICHA"
+  case "$VERSION" in
+    7) ETIQUETA="Windows 7";; 8) ETIQUETA="Windows 8.1";;
+    10) ETIQUETA="Windows 10";; 11) ETIQUETA="Windows 11";;
+    *) mal "--version solo acepta 7, 8, 10 u 11"; exit 1;;
+  esac
+  COMPILACION="según me dijiste"
+  avi "no pude leerlo del disco; uso $ETIQUETA porque me lo indicaste"
+elif [ -n "$CIFRADA" ]; then
+  avi "no puedo leer qué Windows es: la partición está cifrada"
+  echo "      Indícalo tú con  --version 10  o  --version 11"
+else
+  avi "no pude averiguar qué Windows es — indícalo con --version"
+fi
+
+# El tamaño del disco delata con qué perfil se creó: 80 GB es Windows 11,
+# 64 GB Windows 10. Sirve de pista cuando el disco no se puede leer.
+if [ -z "$VERSION" ] && [ -n "$VIRTUAL" ]; then
+  case "$VIRTUAL" in
+    80*) echo "      Pista: el disco es de 80 GB, la medida del perfil de Windows 11." ;;
+    64*) echo "      Pista: el disco es de 64 GB, la medida del perfil de Windows 10." ;;
+  esac
+fi
+
+# ── ¿Podrá arrancar sin la NVRAM antigua? ────────────────────────────
+titulo "3 · ¿PODRÁ ARRANCAR?"
+
+echo "   Al reinstalar se pierde la NVRAM: la memoria del firmware donde"
+echo "   UEFI apunta qué arrancar. El disco no la lleva dentro."
+echo
+echo "   Se salva si en la partición de arranque existe el archivo de"
+echo "   reserva, que UEFI busca solo cuando no tiene ninguna anotación."
+echo
+
+RESERVA=0; MSBOOT=0
+if [ -n "$ESP" ] && mount -o ro "$ESP" "$MNT" 2>/dev/null; then
+  find "$MNT" -ipath '*EFI/Boot/bootx64.efi' 2>/dev/null | grep -q . && RESERVA=1
+  find "$MNT" -ipath '*EFI/Microsoft/Boot/bootmgfw.efi' 2>/dev/null | grep -q . && MSBOOT=1
+  umount "$MNT" 2>/dev/null
+fi
+
+[ "$MSBOOT" = 1 ] && ok "está el cargador de Windows (bootmgfw.efi)" \
+                  || avi "no encuentro el cargador de Windows"
+
+if [ "$RESERVA" = 1 ]; then
+  ok "está el archivo de reserva — arrancará sin ayuda"
+else
+  avi "NO está el archivo de reserva"
+  echo
+  echo "      Windows arrancará igual, pero hay que decírselo una vez al"
+  echo "      firmware. Al encenderla verás una pantalla azul de UEFI:"
+  echo
+  echo "         Boot Maintenance Manager → Boot From File"
+  echo "         → el disco → EFI → Microsoft → Boot → bootmgfw.efi"
+  echo
+  echo "      Se hace UNA sola vez. Después queda anotado."
+fi
+
+if [ "$SOLO_MIRAR" = 1 ]; then
+  titulo "NO SE TOCÓ NADA"
+  echo "   Para crear la máquina alrededor de este disco:"
+  printf "\n      ${AZ}sudo redhornoma-importar --disco %s --nombre NOMBRE${V}\n\n" "$DISCO"
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+# Importar
+# ═════════════════════════════════════════════════════════════════════
+[ -n "$VERSION" ] || { mal "sin saber qué Windows es no puedo elegir el hardware"; exit 1; }
+
+limpiar; trap - EXIT   # soltar el disco antes de que lo tome libvirt
+
+titulo "4 · LA MÁQUINA QUE SE VA A CREAR"
+
+if [ -z "$NOMBRE" ]; then
+  SUG=$(basename "$DISCO" .qcow2)
+  printf "   Nombre para esta máquina [%s]: " "$SUG"
+  read -r NOMBRE; NOMBRE="${NOMBRE:-$SUG}"
+fi
+NOMBRE=$(echo "$NOMBRE" | tr -c 'A-Za-z0-9._-' '-' | sed 's/-*$//')
+
+virsh -c qemu:///system dominfo "$NOMBRE" >/dev/null 2>&1 && {
+  mal "ya existe una máquina llamada «$NOMBRE»"
+  echo "      Para rehacerla:  sudo virsh undefine $NOMBRE --nvram"
+  echo "      ${RO}NUNCA uses --remove-all-storage${V}: borraría este disco."
+  exit 1; }
+
+# Mismo perfil de hardware que usa redhornoma-windows para cada versión.
+case "$VERSION" in
+  7)  OSINFO=win7;    MAQUINA=pc;  FIRMWARE=bios;        TPM=no; RAM_BASE=4096; USB=ehci ;;
+  8)  OSINFO=win8.1;  MAQUINA=q35; FIRMWARE=uefi;        TPM=no; RAM_BASE=4096; USB=qemu-xhci ;;
+  10) OSINFO=win10;   MAQUINA=q35; FIRMWARE=uefi;        TPM=si; RAM_BASE=4096; USB=qemu-xhci ;;
+  11) OSINFO=win11;   MAQUINA=q35; FIRMWARE=uefi-secure; TPM=si; RAM_BASE=6144; USB=qemu-xhci ;;
+esac
+
+# Si el disco es MBR, arrancó por BIOS aunque la versión admita UEFI.
+# Manda el disco, no la tabla de versiones.
+if [ "$ESQUEMA" = "dos" ] && [ "$FIRMWARE" != "bios" ]; then
+  avi "el disco es MBR: se usará BIOS aunque $ETIQUETA admita UEFI"
+  FIRMWARE=bios; MAQUINA=pc
+fi
+
+HILOS=$(nproc)
+if   [ "$HILOS" -le 4 ]; then VCPUS=2
+else VCPUS=$(( HILOS - 2 )); [ "$VCPUS" -gt 4 ] && VCPUS=4; fi
+
+RAM_TOTAL=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
+RAM_MAX=$(( RAM_TOTAL - 3072 ))
+RAM_MB=$RAM_BASE
+[ "$PAPEL" = "servidor" ] && RAM_MB=$(( RAM_BASE + 2048 ))
+[ "$RAM_MB" -gt "$RAM_MAX" ] && { RAM_MB=$RAM_MAX; avi "memoria ajustada a lo que hay: $(( RAM_MB / 1024 )) GB"; }
+
+MARCA_CPU=desconocida
+grep -qm1 ' svm ' /proc/cpuinfo && MARCA_CPU=AMD
+grep -qm1 ' vmx ' /proc/cpuinfo && MARCA_CPU=Intel
+
+CAPS=$(virsh -c qemu:///system domcapabilities 2>/dev/null)
+if echo "$CAPS" | grep -q '<value>spice</value>'; then
+  PANTALLA=spice; echo "$CAPS" | grep -q '<value>qxl</value>' && VIDEO=qxl || VIDEO=vga
+else PANTALLA=vnc; VIDEO=vga; fi
+
+VIRTIO=""
+for f in "$IMG"/virtio-win*.iso "$IMG"/virtio*.iso; do [ -e "$f" ] && { VIRTIO="$f"; break; }; done
+
+d "Sistema:"      "$ETIQUETA (compilación $COMPILACION)"
+d "Nombre:"       "$NOMBRE"
+d "Disco:"        "$(basename "$DISCO")  — ${AM}se conserva tal cual${V}"
+d "Memoria:"      "$(( RAM_MB / 1024 )) GB"
+d "Procesadores:" "$VCPUS, en modo directo"
+d "Chipset:"      "$MAQUINA"
+d "Firmware:"     "$FIRMWARE"
+d "TPM:"          "$([ "$TPM" = si ] && echo '2.0 emulado, nuevo' || echo ninguno)"
+d "Pantalla:"     "$PANTALLA con vídeo $VIDEO"
+
+if [ "$TPM" = si ]; then
+  echo
+  case "$LLAVE" in
+    clara)
+      d "TPM:" "se crea vacío, pero aquí da igual: la llave está en claro" ;;
+    recuperacion|tpm)
+      avi "el TPM se crea vacío y el disco está cifrado"
+      echo "      Ten la clave de recuperación a mano ANTES de encenderla." ;;
+    *)
+      avi "el TPM se crea vacío: el anterior no se respaldó"
+      echo "      Solo importa si dentro de Windows estaba activado BitLocker." ;;
+  esac
+fi
+
+echo
+printf "   Para continuar escribe exactamente  ${AZ}IMPORTAR${V}  y pulsa Enter: "
+read -r R
+[ "$R" = "IMPORTAR" ] || { echo; echo "   Cancelado. No se creó nada."; exit 0; }
+
+titulo "5 · CREANDO"
+
+XML="/tmp/redhornoma-importar-$NOMBRE.xml"
+ARGS=(
+  --connect qemu:///system --dry-run --print-xml 1
+  --name "$NOMBRE" --osinfo "$OSINFO"
+  --memory "$RAM_MB" --vcpus "$VCPUS" --cpu host-passthrough
+  --machine "$MAQUINA"
+  --disk "path=$DISCO,format=qcow2,bus=virtio,cache=writeback,discard=unmap"
+  --network network=default,model=virtio
+  --controller "type=usb,model=$USB"
+  --channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0
+  --graphics "$PANTALLA" --video "$VIDEO" --sound none
+  --import --noautoconsole
+)
+[ -n "$VIRTIO" ] && ARGS+=( --disk "device=cdrom,path=$VIRTIO" )
+
+case "$FIRMWARE" in
+  uefi)        ARGS+=( --boot firmware=efi ) ;;
+  uefi-secure) ARGS+=( --boot "firmware=efi,firmware.feature0.name=enrolled-keys,firmware.feature0.enabled=yes,firmware.feature1.name=secure-boot,firmware.feature1.enabled=yes" ) ;;
+esac
+
+FEATURES="hyperv.relaxed.state=on,hyperv.vapic.state=on,hyperv.spinlocks.state=on,hyperv.spinlocks.retries=8191"
+[ "$FIRMWARE" = "uefi-secure" ] && FEATURES="smm.state=on,$FEATURES"
+ARGS+=( --features "$FEATURES" )
+[ "$TPM" = si ] && ARGS+=( --tpm backend.type=emulator,backend.version=2.0,model=tpm-crb )
+
+virt-install "${ARGS[@]}" > "$XML" 2>/dev/null || { mal "no se pudo generar la configuración"; exit 1; }
+ok "configuración generada"
+
+# <evmcs> es correcto en Intel y impide arrancar en AMD.
+if grep -q evmcs "$XML"; then
+  if [ "$MARCA_CPU" = AMD ]; then sed -i '/<evmcs/d' "$XML"; ok "quitado <evmcs>, que en AMD impide arrancar"
+  else ok "procesador $MARCA_CPU: <evmcs> se conserva"; fi
+fi
+
+if [ "$PANTALLA" = spice ]; then
+  python3 - "$XML" <<'PY' 2>/dev/null
+import re,sys
+f=sys.argv[1]; s=open(f).read()
+extra = ("""<graphics type="spice" autoport="yes" listen="127.0.0.1">
+      <listen type="address" address="127.0.0.1"/>
+      <image compression="auto_glz"/>
+      <jpeg compression="auto"/>
+      <zlib compression="auto"/>
+      <playback compression="on"/>
+      <streaming mode="filter"/>
+      <clipboard copypaste="yes"/>
+      <filetransfer enable="yes"/>
+    </graphics>""")
+s = re.sub(r"<graphics type=.spice.*?</graphics>|<graphics type=.spice.*?/>", extra, s, flags=re.S)
+open(f,"w").write(s)
+PY
+  grep -q auto_glz "$XML" && ok "pantalla comprimida"
+fi
+
+grep -q 'org.qemu.guest_agent.0' "$XML" && ok "canal del agente invitado — hace falta para los respaldos"
+
+# La red «default» viene definida con libvirt pero APAGADA, y sin arrancar
+# automáticamente. Una máquina que la use no enciende, y el error que da
+# —«network default is not active»— no dice que basta con encenderla.
+if ! virsh -c qemu:///system net-info default >/dev/null 2>&1; then
+  virsh -c qemu:///system net-define /usr/share/libvirt/networks/default.xml >/dev/null 2>&1 \
+    && ok "red «default» definida" || avi "no pude definir la red «default»"
+fi
+if [ "$(virsh -c qemu:///system net-info default 2>/dev/null | awk '/^Active/{print $2}')" != "yes" ]; then
+  virsh -c qemu:///system net-start default >/dev/null 2>&1 \
+    && ok "red «default» encendida" || avi "no pude encender la red «default»"
+fi
+if [ "$(virsh -c qemu:///system net-info default 2>/dev/null | awk '/^Autostart/{print $2}')" != "yes" ]; then
+  virsh -c qemu:///system net-autostart default >/dev/null 2>&1 \
+    && ok "red «default» arrancará sola en cada encendido" \
+    || avi "la red «default» no arrancará sola: sudo virsh net-autostart default"
+fi
+
+if ! SALIDA=$(virsh -c qemu:///system define "$XML" 2>&1); then
+  mal "libvirt rechazó la máquina:"; echo "$SALIDA" | sed 's/^/      /'; exit 1
+fi
+ok "máquina «$NOMBRE» registrada"
+
+chown libvirt-qemu:kvm "$DISCO" 2>/dev/null || true
+chmod 660 "$DISCO"
+ok "permisos del disco ajustados"
+
+titulo "LISTO"
+echo "   Para encenderla:"
+printf "\n      ${AZ}sudo virsh start %s${V}\n" "$NOMBRE"
+printf "      ${AZ}virt-viewer --connect qemu:///system %s${V}\n\n" "$NOMBRE"
+if [ "$RESERVA" != 1 ] && [ "$FIRMWARE" != bios ]; then
+  avi "recuerda: la primera vez hay que indicarle el arranque a UEFI"
+  echo "      Boot Maintenance Manager → Boot From File → EFI → Microsoft"
+  echo "      → Boot → bootmgfw.efi"
+  echo
+fi
+exit 0
