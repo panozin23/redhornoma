@@ -1,0 +1,20 @@
+# Ningún centro de salud necesita un controlador de dominio.
+#
+# «samba» hace falta: es lo que comparte la carpeta de SALMI con el Windows
+# virtual. Pero recomienda «samba-ad-dc», un controlador de dominio de Active
+# Directory, y con --apt-recommends true entra solo, arrastrando winbind,
+# samba-ad-provision, samba-dsdb-modules y una veintena de paquetes de Python.
+#
+# Son unos 100 MB en cada ISO y una veintena de servicios más que mantener
+# actualizados, para algo que un centro de primer nivel no va a usar jamás.
+#
+# Se bloquea aquí, y no apagando las recomendaciones enteras: muchas traen
+# firmware y controladores que en equipos viejos SÍ hacen falta. Apagarlas
+# todas para quitar una sola es cambiar un problema pequeño por uno grande.
+#
+# Si algún día un hospital de segundo nivel lo necesitara, se quita este
+# archivo y vuelve.
+
+Package: samba-ad-dc
+Pin: release *
+Pin-Priority: -1

@@ -20,6 +20,29 @@ unzip
 zip
 xz-utils
 
+# Leer las bases de datos de SALMI desde Linux.
+#
+# SALMI guarda todo en archivos .mdb de Access. Sin esto, el respaldo solo
+# puede mirar el tamaño del archivo; con esto ABRE la base, cuenta pacientes
+# y prestaciones, y avisa si la información menguó. Es la diferencia entre
+# una copia y una copia comprobada.
+mdbtools
+
+# Hablar con el Windows virtual desde Python.
+#
+# Los datos se sacan y se devuelven por el agente invitado. Pasarlos como
+# argumento de un comando no sirve: medio mega de texto supera el límite del
+# sistema y el fallo solo aparece al escribir, no al leer. Con esta
+# biblioteca se hace desde Python y no hay límite.
+python3
+python3-libvirt
+
+# Copiar respaldos a otra computadora del centro y a la nube
+rsync
+rclone
+smbclient
+cifs-utils
+
 # Diagnóstico
 htop
 lsb-release

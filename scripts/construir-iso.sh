@@ -89,6 +89,42 @@ if lb config >/tmp/redhornoma-config.log 2>&1; then
     ok "$PROPIOS ajustes propios de RedHornoma añadidos"
   fi
 
+  # ── Las herramientas de RedHornoma van DENTRO de la ISO ─────────────
+  # Una ISO que no trae RedHornoma es Debian con virtualización, y ya. Todo
+  # el valor del proyecto está en estas herramientas: el informe, el papel,
+  # el respaldo, el panel.
+  #
+  # Se construyen aquí, en cada ISO, a partir del código de paquetes/. Así
+  # la ISO nunca lleva un .deb viejo que alguien construyó hace meses y
+  # nadie recuerda de qué versión salió.
+  #
+  # live-build instala solo lo que encuentre en config/packages.chroot/.
+  if [ -x "$BASE/scripts/construir-paquetes.sh" ]; then
+    printf "\n      Construyendo las herramientas de RedHornoma…\n"
+    if bash "$BASE/scripts/construir-paquetes.sh" >/tmp/redhornoma-paquetes.log 2>&1; then
+      rm -f "$RECETA/config/packages.chroot"/redhornoma-*.deb
+      mkdir -p "$RECETA/config/packages.chroot"
+      cp -f "$BASE/paquetes/deb"/*.deb "$RECETA/config/packages.chroot/" 2>/dev/null
+      N=$(ls "$RECETA/config/packages.chroot"/redhornoma-*.deb 2>/dev/null | wc -l)
+      if [ "$N" -gt 0 ]; then
+        ok "$N paquetes de RedHornoma irán dentro de la ISO"
+        for p in "$RECETA/config/packages.chroot"/redhornoma-*.deb; do
+          printf "         %s\n" "$(basename "$p")"
+        done
+      else
+        mal "no se copió ningún paquete — la ISO saldría SIN RedHornoma"
+        exit 1
+      fi
+    else
+      mal "no se pudieron construir las herramientas de RedHornoma"
+      tail -20 /tmp/redhornoma-paquetes.log
+      exit 1
+    fi
+  else
+    mal "falta scripts/construir-paquetes.sh — la ISO saldría sin RedHornoma"
+    exit 1
+  fi
+
   printf "      Debian:       %s\n" "$(grep -oP 'LB_DISTRIBUTION="\K[^"]+' "$RECETA/config/bootstrap" 2>/dev/null)"
   printf "      Áreas:        %s\n" "$(grep -oP 'LB_PARENT_ARCHIVE_AREAS="\K[^"]+' "$RECETA/config/bootstrap" 2>/dev/null)"
   printf "      Listas:       %s\n" "$(ls "$RECETA/config/package-lists"/*.list.chroot 2>/dev/null | wc -l)"

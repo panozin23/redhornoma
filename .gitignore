@@ -33,3 +33,6 @@ isos/
 # ── Respaldos de trabajo ─────────────────────────────────────────────
 *.antes-de-*
 *~
+# Los .deb que se generan para meter en la ISO
+receta/config/packages.chroot/
+paquetes/deb/

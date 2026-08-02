@@ -64,13 +64,53 @@ for lista in "$LISTAS"/*.list.chroot; do
   done < "$lista"
 done
 
+# ── Lo que piden nuestros propios paquetes ────────────────────────────
+# Las herramientas de RedHornoma van dentro de la ISO, y necesitan cosas:
+# mdbtools para abrir las bases de SALMI, python3-libvirt para escribir en
+# Windows. Si no están declaradas en las listas, la ISO se construye igual
+# y el fallo aparece meses después, en un centro, cuando el respaldo no
+# puede comprobar nada.
+#
+# Se mira aquí, en veinte segundos, y no después de noventa minutos.
+printf "\n${AZ}── lo que piden las herramientas de RedHornoma ──${V}\n"
+
+DECLARADOS=$(cat "$LISTAS"/*.list.chroot 2>/dev/null | sed 's/#.*//; s/[[:space:]]//g' | grep -v '^$' | sort -u)
+FALTAN_DEP=0
+
+# Los esenciales de Debian vienen siempre: no hace falta declararlos.
+ESENCIALES="coreutils findutils procps util-linux bash dash grep sed gawk tar dpkg passwd systemd"
+
+for control in "$BASE"/paquetes/*/DEBIAN/control; do
+  [ -f "$control" ] || continue
+  PAQ=$(awk -F': ' '/^Package:/{print $2}' "$control")
+  # tr -d '[:space:]' se comería también los saltos de línea y dejaría todas
+  # las dependencias pegadas en una sola palabra. sed trabaja por líneas.
+  DEPS=$(sed -n '/^Depends:/,/^[A-Z][a-z]*:/p' "$control" \
+         | sed 's/^Depends://; /^[A-Z][a-z]*:/d' \
+         | tr ',' '\n' | sed 's/(.*)//; s/[[:space:]]//g' | grep -v '^$')
+  for dep in $DEPS; do
+    case "$dep" in redhornoma-*) continue;; esac
+    echo " $ESENCIALES " | grep -q " $dep " && continue
+    if ! echo "$DECLARADOS" | grep -qx "$dep"; then
+      printf "   ${RO}✖${V} %-28s lo pide %s y no está en ninguna lista\n" "$dep" "$PAQ"
+      FALTAN_DEP=$((FALTAN_DEP+1))
+    fi
+  done
+done
+
+if [ "$FALTAN_DEP" -eq 0 ]; then
+  printf "   ${VE}●${V} todo lo que piden está declarado\n"
+else
+  printf "\n   ${AM}Añádelos a la lista que les corresponda antes de construir.${V}\n"
+fi
+
 # ── Resumen ───────────────────────────────────────────────────────────
 titulo "RESUMEN"
 printf "   Paquetes declarados:  %s\n" "$TOTAL"
 printf "   ${VE}Encontrados:          %s${V}\n" "$OK"
 [ "$NO" -gt 0 ] && printf "   ${RO}Sin encontrar:        %s${V}\n" "$NO"
 
-if [ "$NO" -eq 0 ]; then
+if [ "$NO" -eq 0 ] && [ "$FALTAN_DEP" -eq 0 ]; then
   echo
   printf "   ${VE}✅ La receta está limpia. Se puede construir.${V}\n"
   echo

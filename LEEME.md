@@ -41,10 +41,17 @@ La ISO queda en `isos/` con su versión, su fecha y su huella SHA-256.
 
 ---
 
-## Instalar las herramientas en un equipo
+La ISO **construye e instala sola las herramientas de RedHornoma**. El paso 3
+las empaqueta a partir del código de `paquetes/` y las mete dentro, así que
+ninguna ISO lleva un `.deb` viejo que alguien construyó hace meses y nadie
+recuerda de qué versión salió.
 
-Las cinco piezas de RedHornoma son paquetes `.deb`. Se construyen desde
-`paquetes/` y se instalan como cualquier programa de Debian:
+---
+
+## Instalar las herramientas en un equipo que ya funciona
+
+Para llevar una corrección a un centro sin rehacer la ISO entera. Son paquetes
+`.deb` normales:
 
 ```bash
 bash scripts/construir-paquetes.sh          # quedan en paquetes/deb/
@@ -76,7 +83,7 @@ Un equipo que instale `redhornoma-completo` tiene el sistema entero.
 
 ## Qué hay en la receta
 
-146 programas declarados, agrupados por para qué sirven:
+153 programas de Debian declarados, agrupados por para qué sirven:
 
 | Lista | Para qué |
 |---|---|
