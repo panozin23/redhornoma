@@ -460,14 +460,34 @@ if [ "$ACCION" = "programar" ]; then
   # ese día la computadora se apagó antes, se hace en cuanto se encienda
   # la próxima vez. Ningún día se queda sin copia.
   HORA=${HORA:-13:30}
-  cat > /etc/systemd/system/redhornoma-respaldo.service <<'UNIDAD'
+
+  # El servicio tiene que llamar al programa que EXISTE, no a uno supuesto.
+  #
+  # El 2026-07-30 se programó aquí una unidad con la ruta /usr/bin escrita a
+  # mano, mientras el programa vivía en la carpeta del proyecto. El
+  # temporizador se disparaba cada día, el servicio no encontraba nada y no
+  # pasaba nada. Dos días sin respaldo y ni un solo aviso.
+  PROGRAMA=$(readlink -f "$0")
+  [ -x "$PROGRAMA" ] || { mal "no encuentro el propio programa en «$PROGRAMA»"; exit 1; }
+
+  if [ "$PROGRAMA" != "/usr/bin/redhornoma-respaldo" ]; then
+    avi "se programará «$PROGRAMA»"
+    echo "      No es la ruta del paquete. Funciona, pero si esa carpeta se"
+    echo "      mueve o se borra, el respaldo deja de hacerse EN SILENCIO."
+    echo
+    echo "      Lo correcto es instalar el paquete y programar desde ahí:"
+    printf "         ${AZ}sudo apt install ./redhornoma-respaldo_*.deb${V}\n"
+    echo
+  fi
+
+  cat > /etc/systemd/system/redhornoma-respaldo.service <<UNIDAD
 [Unit]
 Description=Respaldo de la información del centro
 After=libvirtd.service network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/redhornoma-respaldo --silencioso
+ExecStart=$PROGRAMA --silencioso
 UNIDAD
 
   cat > /etc/systemd/system/redhornoma-respaldo.timer <<UNIDAD
@@ -496,6 +516,19 @@ UNIDAD
     ok "y si ese día estaba apagada, se hace al encenderla"
   else
     mal "no se pudo programar"; exit 1
+  fi
+
+  # Preguntarle a systemd qué va a ejecutar de verdad, en vez de dar por
+  # hecho que escribió lo que le pedimos. Programar algo que no se puede
+  # ejecutar es peor que no programar nada: parece resuelto y no lo está.
+  EXEC=$(systemctl show -p ExecStart --value redhornoma-respaldo.service 2>/dev/null \
+         | grep -oP 'path=\K[^ ;]+' | head -1)
+  if [ -n "$EXEC" ] && [ -x "$EXEC" ]; then
+    ok "systemd ejecutará: $EXEC"
+  else
+    mal "systemd no puede ejecutar «${EXEC:-nada}» — el respaldo NO se hará"
+    echo "      Esto es exactamente el fallo que dejó dos días sin copia."
+    exit 1
   fi
 
   echo
@@ -910,6 +943,71 @@ fi
   printf 'Para restaurarlo: dentro de SALMI, Administración -> Restaurar,\n'
   printf 'y apuntar al archivo terminado en .sal\n'
 } > "$CARPETA_DEST/LEEME.txt"
+
+# ── Guardar también la MÁQUINA, no solo la información ────────────────
+# El disco qcow2 guarda Windows entero, pero la máquina —chipset, memoria,
+# firmware, TPM— vive en libvirt, no en el disco. Al reinstalar un equipo,
+# el disco sobrevive y la máquina no.
+#
+# Esto lo aprendimos reinstalando el portátil el 2026-08-01: hubo que
+# reconstruir la máquina a mano abriendo el disco para adivinar qué
+# Windows era. Son 4 KB los que lo habrían evitado.
+#
+# Se guarda:
+#   maquina.xml    cómo está armada la máquina        ~4 KB
+#   nvram.fd       dónde apunta UEFI para arrancar    ~540 KB
+#   tpm.tar        el TPM emulado, si lo tiene        pocos KB
+#
+# El TPM importa cuando dentro de Windows hay BitLocker: sin él, el disco
+# pide la clave de recuperación de 48 dígitos.
+if [ "$MODO" = "virtual" ] && [ -n "${VM:-}" ]; then
+  printf "\n   ${AZ}Guardando también la máquina${V}\n"
+
+  if virsh -c qemu:///system dumpxml "$VM" > "$CARPETA_DEST/maquina.xml" 2>/dev/null \
+     && [ -s "$CARPETA_DEST/maquina.xml" ]; then
+    ok "maquina.xml — con esto se vuelve a crear sin adivinar nada"
+  else
+    rm -f "$CARPETA_DEST/maquina.xml"
+    avi "no se pudo guardar la configuración de la máquina"
+  fi
+
+  # La NVRAM es la memoria del firmware: sin ella, UEFI no sabe qué
+  # arrancar y hay que indicárselo a mano la primera vez.
+  NVRAM=$(grep -oP '<nvram[^>]*>\K[^<]+' "$CARPETA_DEST/maquina.xml" 2>/dev/null | head -1)
+  if [ -n "$NVRAM" ] && [ -r "$NVRAM" ]; then
+    cp -f "$NVRAM" "$CARPETA_DEST/nvram.fd" 2>/dev/null \
+      && ok "nvram.fd — arrancará sin la pantalla azul de UEFI" \
+      || avi "no se pudo guardar la NVRAM"
+  fi
+
+  # El estado del TPM emulado. Se guarda por UUID de la máquina.
+  UUID=$(virsh -c qemu:///system domuuid "$VM" 2>/dev/null | tr -d '[:space:]')
+  if [ -n "$UUID" ] && [ -d "/var/lib/libvirt/swtpm/$UUID" ]; then
+    if tar -cf "$CARPETA_DEST/tpm.tar" -C /var/lib/libvirt/swtpm "$UUID" 2>/dev/null; then
+      ok "tpm.tar — hace falta si dentro de Windows hay BitLocker"
+    else
+      rm -f "$CARPETA_DEST/tpm.tar"
+      avi "no se pudo guardar el estado del TPM"
+    fi
+  fi
+
+  # Quien abra esta carpeta dentro de dos años tiene que entender qué son
+  # estos archivos sin preguntarle a nadie.
+  if [ -f "$CARPETA_DEST/maquina.xml" ]; then
+    {
+      printf '\n--- La máquina, no solo la información ---\n\n'
+      printf 'maquina.xml   cómo está armada la máquina virtual\n'
+      [ -f "$CARPETA_DEST/nvram.fd" ] && printf 'nvram.fd      la memoria del firmware UEFI\n'
+      [ -f "$CARPETA_DEST/tpm.tar"  ] && printf 'tpm.tar       el TPM emulado (hace falta si hay BitLocker)\n'
+      printf '\nEl disco .qcow2 NO esta aqui: son decenas de GB y se respalda\n'
+      printf 'aparte. Estos archivos son lo que ese disco no lleva dentro.\n\n'
+      printf 'Si hay que rehacer la maquina y el disco se conserva:\n'
+      printf '   sudo virsh define maquina.xml\n'
+      printf 'o, si el disco esta pero no se sabe como estaba armada:\n'
+      printf '   sudo redhornoma-importar --mirar /ruta/al/disco.qcow2\n'
+    } >> "$CARPETA_DEST/LEEME.txt"
+  fi
+fi
 
 # ── Comprobar que sirve ───────────────────────────────────────────────
 # Esto va ANTES de repartir, y no es un detalle de orden.
