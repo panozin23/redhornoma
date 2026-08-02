@@ -6,58 +6,68 @@
 # falló, o por probar— arranca un sistema en inglés, con el usuario «user», sin
 # la configuración de RedHornoma y sin saber por qué.
 #
-# Pasó el 2026-08-02: la primera vez arrancó bien y se anunció en la red como
-# REDHORNOMA; la segunda salió «user@debian» en inglés, y la contraseña del
-# usuario en vivo no existía.
+# Pasó el 2026-08-02: el primer arranque se anunció en la red como REDHORNOMA;
+# el segundo salió «user@debian», y la contraseña del usuario en vivo no
+# existía, así que hubo que apagar con el botón a mitad de instalación.
 #
-# La entrada de rescate tiene que seguir desactivando lo que desactiva —esos
-# argumentos existen para arrancar en máquinas que fallan de otra forma— pero
-# el idioma, el teclado y el usuario no tienen nada que ver con eso.
+# La entrada de rescate sigue desactivando lo que desactiva —esos argumentos
+# existen para arrancar en máquinas que fallan de otra forma— pero el idioma,
+# el teclado y el usuario no tienen nada que ver con eso.
 #
-# Se ejecuta en la fase binaria, cuando los menús ya están escritos.
+# OJO CON EL DIRECTORIO: live-build hace «cd binary» antes de ejecutar los
+# hooks de esta fase (/usr/lib/live/build/binary_hooks, línea 51). La primera
+# versión de este guion buscaba en «binary/isolinux/live.cfg», que desde ahí
+# es «binary/binary/…»: no encontraba nada, no tocaba nada, y decía que todo
+# había ido bien. Se buscan los archivos en vez de suponer dónde están.
 set -e
 
 AJUSTES="locales=es_BO.UTF-8 keyboard-layouts=es keyboard-model=pc105 timezone=America/La_Paz username=redhornoma hostname=redhornoma"
 
 echo "P: RedHornoma — completando el menú de arranque"
+echo "P: RedHornoma — trabajando desde $(pwd)"
 
-# ── Arranque BIOS antiguo (isolinux) ─────────────────────────────────
-for f in binary/isolinux/live.cfg binary/isolinux/*.cfg; do
-  [ -f "$f" ] || continue
-  # Solo a las líneas «append» que NO tengan ya los ajustes.
-  sed -i "/append .*boot=live/{ /username=redhornoma/!s|\$| $AJUSTES| }" "$f"
-  # Etiquetas en español: quien las lee está delante de la máquina.
-  sed -i 's|menu label \^Live system (amd64)|menu label ^RedHornoma — probar sin instalar|' "$f"
-  sed -i 's|menu label Live system (amd64 fail-safe mode)|menu label RedHornoma — modo seguro (si lo de arriba falla)|' "$f"
-done
+# Buscar los menús donde estén, valga la ruta que valga.
+MENUS=$(find . -maxdepth 4 \( -path '*isolinux/*.cfg' -o -path '*boot/grub/grub.cfg' \) 2>/dev/null)
 
-# ── Arranque UEFI (grub) ─────────────────────────────────────────────
-# Ojo con el separador: grub escribe «linux» y un TABULADOR, no un espacio.
-# Buscar «linux » con espacio no encuentra nada y el hook parecería funcionar.
-for f in binary/boot/grub/grub.cfg binary/boot/grub/*.cfg; do
-  [ -f "$f" ] || continue
+if [ -z "$MENUS" ]; then
+  echo "E: RedHornoma — no encuentro ningún menú de arranque que ajustar"
+  echo "E: RedHornoma — esto dejaría la entrada de rescate sin configuración"
+  find . -maxdepth 3 -type d | head -20
+  exit 1
+fi
+
+for f in $MENUS; do
+  # isolinux usa «append», grub usa «linux» + TABULADOR (no espacio).
+  sed -i "/^[^#]*append .*boot=live/{ /username=redhornoma/!s|\$| $AJUSTES| }" "$f"
   sed -i "/^[^#]*linux[[:space:]].*boot=live/{ /username=redhornoma/!s|\$| $AJUSTES| }" "$f"
-  sed -i 's|"Live system (amd64)"|"RedHornoma — probar sin instalar"|' "$f"
-  sed -i 's|"Live system (amd64 fail-safe mode)"|"RedHornoma — modo seguro (si lo de arriba falla)"|' "$f"
+  # Etiquetas en español: quien las lee está delante de la máquina.
+  sed -i 's|\^Live system (amd64)|^RedHornoma — probar sin instalar|; s|"Live system (amd64)"|"RedHornoma — probar sin instalar"|' "$f"
+  sed -i 's|Live system (amd64 fail-safe mode)|RedHornoma — modo seguro (si lo de arriba falla)|' "$f"
 done
 
-# ── Comprobar que quedó hecho ────────────────────────────────────────
+# ── Comprobar de verdad ──────────────────────────────────────────────
 # Un hook que falla en silencio deja el mismo problema que venía a arreglar.
-#
-# Se cuentan solo las líneas activas: los menús traen ejemplos comentados
-# que no arrancan nada, y contarlos daría un fallo donde no lo hay.
+# Se cuentan solo las líneas activas: los menús traen ejemplos comentados que
+# no arrancan nada, y contarlos daría un fallo donde no lo hay.
 FALTAN=0
-for f in binary/isolinux/live.cfg binary/boot/grub/grub.cfg; do
-  [ -f "$f" ] || continue
-  TOTAL=$(grep -c '^[^#]*boot=live' "$f" 2>/dev/null || echo 0)
-  CON=$(grep -c '^[^#]*username=redhornoma' "$f" 2>/dev/null || echo 0)
-  echo "P: RedHornoma — $f: $CON de $TOTAL entradas con los ajustes"
-  [ "$CON" -lt "$TOTAL" ] && FALTAN=1
+REVISADOS=0
+for f in $MENUS; do
+  TOTAL=$(grep -c '^[^#]*boot=live' "$f" 2>/dev/null || true)
+  [ "${TOTAL:-0}" -gt 0 ] || continue
+  CON=$(grep -c '^[^#]*username=redhornoma' "$f" 2>/dev/null || true)
+  REVISADOS=$(( REVISADOS + 1 ))
+  echo "P: RedHornoma — $f: ${CON:-0} de $TOTAL entradas con los ajustes"
+  [ "${CON:-0}" -lt "$TOTAL" ] && FALTAN=1
 done
+
+if [ "$REVISADOS" = 0 ]; then
+  echo "E: RedHornoma — no se revisó ningún menú: algo cambió de sitio"
+  exit 1
+fi
 
 if [ "$FALTAN" = 1 ]; then
   echo "E: RedHornoma — quedaron entradas de arranque sin los ajustes"
   exit 1
 fi
 
-echo "P: RedHornoma — todas las entradas del menú llevan la configuración"
+echo "P: RedHornoma — $REVISADOS menús completos, todas las entradas configuradas"
