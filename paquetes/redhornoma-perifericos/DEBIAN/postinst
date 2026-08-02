@@ -1,0 +1,18 @@
+#!/bin/sh
+# Dejar la carpeta compartida preparada para el primer arranque.
+#
+# No se crea aquí: al instalar el paquete —dentro del chroot de la ISO— no hay
+# ni usuario de la persona ni Samba en marcha. Se activa el servicio, y él la
+# crea la primera vez que arranque el sistema ya instalado.
+set -e
+
+case "$1" in
+  configure)
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    systemctl enable redhornoma-carpeta-compartida.service >/dev/null 2>&1 || true
+    ;;
+esac
+
+exit 0

@@ -763,14 +763,23 @@ cat <<FIN
    después de crear la cuenta local, o Windows despertará la tarjeta en la
    pantalla equivocada y volverá a pedirte la cuenta de Microsoft.
 
-   ${AZ}Paso 3 · Ya dentro de Windows, instala el agente${V}
+   ${AZ}Paso 4 · Ya dentro de Windows, las herramientas del invitado${V}
 
-   En ese mismo segundo CD, ejecuta:
+   En la ${AM}raíz${V} de ese segundo CD —no dentro de ninguna carpeta—:
 
-      guest-agent\\qemu-ga-x86_64.msi
+      ${AZ}virtio-win-guest-tools.exe${V}
 
-   Sin eso no se pueden hacer copias de seguridad con la máquina
-   encendida, y ${AM}el respaldo es lo más importante del sistema${V}.
+   Ese instalador trae TODO junto y en un solo paso:
+
+      · los controladores que faltan (disco, red, memoria)
+      · el agente invitado, sin el cual ${AM}no hay respaldos${V} con la
+        máquina encendida
+      · el portapapeles compartido: copiar en Linux y pegar en Windows
+
+   Reinicia Windows al terminar.
+
+   ${AM}No uses guest-agent\\qemu-ga-x86_64.msi${V}: instala solo el agente y te
+   deja sin portapapeles, que es lo que más falta hace mientras configuras.
 
 FIN
 

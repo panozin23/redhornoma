@@ -1,0 +1,27 @@
+# Crear la carpeta compartida en el primer arranque.
+#
+# Pasar un archivo de Linux a Windows es de las cosas que más se hacen en un
+# centro: los catálogos que manda el Ministerio, los respaldos, los informes.
+# Si hay que montarla a mano —crear usuario, inventar contraseña, conectar
+# unidad de red— nadie lo hace, y se acaba enchufando pendrives.
+#
+# El 2026-08-02 ese montaje a mano costó media hora y una contraseña olvidada.
+# Ahora viene hecha desde el primer arranque.
+#
+# Solo la ve la máquina virtual de este mismo equipo. Para abrirla al centro
+# entero hay que pedirlo a mano, y entonces sí pide contraseña.
+
+[Unit]
+Description=Carpeta compartida entre Linux y Windows
+After=smbd.service network.target
+Wants=smbd.service
+ConditionPathExists=!/var/lib/libvirt/compartido
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/redhornoma-carpeta-compartida --crear
+RemainAfterExit=yes
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

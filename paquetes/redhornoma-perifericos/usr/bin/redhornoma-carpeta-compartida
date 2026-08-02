@@ -97,27 +97,49 @@ titulo "CREANDO"
 
 mkdir -p "$CARPETA" "$RESP"
 chmod 2775 "$CARPETA"
-# Que el usuario del escritorio pueda dejar archivos ahí sin sudo
-DUENO="${SUDO_USER:-root}"
+# Que el usuario del escritorio pueda dejar archivos ahí sin sudo.
+#
+# Con «sudo» sabemos quién lo lanzó. Pero esto también corre solo en el
+# primer arranque, desde systemd, donde no hay SUDO_USER: entonces se busca
+# al usuario de la persona —el primero que creó el instalador, UID 1000—.
+# Si quedara como root, la carpeta no serviría para nada: nadie podría
+# dejar archivos en ella sin sudo, que es justo lo que viene a evitar.
+DUENO="${SUDO_USER:-$(getent passwd 1000 2>/dev/null | cut -d: -f1)}"
+DUENO="${DUENO:-root}"
 chown "$DUENO":"$DUENO" "$CARPETA" 2>/dev/null
 ok "carpeta lista en $CARPETA"
 
-# ── La contraseña de acceso ───────────────────────────────────────────
-# Sin contraseña, cualquiera de la red entra. Con datos de pacientes
-# dentro, eso no es aceptable.
-echo
-printf "   ${AZ}Contraseña para entrar desde Windows${V}\n"
-echo "      Se escribe una sola vez: Windows la recuerda."
-echo
-printf "   Contraseña para el usuario «%s»: " "$USUARIO_SMB"
-read -rs CLAVE; echo
-[ ${#CLAVE} -ge 4 ] || { mal "muy corta — al menos 4 caracteres"; exit 1; }
+# ── ¿Hace falta contraseña? ───────────────────────────────────────────
+# Depende de QUIÉN puede llegar a la carpeta, no de una regla general.
+#
+# Si solo la ve la máquina virtual de este mismo equipo —lo normal—, una
+# contraseña no protege de nada: quien pueda entrar en esa máquina ya está
+# dentro del equipo. Y sí estorba: hay que inventarla, apuntarla y
+# escribirla en Windows peleándose con la barra invertida. El 2026-08-02
+# ese paso costó media hora y una contraseña olvidada.
+#
+# Si se abre al centro entero (--tambien-el-centro) entonces sí hace falta:
+# ahí ya hay información de pacientes viajando por la red y cualquiera de
+# las computadoras puede llegar.
+if [ "$ABRIR_CENTRO" = "1" ]; then
+  echo
+  printf "   ${AZ}Contraseña para entrar desde las computadoras del centro${V}\n"
+  echo "      La carpeta se abre a toda la red, así que hace falta."
+  echo
+  printf "   Contraseña para el usuario «%s»: " "$USUARIO_SMB"
+  read -rs CLAVE; echo
+  [ ${#CLAVE} -ge 4 ] || { mal "muy corta — al menos 4 caracteres"; exit 1; }
 
-id "$USUARIO_SMB" >/dev/null 2>&1 || \
-  useradd -M -s /usr/sbin/nologin "$USUARIO_SMB" 2>/dev/null
-printf '%s\n%s\n' "$CLAVE" "$CLAVE" | smbpasswd -s -a "$USUARIO_SMB" >/dev/null 2>&1 \
-  && ok "usuario «$USUARIO_SMB» listo" || { mal "no se pudo crear el usuario"; exit 1; }
-unset CLAVE
+  id "$USUARIO_SMB" >/dev/null 2>&1 || \
+    useradd -M -s /usr/sbin/nologin "$USUARIO_SMB" 2>/dev/null
+  printf '%s\n%s\n' "$CLAVE" "$CLAVE" | smbpasswd -s -a "$USUARIO_SMB" >/dev/null 2>&1 \
+    && ok "usuario «$USUARIO_SMB» listo" || { mal "no se pudo crear el usuario"; exit 1; }
+  unset CLAVE
+  ACCESO="valid users = $USUARIO_SMB"
+else
+  ACCESO="guest ok = yes"
+  ok "sin contraseña: solo la ve el Windows de este mismo equipo"
+fi
 
 # ── Publicar la carpeta ───────────────────────────────────────────────
 echo
@@ -134,7 +156,8 @@ cat >> "$CONF_SMB" <<CFG
    path = $CARPETA
    browseable = yes
    read only = no
-   valid users = $USUARIO_SMB
+   $ACCESO
+   force user = $DUENO
    force group = $DUENO
    create mask = 0664
    directory mask = 2775
@@ -178,14 +201,17 @@ cat <<FIN
    ${AZ}En Windows${V}
 
       1. Abre el Explorador de archivos
-      2. Clic derecho en «Este equipo» → «Conectar a unidad de red»
-      3. Unidad:  Z:
-      4. Carpeta: ${AZ}\\\\$IP_VIRT\\compartido${V}
-      5. Marca «Conectar de nuevo al iniciar sesión»
-      6. Usuario:  $USUARIO_SMB
-         Contraseña: la que acabas de poner
+      2. Escribe esto en la barra de dirección de arriba y pulsa Enter:
 
-      A partir de ahí, la unidad Z: aparece sola cada vez.
+            ${AZ}\\\\$IP_VIRT\\compartido${V}
+
+      Y ya está: la carpeta se abre.$([ "$ABRIR_CENTRO" = "1" ] && printf ' Pedirá el usuario\n      «%s» y su contraseña.' "$USUARIO_SMB" || printf ' No pide contraseña.')
+
+      ${AZ}Para tenerla siempre como unidad Z:${V}
+
+      Clic derecho en «Este equipo» → «Conectar a unidad de red»,
+      unidad Z:, la misma dirección, y marcar «Conectar de nuevo al
+      iniciar sesión».
 
    ${AZ}Para qué la vas a usar${V}
 

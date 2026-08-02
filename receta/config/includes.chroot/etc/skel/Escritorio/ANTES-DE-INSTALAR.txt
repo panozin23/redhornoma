@@ -1,0 +1,105 @@
+========================================================================
+  INSTALAR RedHornoma EN ESTE EQUIPO
+  Leer esto antes de pulsar el icono de instalar
+========================================================================
+
+
+------------------------------------------------------------------------
+  1 - LIMPIAR EL DISCO SI YA TUVO OTRO SISTEMA
+------------------------------------------------------------------------
+
+Un disco usado suele traer restos de instalaciones anteriores: media
+tabla de particiones de un Windows viejo, media de un Linux. El
+instalador no lo dice, pero se atasca al final con un error de
+"gestor de arranque" y hay que empezar de nuevo.
+
+Comprobarlo tarda diez segundos. Abrir una terminal y escribir:
+
+     lsblk -o NAME,SIZE,TRAN,MODEL
+
+Buscar el disco INTERNO: el que NO diga "usb". El pendrive de
+RedHornoma sí dirá usb.
+
+Si el disco interno se llama, por ejemplo, sda, y NO hay nada dentro
+que se quiera conservar:
+
+     sudo wipefs -a /dev/sda
+     sudo parted -s /dev/sda mklabel msdos
+
+CUIDADO: eso borra ese disco entero. Comprobar dos veces la letra.
+El pendrive nunca se toca.
+
+
+------------------------------------------------------------------------
+  2 - INSTALAR
+------------------------------------------------------------------------
+
+Doble clic en el icono de instalar del escritorio.
+
+En el paso de particionado elegir "Borrar disco".
+
+Al terminar, sacar el pendrive antes de reiniciar.
+
+
+------------------------------------------------------------------------
+  3 - LO QUE YA VIENE HECHO  -  no hay que configurarlo
+------------------------------------------------------------------------
+
+  - Acceso remoto encendido desde el primer arranque
+  - La pantalla no se bloquea sola
+  - Carpeta compartida con Windows creada, y SIN contrasena
+  - Las siete herramientas de RedHornoma instaladas
+
+
+------------------------------------------------------------------------
+  4 - DESPUES DE INSTALAR
+------------------------------------------------------------------------
+
+Todo esto se puede hacer desde otra computadora por red, sin volver
+a sentarse delante de esta.
+
+  a) Decir que es esta computadora dentro del centro:
+
+         sudo redhornoma-papel --configurar --papel servidor
+
+     (o --papel puesto, si es un consultorio)
+
+  b) Crear el Windows:
+
+         sudo redhornoma-windows --version 10
+
+     Windows 10 para equipos viejos. Windows 11 solo si la maquina
+     es moderna.
+
+  c) Programar el respaldo diario:
+
+         sudo redhornoma-respaldo --programar
+
+
+------------------------------------------------------------------------
+  5 - PASAR ARCHIVOS DE LINUX A WINDOWS
+------------------------------------------------------------------------
+
+La carpeta compartida ya esta creada. En Linux es:
+
+     /var/lib/libvirt/compartido
+
+Dejar ahi lo que se quiera pasar.
+
+Desde Windows, escribir esto en la barra de direccion del Explorador:
+
+     \\192.168.122.1\compartido
+
+No pide contrasena. Solo la ve el Windows de este mismo equipo.
+
+(La barra invertida se hace con Alt + 92 en el teclado numerico, o
+con AltGr y la tecla a la izquierda del 1.)
+
+
+========================================================================
+  SI ALGO FALLA
+========================================================================
+
+Anotar el mensaje exacto de la pantalla, o hacerle una foto.
+No forzar ni repetir a ciegas: casi todos los errores dicen
+exactamente que falta, aunque no lo parezca.
