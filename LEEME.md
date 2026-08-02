@@ -181,6 +181,33 @@ respaldarla, leer su informe, enviarle archivos o abrirle una terminal.
 Con cinco consultorios, ver de un golpe cuál lleva ocho días sin copia es la
 diferencia entre enterarse hoy o en diciembre.
 
+**Fase 4 — La cara visible: en marcha desde el 1 de agosto de 2026.**
+
+Las dos primeras piezas, probadas en el portátil:
+
+| | |
+|---|---|
+| `redhornoma-entrar` | abre los programas de salud: enciende la máquina si hace falta y pone su pantalla delante |
+| `redhornoma-panel` | todo el estado del centro en una ventana, en verde, amarillo y rojo |
+
+El panel pregunta cada dato en el momento y, cuando algo no se puede
+saber, lo dice en gris. Un panel que se inventa un verde es peor que no
+tener panel: da confianza falsa justo donde no toca.
+
+Dos cosas que solo se vieron probando, y que cambiaron el diseño:
+
+- **Nada de pantalla completa por defecto.** virt-viewer esconde ahí su
+  barra y solo asoma si llevas el ratón al borde de arriba y esperas.
+  Quien no lo sepa se queda encerrado dentro de Windows sin ver la salida.
+- **Nada de `--reconnect` por defecto.** Servía para las actualizaciones
+  de Windows, que reinician solas, pero virt-viewer no distingue un
+  reinicio de un apagado: al apagar desde Inicio, la ventana se quedaba
+  en gris esperando para siempre. Solo el modo kiosco lo activa, porque
+  allí no hay escritorio detrás donde volver a pulsar.
+
+Falta de esta fase: los tres modos de arranque con su salida de
+emergencia, y las guías imprimibles.
+
 El plan completo, con las siete fases, está en [PLAN.md](PLAN.md).
 
 ---

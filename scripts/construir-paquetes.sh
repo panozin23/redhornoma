@@ -37,7 +37,8 @@ command -v dpkg-deb >/dev/null || { mal "falta dpkg-deb (paquete dpkg-dev)"; exi
 
 # ── El orden importa: base primero, el metapaquete al final ───────────
 ORDEN=(redhornoma-base redhornoma-virtualizacion redhornoma-red
-       redhornoma-respaldo redhornoma-perifericos redhornoma-completo)
+       redhornoma-respaldo redhornoma-perifericos redhornoma-panel
+       redhornoma-completo)
 
 # Avisar de carpetas que existan pero no estén en la lista, en vez de
 # saltárselas en silencio.

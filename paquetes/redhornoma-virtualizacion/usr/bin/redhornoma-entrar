@@ -1,0 +1,177 @@
+#!/bin/bash
+# redhornoma-entrar — Abre los programas de salud. Un solo gesto.
+#
+# Es el músculo detrás del botón grande del panel y detrás del modo
+# directo: encender la máquina de Windows si hace falta, esperar a que
+# levante y poner su pantalla delante. Quien atiende pacientes no tiene
+# por qué saber que ahí abajo hay una máquina virtual.
+#
+# Hasta ahora RedHornoma sabía CREAR la máquina (redhornoma-windows),
+# aligerarla (redhornoma-windows-agil) y abrir la de OTRA computadora
+# por la red (redhornoma-equipos). Faltaba lo más usado de todo: abrir
+# la de aquí.
+#
+# Uso:
+#   redhornoma-entrar                     en una ventana normal
+#   redhornoma-entrar --pantalla-completa
+#   redhornoma-entrar --kiosco            para el modo directo, sin escritorio
+#   redhornoma-entrar --maquina salud     cuando hay varias
+#   redhornoma-entrar --cual              solo dice cuál abriría, no abre
+#
+# No necesita sudo si el usuario está en el grupo «libvirt». Si no lo
+# está, se dice cómo arreglarlo en vez de fallar sin explicación.
+set -u
+
+# yad en Wayland avisa de un identificador X11 que ahí no existe. Por
+# XWayland la llamada es válida y no ensucia la terminal.
+export GDK_BACKEND=x11
+
+VIRSH="virsh -c qemu:///system"
+CONF=/etc/redhornoma
+RECUERDO="$CONF/maquina"          # cuál es LA máquina de los programas
+# Ventana normal y sin reconexión: son los dos ajustes que se probaron y
+# hubo que cambiar. Ver el porqué de cada uno donde se usan, más abajo.
+VM=""; PANTALLA_COMPLETA=0; RECONECTAR=0; SOLO_DECIR=0
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+ok(){  printf "   ${VE}●${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --maquina)            VM="${2:-}"; shift 2 ;;
+    --ventana)            PANTALLA_COMPLETA=0; shift ;;
+    --pantalla-completa)  PANTALLA_COMPLETA=1; shift ;;
+    --kiosco)             PANTALLA_COMPLETA=1; RECONECTAR=1; shift ;;
+    --cual)               SOLO_DECIR=1; shift ;;
+    -h|--help)            sed -n '2,23p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *)                    mal "no entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+# ── Avisar por donde se pueda ─────────────────────────────────────────
+# Esto se lanza desde un icono tanto como desde la terminal. Si hay
+# escritorio, un aviso en la pantalla; si no, texto. Callarse no es una
+# opción: el usuario hizo clic y espera algo.
+hay_pantalla(){ [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v yad >/dev/null 2>&1; }
+
+aviso(){  # titulo  texto  icono
+  if hay_pantalla; then
+    yad --class=redhornoma --borders=14 --center --width=520 \
+        --title="$1" --image="$3" --text="$2" --button="Entendido:0" \
+        >/dev/null 2>&1
+  else
+    printf '\n   %s\n\n' "$1"; printf '%s\n\n' "$2" | sed 's/<[^>]*>//g; s/^/      /'
+  fi
+}
+
+# ── ¿Se puede hablar con libvirt? ─────────────────────────────────────
+# Preguntar a la máquina, nunca suponer: si el permiso falta, se dice
+# exactamente qué escribir para arreglarlo, y hace falta cerrar sesión
+# para que el grupo nuevo cuente.
+command -v virsh >/dev/null 2>&1 || {
+  aviso "Falta la virtualización" \
+    "En esta computadora no está instalada la parte que ejecuta Windows.\n\nInstálala con:\n<b>sudo apt install redhornoma-virtualizacion</b>" \
+    "dialog-error"; exit 1; }
+
+if ! $VIRSH list --all --name >/dev/null 2>&1; then
+  aviso "Sin permiso para las máquinas virtuales" \
+    "Tu usuario <b>$(id -un)</b> no puede manejar las máquinas de este equipo.\n\nSe arregla una sola vez:\n<b>sudo usermod -aG libvirt $(id -un)</b>\n\nDespués hay que <b>cerrar sesión y volver a entrar</b>, o el permiso nuevo no cuenta." \
+    "dialog-password"
+  exit 1
+fi
+
+# ── Qué máquina abrir ─────────────────────────────────────────────────
+# Tres fuentes, por orden de confianza: lo que pidió quien llama, lo que
+# se recordó de la última vez, y lo que haya. Lo recordado se comprueba
+# siempre: una máquina puede haberse borrado o renombrado.
+definidas(){ $VIRSH list --all --name 2>/dev/null | grep -v '^$'; }
+existe(){    definidas | grep -qx "$1"; }
+encendida(){ $VIRSH domstate "$1" 2>/dev/null | grep -q '^running'; }
+
+TODAS=$(definidas)
+[ -z "$TODAS" ] && {
+  aviso "Todavía no hay Windows en esta computadora" \
+    "No hay ninguna máquina de Windows creada aquí.\n\nPara crearla, en una terminal:\n<b>sudo redhornoma-windows</b>\n\nY si ya tienes un disco de Windows de antes:\n<b>sudo redhornoma-importar</b>" \
+    "dialog-information"; exit 1; }
+
+if [ -n "$VM" ]; then
+  existe "$VM" || { mal "no hay ninguna máquina llamada «$VM»"
+                    echo "$TODAS" | sed 's/^/         /'; exit 1; }
+else
+  RECORDADA=$(cat "$RECUERDO" 2>/dev/null)
+  if [ -n "$RECORDADA" ] && existe "$RECORDADA"; then
+    VM="$RECORDADA"
+  elif [ "$(echo "$TODAS" | grep -c .)" = "1" ]; then
+    VM="$TODAS"
+  else
+    # Varias y ninguna recordada. Preferir la que ya esté en marcha:
+    # casi siempre es la buena, y evita preguntar por gusto.
+    ENCENDIDAS=$($VIRSH list --name 2>/dev/null | grep -v '^$')
+    if [ "$(echo "$ENCENDIDAS" | grep -c .)" = "1" ]; then
+      VM="$ENCENDIDAS"
+    elif hay_pantalla; then
+      VM=$(echo "$TODAS" | yad --class=redhornoma --borders=14 --center \
+             --width=420 --height=320 --title="¿Cuál de los Windows?" \
+             --text="Hay más de una máquina en esta computadora.\nElige la de los programas de salud:" \
+             --list --column="Máquina" --separator="" 2>/dev/null)
+      [ -z "$VM" ] && exit 0
+    else
+      mal "hay varias máquinas — elige una con --maquina"
+      echo "$TODAS" | sed 's/^/         /'; exit 1
+    fi
+  fi
+fi
+
+if [ "$SOLO_DECIR" = "1" ]; then
+  printf '%s\t%s\n' "$VM" "$(encendida "$VM" && echo encendida || echo apagada)"
+  exit 0
+fi
+
+# Recordar la elección, para que la próxima vez sea directa. Si no hay
+# permiso de escritura en /etc no pasa nada: solo se preguntará otra vez.
+if [ "$(cat "$RECUERDO" 2>/dev/null)" != "$VM" ]; then
+  mkdir -p "$CONF" 2>/dev/null && printf '%s\n' "$VM" > "$RECUERDO" 2>/dev/null
+fi
+
+# ── Encenderla si está apagada ────────────────────────────────────────
+if ! encendida "$VM"; then
+  printf "   ${AZ}Encendiendo «%s»…${V}\n" "$VM"
+  if ! ARRANQUE=$($VIRSH start "$VM" 2>&1); then
+    aviso "No se pudo encender Windows" \
+      "La máquina <b>$VM</b> no arrancó.\n\nLo que dijo el sistema:\n<tt>$(echo "$ARRANQUE" | tail -3 | sed 's/&/\&amp;/g; s/</\&lt;/g')</tt>" \
+      "dialog-error"
+    exit 1
+  fi
+  ok "encendida"
+fi
+
+# ── Abrir la pantalla ─────────────────────────────────────────────────
+# --wait  espera a que la pantalla exista, en vez de fallar si aún no está.
+#
+# --reconnect NO se pone por defecto, y esto se aprendió probando. Sirve
+# para volver a entrar cuando Windows se reinicia solo al actualizarse,
+# pero virt-viewer no distingue un reinicio de un apagado: si el usuario
+# apaga Windows desde Inicio, la ventana se queda en gris con un
+# «Esperando a que el dominio de huéspedes reinicie» eterno.
+#
+# Entre una ventana que se cierra —y se vuelve a abrir con un clic— y una
+# pantalla gris que no explica nada, gana la primera. Solo el modo kiosco
+# lo activa, porque allí no hay escritorio detrás donde volver a pulsar.
+#
+# Tampoco se abre a pantalla completa por defecto. En pantalla completa
+# virt-viewer esconde su barra y solo aparece si llevas el ratón al borde
+# de arriba y esperas: nadie en un centro de salud descubre eso, y se
+# queda encerrado dentro de Windows sin ver cómo salir.
+command -v virt-viewer >/dev/null 2>&1 || {
+  aviso "Falta el visor" \
+    "No está instalado <b>virt-viewer</b>, que es lo que enseña la pantalla de Windows.\n\n<b>sudo apt install virt-viewer</b>" \
+    "dialog-error"; exit 1; }
+
+ARGS=(--connect qemu:///system --wait)
+[ "$RECONECTAR" = "1" ]        && ARGS+=(--reconnect)
+[ "$PANTALLA_COMPLETA" = "1" ] && ARGS+=(--full-screen)
+
+ok "abriendo la pantalla de «$VM»"
+exec virt-viewer "${ARGS[@]}" "$VM"

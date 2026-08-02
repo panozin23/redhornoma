@@ -1,0 +1,458 @@
+#!/bin/bash
+# redhornoma-panel — Todo lo importante del centro, en una sola ventana.
+#
+# Quien lleva un centro de salud no es informático y no tiene por qué
+# serlo. Necesita saber en tres segundos si algo va mal, y poder hacer lo
+# de cada día sin escribir un comando.
+#
+# Por eso aquí no hay números que haya que interpretar: verde, amarillo y
+# rojo. El número va detrás, para quien quiera mirarlo.
+#
+# Cada dato se le pregunta a la máquina en el momento. Ninguno se supone
+# ni se guarda en caché: un panel que enseña algo viejo es peor que no
+# tener panel, porque da confianza falsa. Cuando un dato no se puede
+# saber se dice «sin dato» en gris, nunca se inventa un verde.
+#
+# Uso:
+#   redhornoma-panel              la ventana
+#   redhornoma-panel --texto      lo mismo en la terminal, sin escritorio
+#   redhornoma-panel --ayuda      empaqueta el informe técnico para enviar
+set -u
+
+# yad en Wayland avisa de un identificador X11 que ahí no existe. Por
+# XWayland la llamada es válida y no ensucia la terminal.
+export GDK_BACKEND=x11
+
+SELF="$(readlink -f "$0")"
+CONF=/etc/redhornoma
+BASE=/var/lib/redhornoma
+RESPALDOS="$BASE/respaldos"
+VIRSH="virsh -c qemu:///system"
+
+MODO=ventana
+case "${1:-}" in
+  --texto)  MODO=texto ;;
+  --ayuda)  MODO=ayuda ;;
+  -h|--help) sed -n '2,19p' "$0" | sed 's/^# \?//'; exit 0 ;;
+  "")       ;;
+  *)        echo "no entiendo «$1»"; exit 1 ;;
+esac
+
+for c in /usr/share/pixmaps/redhornoma.png /usr/share/pixmaps/redhornoma-96.png; do
+  [ -f "$c" ] && { LOGO="$c"; break; }
+done
+LOGO="${LOGO:-utilities-system-monitor}"
+GTKRC=""
+[ -f /usr/share/redhornoma/centro.css ] && GTKRC="--gtkrc=/usr/share/redhornoma/centro.css"
+
+leer_conf(){ grep -oP "^$1=\K.*" "$CONF/centro.conf" 2>/dev/null | head -1; }
+CENTRO=$(leer_conf centro);  CENTRO="${CENTRO:-sin centro definido}"
+PAPEL=$(cat "$CONF/papel" 2>/dev/null || leer_conf papel)
+NOMBRE=$(cat /proc/sys/kernel/hostname 2>/dev/null || uname -n)
+
+# Pango se traga el texto entero si aparece un & o un < sin escapar, y la
+# ventana sale en blanco sin decir por qué. Todo valor que venga de fuera
+# pasa por aquí.
+esc(){ printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+# Rellenar hasta un ancho, contando LETRAS y no bytes. «printf %-24s» mide
+# en bytes: cada tilde ocupa dos y la columna se desplaza. Con «Último
+# respaldo» se veía a simple vista.
+pad(){  # texto ancho
+  local s="$1" i=$(( $2 - ${#1} ))
+  printf '%s' "$s"
+  while [ "$i" -gt 0 ]; do printf ' '; i=$((i-1)); done
+}
+
+# ── Las filas del tablero ─────────────────────────────────────────────
+# Cada detector deja una línea en FILAS con tres campos —color, etiqueta y
+# valor— y, si hay algo que corregir, una frase en PENDIENTES.
+#
+# El separador es el carácter 31 de ASCII, «separador de unidad», que
+# existe justo para esto y jamás aparece dentro de un texto. Se probó
+# antes con «⋮» y no valía: cut necesita un separador de UN byte, y ese
+# ocupa tres.
+SEP=$'\037'
+FILAS=(); PENDIENTES=()
+fila(){ FILAS+=("$1$SEP$2$SEP$3"); }
+pendiente(){ PENDIENTES+=("$1"); }
+
+# Cuánto hace, dicho como lo diría una persona
+hace(){  # segundos
+  local s=$1
+  if   [ "$s" -lt 3600 ]   ; then echo "hace $((s/60)) minutos"
+  elif [ "$s" -lt 86400 ]  ; then echo "hace $((s/3600)) horas"
+  elif [ "$s" -lt 172800 ] ; then echo "ayer"
+  else echo "hace $((s/86400)) días"; fi
+}
+
+# ── 1 · Qué es esta computadora y cuánto lleva en pie ─────────────────
+detectar_equipo(){
+  local seg desde
+  seg=$(cut -d. -f1 /proc/uptime 2>/dev/null); seg=${seg:-0}
+  if   [ "$seg" -lt 3600 ]  ; then desde="$((seg/60)) minutos"
+  elif [ "$seg" -lt 86400 ] ; then desde="$((seg/3600)) horas"
+  else desde="$((seg/86400)) días"; fi
+
+  case "${PAPEL:-}" in
+    servidor)       fila 🟢 "Servidor"        "en marcha desde hace $desde" ;;
+    puesto)         fila 🟢 "Este puesto"     "en marcha desde hace $desde" ;;
+    administracion) fila 🟢 "Administración"  "en marcha desde hace $desde" ;;
+    *)              fila 🟡 "Esta computadora" "sin papel definido todavía"
+                    pendiente "Definir qué es esta computadora:  sudo redhornoma-papel --configurar" ;;
+  esac
+}
+
+# ── 2 · Los programas de salud ────────────────────────────────────────
+# Se informa de si la máquina de Windows está en marcha, no de si SALMI
+# está abierto dentro. Saberlo exigiría preguntarle al agente invitado en
+# cada refresco, y un panel no debe tardar. Prometer menos y cumplirlo.
+detectar_programas(){
+  command -v virsh >/dev/null 2>&1 || {
+    fila ⚪ "Programas de salud" "sin dato — falta la virtualización"; return; }
+  if ! $VIRSH list --all --name >/dev/null 2>&1; then
+    fila ⚪ "Programas de salud" "sin dato — sin permiso de libvirt"
+    pendiente "Dar permiso a tu usuario:  sudo usermod -aG libvirt $(id -un)  (y volver a entrar)"
+    return
+  fi
+
+  local todas vm
+  todas=$($VIRSH list --all --name 2>/dev/null | grep -v '^$')
+  if [ -z "$todas" ]; then
+    fila 🟡 "Programas de salud" "no hay ningún Windows en esta computadora"
+    [ "${PAPEL:-}" = "servidor" ] && \
+      pendiente "Crear la máquina de Windows:  sudo redhornoma-windows"
+    return
+  fi
+
+  vm=$(cat "$CONF/maquina" 2>/dev/null)
+  echo "$todas" | grep -qx "${vm:-}" || vm=$(echo "$todas" | head -1)
+
+  if $VIRSH domstate "$vm" 2>/dev/null | grep -q '^running'; then
+    fila 🟢 "Programas de salud" "«$vm» en marcha"
+  else
+    fila 🟡 "Programas de salud" "«$vm» apagado — se enciende al entrar"
+  fi
+}
+
+# ── 3 · Las demás computadoras del centro ─────────────────────────────
+# Se descubren solas por la red. La lista de las conocidas la mantiene
+# redhornoma-equipos; sirve para saber si falta alguna, que es la
+# pregunta útil: no «cuántas hay» sino «cuál no está».
+detectar_puestos(){
+  command -v avahi-browse >/dev/null 2>&1 || {
+    fila ⚪ "Otras computadoras" "sin dato — falta avahi-utils"; return; }
+
+  # Si el servicio de anuncios no está en marcha, NO se ven cero máquinas:
+  # es que no se puede mirar. Confundir las dos cosas haría que el panel
+  # avisara de puestos caídos que en realidad están trabajando.
+  local salida vistas conocidas roster
+  if ! salida=$(timeout 6 avahi-browse -prt _redhornoma._tcp 2>/dev/null); then
+    fila ⚪ "Otras computadoras" "sin dato — el anuncio en red no está activo"
+    pendiente "Encender el anuncio en la red:  sudo systemctl enable --now avahi-daemon"
+    return
+  fi
+
+  # Descontar esta misma máquina por su nombre, no restando uno a ciegas:
+  # si esta no se anuncia, restar uno se comería a un puesto de verdad.
+  vistas=$(echo "$salida" \
+           | awk -F';' -v yo="$NOMBRE" '$1=="=" && $3=="IPv4" && $7!=yo {print $7}' \
+           | sort -u | grep -c .)
+  roster="$HOME/.config/redhornoma/equipos.conf"
+  conocidas=$(grep -c . "$roster" 2>/dev/null || echo 0)
+
+  if [ "$conocidas" -gt 0 ] && [ "$vistas" -lt "$conocidas" ]; then
+    fila 🟡 "Otras computadoras" "se ven $vistas de $conocidas — falta alguna"
+    pendiente "Mirar cuál no responde:  redhornoma-equipos"
+  elif [ "$vistas" -gt 0 ]; then
+    fila 🟢 "Otras computadoras" "$vistas conectadas"
+  else
+    fila ⚪ "Otras computadoras" "ninguna a la vista"
+  fi
+}
+
+# ── 4 · El respaldo. Lo más importante del panel ──────────────────────
+detectar_respaldo(){
+  local ult seg
+  ult=$(find "$RESPALDOS" -maxdepth 1 -type d -name '20*' 2>/dev/null | sort | tail -1)
+  if [ -z "$ult" ]; then
+    fila 🔴 "Último respaldo" "NUNCA se ha hecho ninguno"
+    pendiente "Hacer el primer respaldo hoy:  sudo redhornoma-respaldo --ahora"
+    return
+  fi
+
+  seg=$(( $(date +%s) - $(stat -c %Y "$ult" 2>/dev/null || echo 0) ))
+  if [ -f "$ult/CORRECTO" ]; then
+    if   [ "$seg" -lt 129600 ]; then fila 🟢 "Último respaldo" "$(hace $seg) ✅ verificado"
+    elif [ "$seg" -lt 345600 ]; then fila 🟡 "Último respaldo" "$(hace $seg) ✅ verificado"
+                                     pendiente "Van más de dos días sin copia:  sudo redhornoma-respaldo --ahora"
+    else fila 🔴 "Último respaldo" "$(hace $seg) — demasiado tiempo"
+         pendiente "URGENTE, respaldar hoy mismo:  sudo redhornoma-respaldo --ahora"; fi
+  else
+    fila 🟡 "Último respaldo" "$(hace $seg) — sin verificar"
+    pendiente "Comprobar que la copia sirve:  sudo redhornoma-respaldo --verificar"
+  fi
+}
+
+# ── 5 · ¿Salió alguna copia de esta computadora? ──────────────────────
+# Una copia que vive en el mismo disco no protege de un robo ni de un
+# incendio. Esta fila responde a «si esta computadora desaparece hoy,
+# ¿se pierde la información?».
+detectar_copia_fuera(){
+  local ultimo=0 t
+  # El respaldo anota en su registro cuántas copias salieron
+  if [ -f "$BASE/respaldo.log" ]; then
+    t=$(grep -E 'OK:.*, [1-9][0-9]* copias fuera' "$BASE/respaldo.log" 2>/dev/null \
+        | tail -1 | cut -f1)
+    [ -n "$t" ] && ultimo=$(date -d "$t" +%s 2>/dev/null || echo 0)
+  fi
+  # Y la nube deja su propia marca
+  if [ -f "$BASE/ultima-subida-nube" ]; then
+    t=$(stat -c %Y "$BASE/ultima-subida-nube" 2>/dev/null || echo 0)
+    [ "$t" -gt "$ultimo" ] && ultimo=$t
+  fi
+
+  if [ "$ultimo" = "0" ]; then
+    fila 🔴 "Copia fuera del equipo" "ninguna — todo está en esta máquina"
+    pendiente "Enchufar un disco externo, o configurar la nube en $BASE/respaldo.conf"
+    return
+  fi
+
+  local seg=$(( $(date +%s) - ultimo ))
+  if   [ "$seg" -lt 604800 ] ; then fila 🟢 "Copia fuera del equipo" "$(hace $seg)"
+  elif [ "$seg" -lt 1209600 ]; then fila 🟡 "Copia fuera del equipo" "$(hace $seg)"
+                                    pendiente "Sacar una copia fuera: enchufa el disco externo y respalda"
+  else fila 🔴 "Copia fuera del equipo" "$(hace $seg) — demasiado"
+       pendiente "Sacar una copia fuera: enchufa el disco externo y respalda"; fi
+}
+
+# ── 6 · Espacio, dicho en meses y no en porcentajes ───────────────────
+# «42 GB» no le dice nada a nadie. «Queda para tres meses» sí. La cuenta
+# sale de lo que han crecido los respaldos de verdad en este equipo, no
+# de una estimación de manual.
+detectar_espacio(){
+  local libre_kb libre_gb usado n meses="" viejo nuevo dias bytes_dia total_kb
+  libre_kb=$(df -Pk "$BASE" 2>/dev/null | awk 'NR==2{print $4}')
+  usado=$(df -Pk "$BASE" 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+  [ -z "${libre_kb:-}" ] && { fila ⚪ "Espacio libre" "sin dato"; return; }
+  libre_gb=$(( libre_kb / 1048576 ))
+
+  n=$(find "$RESPALDOS" -maxdepth 1 -type d -name '20*' 2>/dev/null | wc -l)
+  if [ "$n" -ge 2 ]; then
+    viejo=$(find "$RESPALDOS" -maxdepth 1 -type d -name '20*' -printf '%T@\n' 2>/dev/null | sort -n | head -1 | cut -d. -f1)
+    nuevo=$(find "$RESPALDOS" -maxdepth 1 -type d -name '20*' -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)
+    dias=$(( (nuevo - viejo) / 86400 )); [ "$dias" -lt 1 ] && dias=1
+    total_kb=$(du -sk "$RESPALDOS" 2>/dev/null | cut -f1)
+    bytes_dia=$(( total_kb / dias ))
+    [ "$bytes_dia" -gt 0 ] && meses=$(( libre_kb / bytes_dia / 30 ))
+  fi
+
+  # Decir «queda para 1326 meses» no informa, hace ruido. Pasados dos años
+  # la cuenta deja de ser útil y basta con decir que sobra sitio.
+  local texto="$libre_gb GB"
+  if [ -n "$meses" ]; then
+    if   [ "$meses" -eq 0 ]  ; then texto="$libre_gb GB — menos de un mes"
+    elif [ "$meses" -le 24 ] ; then texto="$libre_gb GB — queda para $meses meses"
+    else                            texto="$libre_gb GB — de sobra"
+    fi
+  fi
+
+  if   [ "${usado:-0}" -ge 92 ]; then fila 🔴 "Espacio libre" "$texto"
+                                      pendiente "Disco casi lleno. Los respaldos ya se podan solos, así que mira qué más ocupa:  du -sh /var/* /home/* | sort -h | tail"
+  elif [ "${usado:-0}" -ge 80 ]; then fila 🟡 "Espacio libre" "$texto"
+  else fila 🟢 "Espacio libre" "$texto"; fi
+}
+
+# ── 7 · Corriente y batería ───────────────────────────────────────────
+# En un centro con cortes de luz, un servidor sin batería es información
+# perdida a medio escribir. Que no haya batería no es un fallo del
+# equipo, pero sí algo que alguien debería saber.
+detectar_energia(){
+  local bat cap ac="" enchufado=""
+  bat=$(ls -d /sys/class/power_supply/BAT* 2>/dev/null | head -1)
+  for a in /sys/class/power_supply/A{C,DP}*; do
+    [ -r "$a/online" ] && { ac=$(cat "$a/online" 2>/dev/null); break; }
+  done
+  [ "$ac" = "1" ] && enchufado="conectado a la corriente"
+  [ "$ac" = "0" ] && enchufado="SIN corriente, tirando de batería"
+
+  if [ -z "$bat" ]; then
+    fila 🟡 "Corriente" "${enchufado:-sin batería ni UPS} — un corte apaga de golpe"
+    [ "${PAPEL:-}" = "servidor" ] && \
+      pendiente "El servidor no tiene batería: un corte de luz puede dañar la base de datos"
+    return
+  fi
+
+  cap=$(cat "$bat/capacity" 2>/dev/null); cap=${cap:-?}
+  if   [ "$ac" = "0" ] && [ "${cap%\?}" != "" ] && [ "$cap" -lt 25 ] 2>/dev/null; then
+    fila 🔴 "Batería" "$cap% — $enchufado"
+  elif [ "$ac" = "0" ]; then fila 🟡 "Batería" "$cap% — $enchufado"
+  else fila 🟢 "Batería" "$cap% — ${enchufado:-conectada}"; fi
+}
+
+# ── 8 · Impresora ─────────────────────────────────────────────────────
+detectar_impresora(){
+  command -v lpstat >/dev/null 2>&1 || {
+    fila ⚪ "Impresora" "sin dato — falta el sistema de impresión"; return; }
+  local n
+  n=$(lpstat -a 2>/dev/null | grep -c .)
+  if [ "${n:-0}" -gt 0 ]; then
+    fila 🟢 "Impresora" "$n lista(s)"
+  else
+    fila 🟡 "Impresora" "ninguna configurada"
+  fi
+}
+
+recoger_todo(){
+  FILAS=(); PENDIENTES=()
+  detectar_equipo
+  detectar_programas
+  detectar_puestos
+  detectar_respaldo
+  detectar_copia_fuera
+  detectar_espacio
+  detectar_energia
+  detectar_impresora
+}
+
+# ── Pedir ayuda ───────────────────────────────────────────────────────
+# Empaqueta lo que hace falta para diagnosticar sin que nadie tenga que
+# explicar qué pasa por teléfono. No se envía solo: se deja un archivo y
+# se dice dónde está, para que el centro decida a quién se lo manda.
+pedir_ayuda(){
+  local destino="$HOME/informe-redhornoma-$(date '+%Y-%m-%d_%H%M').txt"
+  recoger_todo
+  {
+    echo "INFORME DE RedHornoma"
+    echo "════════════════════════════════════════════"
+    echo "Centro:       $CENTRO"
+    echo "Computadora:  $NOMBRE   (papel: ${PAPEL:-sin definir})"
+    echo "Fecha:        $(date '+%Y-%m-%d %H:%M')"
+    echo
+    echo "ESTADO"
+    echo "────────────────────────────────────────────"
+    local f col eti val
+    for f in "${FILAS[@]}"; do
+      IFS="$SEP" read -r col eti val <<< "$f"
+      printf '  %s  %s %s\n' "$col" "$(pad "$eti" 24)" "$val"
+    done
+    if [ "${#PENDIENTES[@]}" -gt 0 ]; then
+      echo; echo "LO QUE HABRÍA QUE HACER"
+      echo "────────────────────────────────────────────"
+      printf '  · %s\n' "${PENDIENTES[@]}"
+    fi
+    echo; echo "ÚLTIMOS RESPALDOS"
+    echo "────────────────────────────────────────────"
+    tail -25 "$BASE/respaldo.log" 2>/dev/null || echo "  (sin registro)"
+    echo; echo "LA MÁQUINA POR DENTRO"
+    echo "────────────────────────────────────────────"
+    command -v redhornoma-informe >/dev/null 2>&1 \
+      && redhornoma-informe --sin-color 2>/dev/null \
+      || echo "  (redhornoma-informe no está instalado)"
+  } > "$destino" 2>&1
+
+  if [ "$MODO" = ventana ] && command -v yad >/dev/null 2>&1; then
+    yad --class=redhornomapanel $GTKRC --borders=14 --center --width=620 \
+      --title="Informe listo para enviar" --window-icon="$LOGO" \
+      --image="dialog-information" --image-on-top \
+      --text="El informe de esta computadora está guardado en:\n\n<b>$(esc "$destino")</b>\n\nAdjúntalo al correo o al mensaje cuando pidas ayuda.\nNo contiene datos de pacientes: solo el estado del sistema." \
+      --button="Abrir la carpeta:2" --button="Entendido:0" >/dev/null 2>&1
+    [ "$?" = "2" ] && setsid xdg-open "$(dirname "$destino")" >/dev/null 2>&1 &
+  else
+    echo "   Informe guardado en: $destino"
+  fi
+}
+
+# ── Dibujar ───────────────────────────────────────────────────────────
+tablero_texto(){
+  local f col eti val
+  for f in "${FILAS[@]}"; do
+    IFS="$SEP" read -r col eti val <<< "$f"
+    printf '   %s  %s %s\n' "$col" "$(pad "$eti" 24)" "$val"
+  done
+}
+
+tablero_pango(){
+  local f col eti val
+  for f in "${FILAS[@]}"; do
+    IFS="$SEP" read -r col eti val <<< "$f"
+    printf '%s  <b>%s</b> %s\n' "$col" "$(esc "$(pad "$eti" 22)")" "$(esc "$val")"
+  done
+}
+
+# Una sola ventana: cerrar la anterior antes de abrir otra, o al pulsar
+# «Actualizar» varias veces se apilan y confunden.
+solo_una(){ pkill -f "class=redhornomapanel" 2>/dev/null; sleep 0.15; }
+
+case "$MODO" in
+  ayuda) pedir_ayuda; exit 0 ;;
+  texto)
+    recoger_todo
+    printf '\n   \033[1;34mRedHornoma — %s\033[0m\n' "$CENTRO"
+    printf '   %s · %s\n\n' "$NOMBRE" "${PAPEL:-sin papel}"
+    tablero_texto
+    if [ "${#PENDIENTES[@]}" -gt 0 ]; then
+      printf '\n   \033[1;33mLo que habría que hacer\033[0m\n'
+      printf '      · %s\n' "${PENDIENTES[@]}"
+    fi
+    echo; exit 0 ;;
+esac
+
+command -v yad >/dev/null 2>&1 || { MODO=texto; exec "$SELF" --texto; }
+
+recoger_todo
+solo_una
+
+AVISO=""
+if [ "${#PENDIENTES[@]}" -gt 0 ]; then
+  AVISO="\n<b>Lo que habría que hacer</b>\n"
+  for p in "${PENDIENTES[@]}"; do AVISO="$AVISO   ·  $(esc "$p")\n"; done
+fi
+
+# Los botones se ponen solo si su herramienta está instalada: un botón
+# que no hace nada es peor que un botón que falta.
+#
+# Sin emojis en las etiquetas. Se probaron y esta fuente no tiene la
+# mitad: el disquete salía con un cuadrito delante y el 🆘 como «? SOS».
+# Cada botón ya lleva su icono del tema, que sí está siempre.
+CAMPOS=()
+if command -v redhornoma-entrar >/dev/null 2>&1; then
+  CAMPOS+=(--field="Entrar a los programas de salud!distributor-logo-windows:fbtn"
+           "bash -c 'redhornoma-entrar &'")
+fi
+if command -v redhornoma-respaldo >/dev/null 2>&1; then
+  CAMPOS+=(--field="Respaldar ahora!document-save:fbtn"
+           "bash -c 'x-terminal-emulator -e bash -c \"sudo redhornoma-respaldo --ahora; echo; read -p \\\"Pulsa Enter para cerrar\\\"\" &'")
+fi
+if command -v redhornoma-equipos >/dev/null 2>&1; then
+  CAMPOS+=(--field="Ver las otras computadoras!network-workgroup:fbtn"
+           "bash -c 'redhornoma-equipos &'")
+fi
+CAMPOS+=(--field="Pedir ayuda — preparar el informe!help-contents:fbtn"
+         "bash -c '$SELF --ayuda &'")
+
+# No se le fija el alto: yad mide su propio contenido mejor que cualquier
+# cuenta que hagamos aquí. Se intentó calcularlo a partir de las filas y
+# los botones, y siempre sobraba un palmo de gris debajo.
+#
+# Solo se pone un tope cuando el contenido no cabría en la pantalla, que
+# es el único caso donde yad se equivoca: crecería más allá del borde y
+# el botón de cerrar quedaría fuera.
+BOTONES=$(( ${#CAMPOS[@]} / 2 ))
+ALTO_EST=$(( 200 + ${#FILAS[@]} * 26 + ${#PENDIENTES[@]} * 22 + ( (BOTONES + 1) / 2 ) * 56 ))
+PANTALLA=$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}' | cut -dx -f2); PANTALLA=${PANTALLA:-768}
+TOPE=$(( PANTALLA - 90 ))
+ARG_ALTO=()
+[ "$ALTO_EST" -gt "$TOPE" ] && ARG_ALTO=(--height=$TOPE)
+
+yad --class=redhornomapanel $GTKRC --borders=14 \
+  --title="RedHornoma — $CENTRO" --center --width=760 "${ARG_ALTO[@]}" \
+  --window-icon="$LOGO" --image="$LOGO" --image-on-top --align=left \
+  --text="<span size=\"x-large\"><b>$(esc "$CENTRO")</b></span>
+<i>$(esc "$NOMBRE") · ${PAPEL:-sin papel definido} · $(date '+%d/%m/%Y %H:%M')</i>
+
+<tt>$(tablero_pango)</tt>
+$(printf '%b' "$AVISO")" \
+  --form --columns=2 "${CAMPOS[@]}" \
+  --button="🔄   Actualizar:bash -c '$SELF &'" \
+  --button="Cerrar:1"

@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Programas de Salud
+GenericName=SALMI, SNIS y SOAPS
+Comment=Abre los programas del Ministerio en una ventana
+Exec=redhornoma-entrar
+Icon=/usr/share/pixmaps/redhornoma.png
+Terminal=false
+Categories=Office;System;
+Keywords=salmi;snis;soaps;windows;salud;programas;ministerio;pacientes;
+StartupNotify=true
+StartupWMClass=virt-viewer
+Actions=PantallaCompleta;
+
+[Desktop Action PantallaCompleta]
+Name=Abrir a pantalla completa
+Exec=redhornoma-entrar --pantalla-completa

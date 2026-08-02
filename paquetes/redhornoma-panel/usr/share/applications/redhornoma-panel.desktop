@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Centro de Salud
+GenericName=Panel de control de RedHornoma
+Comment=Estado del centro, respaldos y programas de salud en una sola ventana
+Exec=redhornoma-panel
+Icon=/usr/share/pixmaps/redhornoma.png
+Terminal=false
+Categories=System;Monitor;
+Keywords=redhornoma;panel;estado;respaldo;salmi;snis;soaps;salud;servidor;
+StartupNotify=true
+StartupWMClass=redhornomapanel
