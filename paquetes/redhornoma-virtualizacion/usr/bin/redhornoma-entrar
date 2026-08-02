@@ -15,7 +15,7 @@
 #   redhornoma-entrar                     en una ventana normal
 #   redhornoma-entrar --pantalla-completa
 #   redhornoma-entrar --kiosco            para el modo directo, sin escritorio
-#   redhornoma-entrar --maquina salud     cuando hay varias
+#   redhornoma-entrar --maquina salud-servidor     cuando hay varias
 #   redhornoma-entrar --cual              solo dice cuál abriría, no abre
 #
 # No necesita sudo si el usuario está en el grupo «libvirt». Si no lo

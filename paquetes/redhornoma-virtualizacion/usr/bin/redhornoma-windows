@@ -11,7 +11,7 @@
 #
 # Uso:
 #   sudo redhornoma-windows                    asistente, paso a paso
-#   sudo redhornoma-windows --version 11 --iso /ruta/Win11.iso --nombre salud
+#   sudo redhornoma-windows --version 11 --iso /ruta/Win11.iso --nombre salud-servidor
 #
 # Qué hace:     crea el disco virtual y DEFINE la máquina.
 # Qué NO hace:  no la enciende, no instala Windows, no toca tus particiones,

@@ -12,7 +12,7 @@
 # Uso:
 #   redhornoma-windows-agil                 mira e informa
 #   sudo redhornoma-windows-agil --aplicar
-#   sudo redhornoma-windows-agil --aplicar --maquina salud
+#   sudo redhornoma-windows-agil --aplicar --maquina salud-servidor
 #
 # Todo es reversible: al final se explica cómo deshacerlo.
 set -u

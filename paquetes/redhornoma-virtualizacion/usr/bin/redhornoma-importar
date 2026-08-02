@@ -15,7 +15,7 @@
 # Uso:
 #   sudo redhornoma-importar                     busca discos huérfanos e informa
 #   sudo redhornoma-importar --mirar DISCO        examina uno, sin tocar nada
-#   sudo redhornoma-importar --disco DISCO --nombre salud
+#   sudo redhornoma-importar --disco DISCO --nombre salud-servidor
 #
 # Mirar NO modifica nada: el disco se abre en modo solo lectura.
 set -u

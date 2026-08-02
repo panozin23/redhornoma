@@ -26,6 +26,26 @@ y todos escriben en ella.
 Los permisos los distingue **el usuario con el que cada uno entra en SALMI**,
 no la máquina. SALMI trae su propia lista de usuarios.
 
+### Cómo se llama cada máquina virtual
+
+```
+salud-servidor    la que guarda la base de datos
+salud-puesto      un consultorio metiendo información
+```
+
+Parece un detalle y no lo es. Durante un tiempo las tres máquinas del
+proyecto se llamaron `salud`, y entonces esto:
+
+```bash
+sudo virsh shutdown --mode agent salud
+```
+
+**apaga una máquina distinta según en qué computadora lo escribas.** Con
+cinco consultorios, es apagar el servidor creyendo que apagas un puesto. Ya
+provocó un respaldo hecho contra la máquina equivocada el 2026-08-01.
+
+`redhornoma-windows` propone el nombre correcto solo. Acéptalo.
+
 ### Lo que hay que asumir
 
 Si se apaga el servidor, **nadie puede trabajar**. Es así por diseño, no un
@@ -46,9 +66,9 @@ en puente para que los demás lo vean.
 **Requiere apagar ese Windows primero:**
 
 ```bash
-sudo virsh shutdown --mode agent salud
+sudo virsh shutdown --mode agent salud-servidor
 sudo redhornoma-papel --configurar --papel servidor
-sudo virsh start salud
+sudo virsh start salud-servidor
 ```
 
 > `--mode agent` no es un detalle: si Windows tiene la pantalla apagada por
