@@ -1,0 +1,21 @@
+# Que la pantalla no se bloquee sola.
+#
+# El 2026-08-02, instalando RedHornoma en un PC de escritorio, la sesión en
+# vivo se bloqueó por inactividad mientras el instalador trabajaba. Al volver
+# pedía una contraseña que nadie había puesto —la del usuario en vivo— y no
+# había forma de entrar. Hubo que apagar con el botón a mitad de instalación.
+#
+# En un centro de salud pasa lo mismo con otra cara: alguien deja el equipo,
+# se bloquea, y quien vuelve no sabe la contraseña porque la puso otra persona
+# hace meses. Una pantalla bloqueada que nadie puede abrir es peor problema
+# que una pantalla desbloqueada en una sala cerrada.
+#
+# La pantalla SÍ se puede bloquear a mano cuando alguien quiera. Lo que se
+# quita es que lo haga sola.
+#
+# Un centro que prefiera lo contrario cambia Autolock a true.
+
+[Daemon]
+Autolock=false
+LockOnResume=false
+LockGrace=300

@@ -26,6 +26,18 @@ mokutil
 efibootmgr
 os-prober
 
+# Arranque a la manera antigua, para máquinas sin UEFI.
+#
+# Sin esto, instalar en un equipo que arrancó en modo BIOS falla al final
+# con «grub-install --target=i386-pc devolvió el código de error 1», y el
+# instalador no dice qué hacer. Se descubrió el 2026-08-02 en un PC de
+# escritorio de 2011 — justo el tipo de máquina que hay en los centros.
+#
+# cursalialinux lo lleva desde siempre, y por eso instala en todas partes.
+# mtools hace falta para escribir la partición de arranque EFI.
+grub-pc-bin
+mtools
+
 # Discos y sistemas de archivos
 ntfs-3g
 exfatprogs

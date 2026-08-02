@@ -82,12 +82,18 @@ if lb config >/tmp/redhornoma-config.log 2>&1; then
 
   # Los ajustes propios se copian DESPUÉS de lb config, porque lb config
   # rehace config/hooks/ desde cero con los enlaces de live-build.
-  PROPIOS=$(find "$RECETA/hooks-propios" -name '*.hook.chroot' 2>/dev/null | wc -l)
-  if [ "$PROPIOS" -gt 0 ]; then
-    cp -f "$RECETA/hooks-propios"/*.hook.chroot "$RECETA/config/hooks/normal/"
-    chmod +x "$RECETA/config/hooks/normal"/*.hook.chroot 2>/dev/null
-    ok "$PROPIOS ajustes propios de RedHornoma añadidos"
-  fi
+  # Los de «chroot» tocan el sistema que se construye; los de «binary» tocan
+  # la imagen ya armada —el menú de arranque, por ejemplo—. Hacen falta los
+  # dos: el menú se escribe al final, cuando el chroot ya está cerrado.
+  PROPIOS=0
+  for tipo in chroot binary; do
+    N=$(find "$RECETA/hooks-propios" -name "*.hook.$tipo" 2>/dev/null | wc -l)
+    [ "$N" -gt 0 ] || continue
+    cp -f "$RECETA/hooks-propios"/*."hook.$tipo" "$RECETA/config/hooks/normal/"
+    chmod +x "$RECETA/config/hooks/normal"/*."hook.$tipo" 2>/dev/null
+    PROPIOS=$(( PROPIOS + N ))
+  done
+  [ "$PROPIOS" -gt 0 ] && ok "$PROPIOS ajustes propios de RedHornoma añadidos"
 
   # ── Las herramientas de RedHornoma van DENTRO de la ISO ─────────────
   # Una ISO que no trae RedHornoma es Debian con virtualización, y ya. Todo
