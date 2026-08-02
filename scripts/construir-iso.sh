@@ -115,6 +115,15 @@ if lb config >/tmp/redhornoma-config.log 2>&1; then
       rm -f "$RECETA/config/packages.chroot"/redhornoma-*.deb
       mkdir -p "$RECETA/config/packages.chroot"
       cp -f "$BASE/paquetes/deb"/*.deb "$RECETA/config/packages.chroot/" 2>/dev/null
+      # Devolver paquetes/deb/ a su dueño. Esto se ejecuta con sudo, así que
+      # lo que construya queda a nombre de root, y después el usuario no puede
+      # volver a construir sin sudo — un «permiso denegado» sin explicación en
+      # su propia carpeta. Pasó el 2026-08-02.
+      if [ -n "${SUDO_USER:-}" ]; then
+        chown -R "$SUDO_USER":"$(id -gn "$SUDO_USER" 2>/dev/null || echo "$SUDO_USER")" \
+              "$BASE/paquetes/deb" 2>/dev/null || true
+      fi
+
       N=$(ls "$RECETA/config/packages.chroot"/redhornoma-*.deb 2>/dev/null | wc -l)
       if [ "$N" -gt 0 ]; then
         ok "$N paquetes de RedHornoma irán dentro de la ISO"

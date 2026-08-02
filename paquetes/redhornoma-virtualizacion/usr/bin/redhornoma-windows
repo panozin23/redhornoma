@@ -530,8 +530,18 @@ ARGS=(
   --vcpus "$VCPUS"
   --cpu host-passthrough
   --machine "$MAQUINA"
-  --disk "path=$DISCO,format=qcow2,bus=virtio,cache=writeback,discard=unmap"
-  --disk "device=cdrom,path=$ISO_WIN,boot.order=1"
+  # EL DISCO ARRANCA PRIMERO, no el CD. Parece al revés y no lo es.
+  #
+  # Con el CD en primer lugar, Windows entra en bucle: copia los archivos,
+  # reinicia, vuelve a arrancar del CD y empieza la instalación otra vez.
+  # Quien instala tiene que adivinar que en el primer arranque hay que pulsar
+  # una tecla y en el segundo NO — y nadie lo adivina. Pasó el 2026-08-02.
+  #
+  # Con el disco primero no hay bucle: mientras está vacío el firmware cae
+  # al CD igual y la instalación arranca sola; en cuanto Windows escribe algo
+  # en el disco, sigue desde ahí. Y no hay que acordarse de nada.
+  --disk "path=$DISCO,format=qcow2,bus=virtio,cache=writeback,discard=unmap,boot.order=1"
+  --disk "device=cdrom,path=$ISO_WIN,boot.order=2"
   --disk "device=cdrom,path=$VIRTIO"
   --network network=default,model=virtio
   --controller "type=usb,model=$USB"
@@ -726,10 +736,21 @@ cat <<FIN
    Abre «Gestor de máquinas virtuales», haz doble clic en «$NOMBRE»
    para ver su pantalla, y ${AM}solo entonces${V} pulsa ▶.
 
-   Si la enciendes sin mirar, te pierdes el aviso «Press any key to boot
-   from CD», que dura cinco segundos, y no arrancará la instalación.
+   El disco está vacío, así que arrancará del CD sola. No hace falta
+   pulsar ninguna tecla, ni al principio ni en los reinicios: el disco
+   tiene la prioridad, y en cuanto Windows escriba en él seguirá de ahí.
 
-   ${AZ}Paso 2 · La pantalla de discos saldrá VACÍA${V}
+   ${AZ}Paso 2 · Si no quieres cuenta de Microsoft, quítale la red${V}
+
+   Con internet, Windows obliga a entrar con una cuenta de Microsoft. Sin
+   internet ofrece crear una cuenta local, que es lo que le conviene a un
+   equipo de un centro: no queda atado a la cuenta personal de nadie.
+
+   ${AZ}sudo virsh domif-setlink $NOMBRE \$(virsh -c qemu:///system domiflist $NOMBRE | awk '/virtio/{print \$5}') down --config${V}
+
+   Y cuando termines de instalar, lo mismo con ${AM}up${V} en vez de down.
+
+   ${AZ}Paso 3 · La pantalla de discos saldrá VACÍA${V}
 
    Es normal y le pasa a todo el mundo. Windows no reconoce el disco de
    una máquina virtual hasta que le das el controlador.
@@ -737,7 +758,10 @@ cat <<FIN
    Pulsa «Cargar controlador» y busca en el ${AM}segundo CD${V}:
 
       viostor\\$DRIVERS\\amd64     → aparecerá el disco de ${DISCO_GB} GB
-      NetKVM\\$DRIVERS\\amd64      → para la tarjeta de red
+
+   ${AM}Carga solo ese.${V} El de red (NetKVM\\$DRIVERS\\amd64) déjalo para
+   después de crear la cuenta local, o Windows despertará la tarjeta en la
+   pantalla equivocada y volverá a pedirte la cuenta de Microsoft.
 
    ${AZ}Paso 3 · Ya dentro de Windows, instala el agente${V}
 

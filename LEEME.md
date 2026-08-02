@@ -166,6 +166,9 @@ proyecto.
 El procedimiento completo, paso a paso y con los fallos que uno se encuentra,
 está en [documentacion/SALMI-EN-RED.md](documentacion/SALMI-EN-RED.md).
 
+Y cómo se pone el Windows que necesitan, con las cuatro trampas que uno se
+encuentra, en [documentacion/INSTALAR-WINDOWS.md](documentacion/INSTALAR-WINDOWS.md).
+
 `redhornoma-papel` define de una vez qué es cada computadora del centro
 —servidor, puesto o administración— y aplica todo lo que ese papel implica:
 nombre propio, anuncio en la red, SSH, y si es el servidor también la red en
