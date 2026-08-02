@@ -99,7 +99,11 @@ if lb config >/tmp/redhornoma-config.log 2>&1; then
   # nadie recuerda de qué versión salió.
   #
   # live-build instala solo lo que encuentre en config/packages.chroot/.
-  if [ -x "$BASE/scripts/construir-paquetes.sh" ]; then
+  # Se pregunta por -f y no por -x: se ejecuta con «bash», que no necesita
+  # permiso de ejecución, y git no siempre conserva ese permiso al clonar.
+  # Con -x, un clon recién hecho pararía la construcción diciendo que falta
+  # un archivo que está ahí delante.
+  if [ -f "$BASE/scripts/construir-paquetes.sh" ]; then
     printf "\n      Construyendo las herramientas de RedHornoma…\n"
     if bash "$BASE/scripts/construir-paquetes.sh" >/tmp/redhornoma-paquetes.log 2>&1; then
       rm -f "$RECETA/config/packages.chroot"/redhornoma-*.deb
