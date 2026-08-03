@@ -50,3 +50,42 @@
 
 # Los discos externos que estén enchufados se detectan solos: se crea
 # en ellos una carpeta B-SALMI26 y se copia ahí.
+
+# ══════════════════════════════════════════════════════════════════════
+#  CADA CUÁNTO Y CUÁNTAS SE GUARDAN
+# ══════════════════════════════════════════════════════════════════════
+
+# Cada cuántos días se hace una copia. El temporizador se dispara todos los
+# días; si no ha pasado este tiempo desde la última, la deja para mañana.
+#
+# Se hace así y no con un calendario «cada dos días» porque los centros
+# apagan las computadoras: un apagón el día que tocaba saltaría la copia
+# hasta cuatro días. Mirando la fecha de la última, se recupera al encender.
+#cada_dias=2
+
+# Cuántas copias recientes se guardan. Con cada_dias=2, treinta son dos meses.
+#diarios=30
+
+# Cuántas semanales. Si las recientes ya cubren dos meses, esto sobra.
+#semanales=0
+
+# Cuántas mensuales. Se guarda LA ÚLTIMA de cada mes, que en un centro de
+# salud es la del cierre: la del 30 o 31, la que corresponde al concentrado
+# que se entrega. Doce son un año y ocupan unos 100 MB.
+#mensuales=12
+
+# ══════════════════════════════════════════════════════════════════════
+#  LO QUE EL CENTRO DEJA A MANO
+# ══════════════════════════════════════════════════════════════════════
+
+# SALMI se saca solo: sus archivos están siempre en el mismo sitio. SOAPS
+# y SNIS no — sus copias las genera una persona desde el programa, una vez
+# al mes, y las deja en una carpeta compartida.
+#
+# Aquí se dice cuál es esa carpeta, para recogerlas también.
+#
+# Solo se copian archivos pequeños que sirven para recuperar: .wak, .sal,
+# .ves y los formularios de Excel. Los .bak de SQL Server se dejan estar:
+# pesan cientos de megas y no caben en la nube de un centro rural.
+#windows_extra=//192.168.1.103/COMPARTIDO
+#windows_extra_carpeta=RESPALDOS

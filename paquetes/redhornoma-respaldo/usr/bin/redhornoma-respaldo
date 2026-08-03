@@ -24,8 +24,18 @@ DESTINO="$BASE/respaldos"
 CONF="$BASE/respaldo.conf"
 REGISTRO="$BASE/respaldo.log"
 
-# Cuántos se conservan
+# Cuántos se conservan. Son los valores de partida: cada centro puede
+# cambiarlos en respaldo.conf, porque no todos trabajan igual.
 DIARIOS=7; SEMANALES=4; MENSUALES=12
+
+# Cada cuántos días se hace una copia. El temporizador se dispara todos los
+# días; si no ha pasado este tiempo desde la última, la deja para mañana.
+#
+# Se hace así, y no con un temporizador cada dos días, porque un centro
+# apaga las computadoras y se va: con «cada dos días» en el calendario, un
+# apagón el día que tocaba salta la copia entera hasta cuatro días después.
+# Mirando la fecha de la última, se recupera al primer encendido.
+CADA_DIAS=1
 
 VM=""; ACCION="mirar"
 while [ $# -gt 0 ]; do
@@ -84,6 +94,20 @@ WIN_RED=$(leer_conf windows_red)          # //192.168.1.50/SALMI
 WIN_CRED=$(leer_conf windows_credenciales) # archivo con usuario y clave
 WIN_CRED="${WIN_CRED:-/etc/redhornoma/windows.credenciales}"
 if [ -n "$WIN_RED" ]; then MODO=red; else MODO=virtual; fi
+
+# Cuántas copias guarda cada centro, y cada cuánto las hace.
+#
+# Estaba escrito a fuego en el código, y no todos los centros trabajan igual:
+# uno con pocos pacientes puede querer una copia diaria y un año de historia;
+# otro, una cada dos días. Ahora se pone en respaldo.conf y punto.
+#
+# Cada valor se acepta solo si es un número: una errata que dejara «diarios=»
+# vacío borraría todas las copias en el siguiente paso.
+num_conf(){ V_=$(leer_conf "$1"); case "$V_" in ''|*[!0-9]*) echo "$2";; *) echo "$V_";; esac; }
+DIARIOS=$(num_conf   diarios   "$DIARIOS")
+SEMANALES=$(num_conf semanales "$SEMANALES")
+MENSUALES=$(num_conf mensuales "$MENSUALES")
+CADA_DIAS=$(num_conf cada_dias "$CADA_DIAS")
 
 smb(){ smbclient "$WIN_RED" -A "$WIN_CRED" -t 30 -c "$*" 2>&1; }
 
@@ -792,6 +816,27 @@ fi
 titulo "RESPALDO DE LA INFORMACIÓN DEL CENTRO"
 [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
 
+# ── ¿Toca hoy? ────────────────────────────────────────────────────────
+# Solo cuando la copia la pide el temporizador. Si alguien escribe --ahora
+# es porque la quiere ahora, y ahí no se discute.
+#
+# El temporizador se dispara todos los días y aquí se mira la fecha de la
+# última copia. Así, si el centro estuvo cerrado el día que tocaba, la copia
+# se hace al encender y no se pierde el turno.
+if [ "$SILENCIO" = "1" ] && [ "${CADA_DIAS:-1}" -gt 1 ]; then
+  ULTIMA=$(find "$DESTINO" -maxdepth 1 -type d -name '20*' -printf '%f\n' 2>/dev/null | sort -r | head -1)
+  if [ -n "$ULTIMA" ]; then
+    SEG_ULT=$(date -d "$(echo "$ULTIMA" | cut -d_ -f1)" +%s 2>/dev/null || echo 0)
+    DIAS=$(( ( $(date +%s) - SEG_ULT ) / 86400 ))
+    if [ "$SEG_ULT" -gt 0 ] && [ "$DIAS" -lt "$CADA_DIAS" ]; then
+      ok "la última copia fue hace $DIAS día(s); toca cada $CADA_DIAS"
+      echo "      No se hace nada. La próxima, en $(( CADA_DIAS - DIAS )) día(s)."
+      anota "saltada: última hace $DIAS días, se hace cada $CADA_DIAS"
+      exit 0
+    fi
+  fi
+fi
+
 if [ "$MODO" = "red" ]; then
   # Windows es una computadora del centro, no una máquina virtual
   d "Modo:" "por red, sin tocar esa computadora"
@@ -924,6 +969,44 @@ for archivo in bdSalmiDis.mdb bdPrescripcion.mdb bdExterna.mdb; do
 done
 
 trap - EXIT INT TERM
+
+# ── Lo que el centro deja en la carpeta compartida ────────────────────
+# SALMI se saca solo porque sus archivos están siempre ahí. SOAPS y SNIS
+# no: sus copias las genera una persona desde el programa, una vez al mes,
+# y las deja en una carpeta.
+#
+# Aquí se recogen. Solo los archivos pequeños que sirven para recuperar
+# —el .wak de SOAPS, el .sal de SALMI, los formularios del SNIS— y nunca
+# los .bak de SQL Server, que pesan cientos de megas y no caben en la nube
+# de un centro con internet rural.
+EXTRA_RED=$(leer_conf windows_extra)
+EXTRA_CARP=$(leer_conf windows_extra_carpeta); EXTRA_CARP="${EXTRA_CARP:-RESPALDOS}"
+if [ -n "$EXTRA_RED" ]; then
+  printf "\n   ${AZ}Recogiendo lo que dejó el centro${V}\n"
+  mkdir -p "$CARPETA_DEST/del-centro"
+  N_EXTRA=0
+  for PATRON in '*.wak' '*.sal' '*.ves' '*.xlsx' '*.xls'; do
+    LISTA=$(smbclient "$EXTRA_RED" -A "$WIN_CRED" -t 60 \
+              -c "recurse ON; prompt OFF; cd \"$EXTRA_CARP\"; ls $PATRON" 2>/dev/null \
+            | awk '$2=="A"{print $1}')
+    for f in $LISTA; do
+      smbclient "$EXTRA_RED" -A "$WIN_CRED" -t 60 \
+        -c "recurse ON; prompt OFF; cd \"$EXTRA_CARP\"; mget \"$f\"" \
+        >/dev/null 2>&1 || continue
+      [ -f "$f" ] && mv -f "$f" "$CARPETA_DEST/del-centro/" 2>/dev/null && {
+        printf "      %-34s %s\n" "$f" "$(du -h "$CARPETA_DEST/del-centro/$f" | cut -f1)"
+        N_EXTRA=$((N_EXTRA+1)); }
+    done
+  done
+  if [ "$N_EXTRA" -gt 0 ]; then
+    ok "$N_EXTRA archivo(s) del centro recogidos"
+  else
+    avi "no había nada que recoger en $EXTRA_CARP"
+    echo "      Ahí van las copias que se generan a mano: el .wak de SOAPS"
+    echo "      al cerrar el mes, y los formularios del SNIS."
+    rmdir "$CARPETA_DEST/del-centro" 2>/dev/null
+  fi
+fi
 
 if [ "$COPIADOS" = "0" ]; then
   mal "no se pudo copiar nada"
