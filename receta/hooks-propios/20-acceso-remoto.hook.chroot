@@ -9,8 +9,7 @@
 #
 # Las ISOs en vivo borran esas llaves a propósito —para que no todas las
 # instalaciones tengan la misma— y solo live-config las rehace, que en un
-# sistema ya instalado no corre. Resultado: ssh.service no arranca y el
-# mensaje no dice por qué.
+# sistema ya instalado no corre. Resultado: ssh.service no arranca.
 #
 # En un centro rural, ir a la máquina significa un viaje de horas. Y la regla
 # de trabajo del proyecto es justamente no tener que ir.
@@ -21,20 +20,44 @@ echo "P: RedHornoma — acceso remoto desde el primer arranque"
 # 1 · Encendido de fábrica
 systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null || true
 
-# 2 · Que se cree sus llaves si no las tiene, antes de intentar arrancar.
-#     ssh-keygen -A no toca las que ya existan: solo crea las que falten.
+# 2 · Las llaves, ANTES de que sshd compruebe su configuración.
+#
+# EL ORDEN ES TODO. La unidad de Debian trae:
+#
+#     ExecStartPre=/usr/sbin/sshd -t
+#
+# y systemd AÑADE al final lo que ponga un drop-in. El primer intento puso
+# solo «ExecStartPre=/usr/bin/ssh-keygen -A», que quedó DETRÁS: sshd -t
+# comprobaba la configuración sin llaves, fallaba, y ssh-keygen nunca
+# llegaba a ejecutarse. El servicio quedaba en «failed» y el mensaje no
+# decía nada de llaves. Se descubrió el 2026-08-03, en el área rural, con
+# la máquina ya instalada y sin poder entrar en ella.
+#
+# La línea «ExecStartPre=» vacía borra la lista heredada. Después se ponen
+# las dos en el orden correcto.
 mkdir -p /etc/systemd/system/ssh.service.d
 cat > /etc/systemd/system/ssh.service.d/10-redhornoma-llaves.conf <<'UNIDAD'
-# Crear las llaves de identidad si faltan.
+# Crear las llaves de identidad ANTES de comprobar la configuración.
 #
-# Sin esto, un sistema recién instalado desde la ISO no puede arrancar SSH:
-# la imagen en vivo borra las llaves y nadie las vuelve a crear. Hay que ir
-# físicamente a la máquina a escribir «ssh-keygen -A», que es justo lo que
-# este proyecto quiere evitar.
+# La primera línea, vacía a propósito, borra la lista que trae Debian. Sin
+# ella, esto se añadiría DETRÁS de «sshd -t», que es justo el paso que
+# fracasa cuando no hay llaves. Orden equivocado = servicio muerto.
 #
-# «-A» solo crea las que falten. Si ya están, no toca nada.
+# «ssh-keygen -A» solo crea las que falten: si ya están, no toca nada.
 [Service]
+ExecStartPre=
 ExecStartPre=/usr/bin/ssh-keygen -A
+ExecStartPre=/usr/sbin/sshd -t
 UNIDAD
 
-echo "P: RedHornoma — SSH encendido y con llaves aseguradas"
+# 3 · Comprobar aquí mismo que el ajuste dice lo que tiene que decir.
+#     Un arreglo que se cuela mal en la ISO no se descubre hasta que alguien
+#     está delante de una máquina a tres horas de camino.
+A=/etc/systemd/system/ssh.service.d/10-redhornoma-llaves.conf
+if grep -q '^ExecStartPre=$' "$A" && \
+   [ "$(grep -n 'ssh-keygen -A' "$A" | cut -d: -f1)" -lt "$(grep -n 'sshd -t' "$A" | cut -d: -f1)" ]; then
+  echo "P: RedHornoma — SSH: llaves antes de la comprobación, orden correcto"
+else
+  echo "E: RedHornoma — el ajuste de SSH quedó en mal orden"
+  exit 1
+fi
