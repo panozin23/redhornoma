@@ -1,17 +1,18 @@
 #!/bin/sh
-# Dejar la carpeta compartida preparada para el primer arranque.
+# La carpeta compartida se crea sola en el primer arranque.
 #
-# No se crea aquí: al instalar el paquete —dentro del chroot de la ISO— no hay
-# ni usuario de la persona ni Samba en marcha. Se activa el servicio, y él la
-# crea la primera vez que arranque el sistema ya instalado.
+# El enlace que enciende el servicio va DENTRO del paquete, en
+# /usr/lib/systemd/system/multi-user.target.wants/. No se crea aquí a
+# propósito: «systemctl enable» no funciona dentro del chroot donde se
+# construye la ISO, y al fallar en silencio dejaba el servicio apagado.
+# Pasó el 2026-08-02 y solo se vio revisando el sistema construido.
+#
+# Aquí solo se avisa a systemd de que hay algo nuevo, cuando lo hay.
 set -e
 
 case "$1" in
   configure)
-    if [ -d /run/systemd/system ]; then
-      systemctl daemon-reload >/dev/null 2>&1 || true
-    fi
-    systemctl enable redhornoma-carpeta-compartida.service >/dev/null 2>&1 || true
+    [ -d /run/systemd/system ] && systemctl daemon-reload >/dev/null 2>&1 || true
     ;;
 esac
 
