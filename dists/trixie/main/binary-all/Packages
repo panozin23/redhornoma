@@ -1,0 +1,177 @@
+Package: redhornoma-base
+Version: 1.0.1
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: iproute2, usbutils, pciutils, procps, util-linux
+Recommends: yad, libvirt-clients
+Filename: pool/main/redhornoma-base_1.0.1_all.deb
+Size: 7088
+MD5sum: e580f3857e321098570607c05e340f7b
+SHA1: d57bbd8c269139cf588ce0544c6d9dfd79918be8
+SHA256: a4bbe5ccd58c9fbd5b2feb2dcc223902a4830444683580b4fc0a437f37bdfe8b
+Section: admin
+Priority: optional
+Description: Radiografía de un equipo de RedHornoma
+ Examina una computadora y da un veredicto: qué papel puede desempeñar
+ dentro de un centro de salud —servidor, puesto o ninguno.
+ .
+ No modifica nada. Solo mira e informa. Es la base sobre la que se apoyan
+ las demás herramientas de RedHornoma, y el primer principio del proyecto:
+ preguntar a la máquina, nunca suponer.
+
+Package: redhornoma-completo
+Version: 1.0.17
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.1), redhornoma-virtualizacion (>= 1.0.8),
+ redhornoma-red (>= 1.0.0), redhornoma-respaldo (>= 1.0.6),
+ redhornoma-perifericos (>= 1.0.2), redhornoma-panel (>= 1.0.0)
+Filename: pool/main/redhornoma-completo_1.0.17_all.deb
+Size: 960
+MD5sum: cb70cecd01ce7ecc5c9ca8f1c8f38693
+SHA1: 35d28eb3e50b13ea52c931d2da0f6c80466c3805
+SHA256: 38adc6d450b50d4876dd388be7e537000b37f783c7bc247ed8abaf12a50c4f57
+Section: admin
+Priority: optional
+Description: RedHornoma entero, en un solo paquete
+ Instala las seis piezas de RedHornoma: el informe del equipo, la
+ virtualización de Windows, la red del centro, el respaldo automático,
+ los periféricos y la pantalla única de control.
+ .
+ Es lo que debe declarar la receta de la ISO. Un centro que instale este
+ paquete tiene el sistema completo.
+
+Package: redhornoma-panel
+Version: 1.0.0
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.1), yad, coreutils, findutils
+Recommends: redhornoma-virtualizacion, redhornoma-respaldo, redhornoma-red,
+ avahi-utils, cups-client, xdg-utils
+Filename: pool/main/redhornoma-panel_1.0.0_all.deb
+Size: 8516
+MD5sum: 6a9b73c0266f769f32604c6c8a38b3e2
+SHA1: 5a8fa9ee839b5999b78a2f2c0b7b68f94123d404
+SHA256: e0d22d7e0d0cb414c18caa082e4c3ced51a66128458fec83154152199e77fa3c
+Section: admin
+Priority: optional
+Description: La pantalla única de control de RedHornoma
+ Todo lo importante del centro en una ventana: si el servidor está en
+ pie, si los programas de salud corren, cuándo fue el último respaldo y
+ si alguna copia salió del edificio.
+ .
+ Verde, amarillo y rojo. Sin números que haya que interpretar. Quien lo
+ mira entiende en tres segundos si algo va mal, y debajo tiene los cuatro
+ botones del día a día: entrar a los programas, respaldar, ver las otras
+ computadoras y pedir ayuda.
+ .
+ Cada dato se le pregunta a la máquina en el momento. Cuando algo no se
+ puede saber lo dice en gris, en vez de inventarse un verde: un panel que
+ miente es peor que no tener panel.
+
+Package: redhornoma-perifericos
+Version: 1.0.2
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.1), samba, samba-common-bin
+Recommends: cups, sane-utils
+Filename: pool/main/redhornoma-perifericos_1.0.2_all.deb
+Size: 5228
+MD5sum: a64ce5eef90717e6ffb6d5ecdc8df055
+SHA1: 034d7f52173eab796b7f24051748b898e879fc06
+SHA256: 8ecb9683897434fa15929fb73f64f52dbfd5fae8bcc699d73c65d6f9dc28af1d
+Section: admin
+Priority: optional
+Description: Una carpeta que ven Linux y Windows a la vez
+ Pasar un archivo al Windows virtual no debería obligar a grabar un CD ni
+ a buscar un pendrive. Esta carpeta aparece en Windows como una unidad de
+ red y en Linux como una carpeta normal.
+ .
+ Sirve para sacar los respaldos de SALMI hacia el disco externo, meter los
+ catálogos que manda el Ministerio y llevar informes a imprimir.
+
+Package: redhornoma-red
+Version: 1.0.0
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.1), avahi-daemon, avahi-utils,
+ openssh-client, openssh-server, libvirt-clients, iproute2
+Recommends: yad, virt-viewer, samba-common-bin
+Filename: pool/main/redhornoma-red_1.0.0_all.deb
+Size: 13204
+MD5sum: 1ac25c9f3d3cfa70bec2842949580a1e
+SHA1: 0e55caed1d5ec0580a64b1accf3ecbda091cf6b6
+SHA256: f5ad5f21f717758e12991807dd9362484a920436da6ce89f9725f263ce19a251
+Section: admin
+Priority: optional
+Description: La red interna de un centro de salud
+ Define de una vez qué es cada computadora —servidor, puesto o
+ administración— y aplica todo lo que ese papel implica: nombre propio,
+ anuncio en la red, acceso remoto, y si es el servidor también la red en
+ puente, el arranque automático de su Windows y el bloqueo de la
+ suspensión.
+ .
+ Las máquinas se descubren solas: cada una se anuncia con su nombre, su
+ papel y su centro, así que no hay direcciones que apuntar en ninguna
+ parte.
+ .
+ Incluye una ventana con todas las computadoras del centro, su estado y
+ —lo que de verdad importa— cuándo fue el último respaldo de cada una.
+
+Package: redhornoma-respaldo
+Version: 1.0.6
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.1), libvirt-clients, python3,
+ python3-libvirt, mdbtools, rsync
+Recommends: rclone, smbclient, cifs-utils
+Filename: pool/main/redhornoma-respaldo_1.0.6_all.deb
+Size: 19084
+MD5sum: d67d96a0bddc9cfcf94e90ce247e76b6
+SHA1: c587a6a7d60312e2e11a1a65102f97260391c22e
+SHA256: d5c5636dcb5183818a33cd042b10b430dca9f8ceb9671b5ea68346d26454c025
+Section: admin
+Priority: optional
+Description: Guarda la información del centro, sola, cada día
+ La información de un centro de salud no se puede volver a escribir. Si
+ se pierde, se perdió.
+ .
+ Congela un instante el disco de la máquina virtual, saca los archivos de
+ SALMI sin que nadie abra nada, abre la base de datos para comprobar que
+ sirve, avisa si la información menguó respecto al día anterior, y deja
+ copia en el disco externo, en otra computadora del centro y en la nube.
+ .
+ Se ejecuta a las 13:30. Si ese día el centro estuvo cerrado, lo hace al
+ encender.
+
+Package: redhornoma-virtualizacion
+Version: 1.0.8
+Architecture: all
+Maintainer: euflo <dpto.salud10@gmail.com>
+Depends: redhornoma-base (>= 1.0.1), libvirt-clients, libvirt-daemon-system,
+ virtinst, qemu-system-x86, qemu-utils, qemu-system-modules-spice,
+ ovmf, swtpm, swtpm-tools, virt-viewer, python3
+Recommends: virt-manager, xorriso, libarchive-tools, libbde-utils
+Filename: pool/main/redhornoma-virtualizacion_1.0.8_all.deb
+Size: 33288
+MD5sum: e6cfbdc35437f51c9e843343bafffaf9
+SHA1: 7a1415b778d92ed8c8d38293abca379f6b1a4fb1
+SHA256: 537ea0b2b5625a2d2197425767cb56ef59f48a487ce92aa2dd504e2c040e0d26
+Section: admin
+Priority: optional
+Description: Windows dentro de RedHornoma, adaptado a cada máquina
+ Los programas del Ministerio —SALMI, SNIS, SOAPS— solo existen para
+ Windows. Estas herramientas lo alojan sin que el centro tenga que
+ renunciar a Linux.
+ .
+ Soporta Windows 7, 8.1, 10 y 11. Antes de crear nada le pregunta a
+ libvirt qué acepta ESTE equipo concreto y ajusta memoria, procesadores
+ y firmware a lo que de verdad hay.
+ .
+ Incluye una prueba que responde «¿puede esta computadora ejecutar
+ Windows?» sin necesitar imagen ni licencia.
+ .
+ Y «entrar a los programas»: un solo gesto que enciende la máquina si
+ hace falta y pone su pantalla delante. Quien atiende pacientes no tiene
+ por qué saber que ahí abajo hay una máquina virtual.
+

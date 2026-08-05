@@ -1,0 +1,41 @@
+<!doctype html><html lang="es"><meta charset="utf-8">
+<title>Repositorio de RedHornoma</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+ body{font-family:system-ui,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1.2rem;
+      line-height:1.7;color:#12210F;background:#F4F8F1}
+ h1{color:#1F7A34} h2{margin-top:2.2rem;border-top:1px solid #D5E4CE;padding-top:1.4rem}
+ pre{background:#10200C;color:#DCEFD6;padding:1rem;border-radius:7px;overflow-x:auto;font-size:.86rem}
+ code{background:#E6F1E1;padding:.1em .35em;border-radius:3px}
+ .nota{background:#fff;border:1px solid #D5E4CE;border-radius:7px;padding:1rem 1.2rem}
+</style>
+<h1>Repositorio de RedHornoma</h1>
+<p><b>RedHornoma</b> es el sistema para las computadoras de un centro de salud:
+la red interna, los programas del Ministerio dentro de Windows, y el respaldo
+que se hace solo.</p>
+<p>Aquí se publican sus mejoras. Una vez añadido este origen, un centro las
+recibe con <code>apt upgrade</code>, sin reinstalar y sin pendrive.</p>
+
+<h2>Añadirlo a una computadora</h2>
+<p>Solo hace falta una vez. Las instaladas con el ISO ya lo traen puesto.</p>
+<pre>sudo mkdir -p /usr/share/keyrings
+wget -qO- https://panozin23.github.io/redhornoma/redhornoma-archive-keyring.gpg \
+  | sudo tee /usr/share/keyrings/redhornoma.gpg > /dev/null
+
+echo "deb [signed-by=/usr/share/keyrings/redhornoma.gpg] https://panozin23.github.io/redhornoma trixie main" \
+  | sudo tee /etc/apt/sources.list.d/redhornoma.list
+
+sudo apt update
+sudo apt install redhornoma-completo</pre>
+
+<h2>Recibir las mejoras</h2>
+<pre>sudo apt update && sudo apt upgrade</pre>
+
+<div class="nota">
+<p><b>Qué instala.</b> El informe del equipo, la virtualización de Windows,
+la red del centro, el respaldo automático, los periféricos y la pantalla
+única de control.</p>
+<p>Software libre, construido sobre Debian, KDE, QEMU y decenas de proyectos
+más.</p>
+</div>
+</html>
