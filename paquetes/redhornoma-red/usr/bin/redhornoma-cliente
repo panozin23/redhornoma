@@ -1,0 +1,267 @@
+#!/bin/bash
+# redhornoma-cliente — Conectar esta computadora a los programas del centro.
+#
+# En un centro hay UNA máquina con los programas y la información —SALMI,
+# SOAPS— y las demás la usan. No hay copias de la base de datos ni nada que
+# sincronizar: todos abren el mismo programa, sobre los mismos datos.
+#
+# Montar eso a mano son ocho pasos dentro de Windows, y uno de ellos —quitar
+# el icono local— se olvida siempre. Cuando se olvida, alguien abre por error
+# el SALMI vacío de su propia máquina, no ve ningún paciente, y cree que se
+# perdió todo el trabajo del centro. Ha pasado.
+#
+# Aquí se hace en una ventana: se dice cuál es el servidor, con qué cuenta se
+# entra, y qué programas se quieren. El resto lo hace la herramienta, y al
+# final comprueba que de verdad se llega.
+#
+# Uso:
+#   redhornoma-cliente                 la ventana
+#   redhornoma-cliente --revisar       solo mirar cómo está esta máquina
+set -u
+
+CONF=/etc/redhornoma
+export GDK_BACKEND=x11
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+
+hay_pantalla(){ [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v yad >/dev/null 2>&1; }
+
+# Quien habla con el Windows de dentro. Se busca en el sistema y, si no está,
+# al lado de este mismo archivo: así el proyecto se puede probar desde su
+# carpeta, sin instalar los paquetes, antes de darlo por bueno.
+for C in /usr/bin/redhornoma-en-windows \
+         "$(dirname "$(readlink -f "$0")")/redhornoma-en-windows" \
+         "$(dirname "$(readlink -f "$0")")/../../../redhornoma-virtualizacion/usr/bin/redhornoma-en-windows"; do
+  [ -x "$C" ] && { EN_WIN="$C"; break; }
+done
+EN_WIN="${EN_WIN:-/usr/bin/redhornoma-en-windows}"
+
+# ── Lo que sabemos conectar ──────────────────────────────────────────
+#
+# Nombre visible | carpeta compartida | ruta dentro | programa | icono local a retirar
+#
+# Las rutas salen de máquinas reales, no de suposiciones: SalmiDis.exe y
+# SOAPS_7.exe se comprobaron en servidor-ciudad el 2026-08-06.
+PROGRAMAS=(
+  "SALMI|SALMI|SalmiDis.exe|SALMI del centro|SALMI-PN Dispensación"
+  "SOAPS|SOAPS|SOAPS_7.exe|SOAPS del centro|soaps_emisor"
+)
+campo(){ echo "$1" | cut -d'|' -f"$2"; }
+
+# ── Mirar cómo está esta máquina ─────────────────────────────────────
+revisar(){
+  titulo "CÓMO ESTÁ ESTA COMPUTADORA"
+  [ -x "$EN_WIN" ] || { mal "falta redhornoma-en-windows (paquete de virtualización)"; return 1; }
+  cat > /tmp/rh-cliente-revisar.ps1 <<'FIN'
+"-- UNIDADES DE RED CONECTADAS"
+$n = Get-CimInstance Win32_NetworkConnection -ErrorAction SilentlyContinue
+if ($n) { $n | ForEach-Object { "   {0} -> {1}" -f $_.LocalName, $_.RemoteName } }
+else { "   ninguna" }
+""
+"-- ICONOS EN EL ESCRITORIO"
+Get-ChildItem "C:\Users\Public\Desktop","$env:USERPROFILE\Desktop" -Filter *.lnk -ErrorAction SilentlyContinue |
+  ForEach-Object { "   {0}" -f $_.BaseName }
+FIN
+  "$EN_WIN" --guion /tmp/rh-cliente-revisar.ps1
+  rm -f /tmp/rh-cliente-revisar.ps1
+}
+
+[ "${1:-}" = "--revisar" ] && { revisar; exit $?; }
+
+# ── Buscar servidores en la red ──────────────────────────────────────
+# Se ofrecen los que se anuncian, pero el campo se puede escribir a mano: en
+# Hornoma el servidor es un Windows que ya estaba, y ese no se anuncia.
+buscar_servidores(){
+  command -v avahi-browse >/dev/null 2>&1 || return 0
+  timeout 6 avahi-browse -atrp 2>/dev/null \
+    | awk -F';' '/^=/ && $3=="IPv4" {print $7}' | sed 's/\.local$//' | sort -u
+}
+
+if ! hay_pantalla; then
+  titulo "CONECTAR ESTA COMPUTADORA AL CENTRO"
+  echo "   Esto necesita el escritorio para pedir la contraseña sin que se vea."
+  echo "   Ábrelo desde el menú:  «Conectar al servidor del centro»"
+  echo
+  echo "   Para ver cómo está ahora:"
+  echo "      redhornoma-cliente --revisar"
+  exit 1
+fi
+
+[ -x "$EN_WIN" ] || {
+  yad --class=redhornoma --center --borders=14 --width=430 --image=dialog-error \
+      --title="Falta una pieza" --button="Entendido:0" \
+      --text="No encuentro <b>redhornoma-en-windows</b>.\n\nInstálalo con:\n<b>sudo apt install redhornoma-virtualizacion</b>" >/dev/null 2>&1
+  exit 1; }
+
+SUGERIDOS=$(buscar_servidores | paste -sd'!' -)
+
+DATOS=$(yad --class=redhornoma --center --borders=16 --width=520 \
+  --title="Conectar esta computadora al centro" \
+  --image="network-workgroup" \
+  --text="<b>Esta computadora va a usar los programas del servidor.</b>\n\nNo se copia ninguna base de datos: se abre la del servidor,\nla misma que ven los demás consultorios." \
+  --form \
+  --field="Servidor (nombre o dirección)":CBE "${SUGERIDOS:-}" \
+  --field="Cuenta de la carpeta compartida" "salmired" \
+  --field="Contraseña":H "" \
+  --field="Conectar SALMI:CHK" TRUE \
+  --field="Conectar SOAPS:CHK" FALSE \
+  --separator="|" \
+  --button="Cancelar:1" --button="Conectar:0" 2>/dev/null) || exit 0
+
+SERVIDOR=$(echo "$DATOS" | cut -d'|' -f1)
+USUARIO=$(echo "$DATOS"  | cut -d'|' -f2)
+CLAVE=$(echo "$DATOS"    | cut -d'|' -f3)
+Q_SALMI=$(echo "$DATOS"  | cut -d'|' -f4)
+Q_SOAPS=$(echo "$DATOS"  | cut -d'|' -f5)
+
+falta(){ yad --class=redhornoma --center --borders=14 --width=400 --image=dialog-warning \
+             --title="Falta un dato" --text="$1" --button="Entendido:0" >/dev/null 2>&1; exit 1; }
+[ -n "$SERVIDOR" ] || falta "Hace falta el <b>nombre o la dirección</b> del servidor."
+[ -n "$USUARIO" ]  || falta "Hace falta la <b>cuenta</b> con la que se entra a la carpeta compartida."
+[ -n "$CLAVE" ]    || falta "Hace falta la <b>contraseña</b> de esa cuenta."
+[ "$Q_SALMI" = TRUE ] || [ "$Q_SOAPS" = TRUE ] || falta "Elige al menos <b>un programa</b> que conectar."
+
+# ── Armar el trabajo para Windows ────────────────────────────────────
+#
+# Se manda como guion codificado (--guion), no como orden suelta: por el
+# camino hasta Windows hay cuatro programas y cada uno se come parte de las
+# comillas. Una contraseña con un símbolo raro no sobreviviría el viaje.
+GUION=$(mktemp); chmod 600 "$GUION"
+trap 'rm -f "$GUION"' EXIT
+
+{
+printf '$srv = "%s"\n' "$SERVIDOR"
+printf '$usr = "%s"\n' "$USUARIO"
+printf '$pwd = @%s\n%s\n%s@\n' "'" "$CLAVE" "'"
+cat <<'CABECERA'
+$script:huboFallo = $false
+$ws = New-Object -ComObject WScript.Shell
+
+# La contrasena se guarda en el almacen de Windows en vez de escribirla en
+# cada conexion. Asi «net use» no la lleva en su linea de ordenes, donde
+# cualquiera que mire los procesos la veria.
+#
+# El nombre de la cuenta lleva DELANTE el servidor: «192.168.0.50\salmired».
+# Sin eso, Windows entiende que «salmired» es una cuenta de ESTA maquina, va
+# a buscarla aqui, no la encuentra y responde «la contrasena no es valida» —
+# un mensaje que manda a cambiar la contrasena cuando la contrasena estaba
+# bien. Costo media hora el 2026-08-06.
+#
+# Si alguien ya escribio «SERVIDOR\cuenta», se respeta tal cual.
+$usrCompleto = if ($usr -match "\\") { $usr } else { $srv + "\" + $usr }
+cmdkey /delete:$srv 2>&1 | Out-Null
+cmdkey /add:$srv /user:$usrCompleto /pass:$pwd 2>&1 | Out-Null
+
+function Conectar($recurso, $programa, $titulo, $iconoLocal) {
+  Write-Output ""
+  Write-Output ("-- " + $titulo)
+  $ruta = "\\" + $srv + "\" + $recurso
+  $exe  = $ruta + "\" + $programa
+
+  # Se apunta a la ruta de red entera, SIN letra de unidad.
+  #
+  # Una unidad de red (S:, Z:) pertenece a la sesion de quien la crea. Estas
+  # ordenes las ejecuta el agente invitado, que es NT AUTHORITY\SYSTEM: la
+  # unidad que mapeara SYSTEM no la ve NADIE al iniciar sesion, y el icono
+  # apuntaria a una letra que no existe. Se comprobo el 2026-08-06 en
+  # salud-puesto: cmdkey y el icono se crearon, la S: no aparecio jamas.
+  #
+  # La ruta \\servidor\carpeta\programa.exe funciona para cualquier usuario,
+  # sin depender de ninguna sesion.
+  if (-not (Test-Path $ruta)) {
+    Write-Output ("   [FALLO] no se llega a " + $ruta)
+    Write-Output "          Comprueba la direccion del servidor, la cuenta y la contrasena."
+    $script:huboFallo = $true
+    return
+  }
+  Write-Output ("   [ok] se llega a " + $ruta)
+
+  if (-not (Test-Path $exe)) {
+    Write-Output ("   [FALLO] la carpeta se abre, pero no esta " + $programa)
+    Write-Output "          Puede que sea otra carpeta del servidor."
+    $script:huboFallo = $true
+    return
+  }
+  Write-Output ("   [ok] el programa esta ahi: " + $programa)
+
+  # El icono va al escritorio PUBLICO: asi lo ve todo el mundo que use esta
+  # computadora, no solo quien la configuro.
+  $publico = Join-Path $env:PUBLIC "Desktop"
+  $acceso = $ws.CreateShortcut((Join-Path $publico ($titulo + ".lnk")))
+  $acceso.TargetPath = $exe
+  $acceso.WorkingDirectory = $ruta
+  $acceso.Description = "Abre el programa del servidor del centro"
+  $acceso.Save()
+  Write-Output ("   [ok] icono para todos: " + $titulo)
+
+  # Retirar el icono local. ESTE ES EL PASO QUE SE OLVIDA SIEMPRE, y cuando
+  # se olvida alguien abre el programa vacio de su propia maquina, no ve
+  # ningun paciente y cree que se perdio la informacion del centro.
+  #
+  # No se borra: se aparta a una carpeta, por si hiciera falta.
+  # Se mira el escritorio publico Y el de cada persona que use la maquina.
+  #
+  # No se usa [Environment]::GetFolderPath("Desktop"): esto lo ejecuta el
+  # agente invitado como NT AUTHORITY\SYSTEM, que no tiene escritorio, y esa
+  # llamada devuelve una cadena VACIA. Con ella, Join-Path falla y el paso
+  # entero se salta sin que nadie lo note — justo el paso que evita que
+  # alguien abra el SALMI vacio de su maquina. Se vio el 2026-08-06.
+  $guardados = Join-Path $env:PUBLIC "iconos-locales-retirados"
+  $escritorios = @(Join-Path $env:PUBLIC "Desktop")
+  Get-ChildItem "C:\Users" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+    $escritorios += (Join-Path $_.FullName "Desktop")
+    $escritorios += (Join-Path $_.FullName "Escritorio")
+  }
+  foreach ($d in ($escritorios | Where-Object { $_ -and (Test-Path $_) })) {
+    $viejo = Join-Path $d ($iconoLocal + ".lnk")
+    if (Test-Path $viejo) {
+      New-Item -ItemType Directory -Force -Path $guardados | Out-Null
+      Move-Item $viejo (Join-Path $guardados ($iconoLocal + ".lnk")) -Force
+      Write-Output ("   [ok] retirado el icono local de " + (Split-Path $d -Parent | Split-Path -Leaf))
+    }
+  }
+}
+CABECERA
+
+[ "$Q_SALMI" = TRUE ] && printf 'Conectar "%s" "%s" "%s" "%s"\n' \
+  "$(campo "${PROGRAMAS[0]}" 2)" "$(campo "${PROGRAMAS[0]}" 3)" \
+  "$(campo "${PROGRAMAS[0]}" 4)" "$(campo "${PROGRAMAS[0]}" 5)"
+[ "$Q_SOAPS" = TRUE ] && printf 'Conectar "%s" "%s" "%s" "%s"\n' \
+  "$(campo "${PROGRAMAS[1]}" 2)" "$(campo "${PROGRAMAS[1]}" 3)" \
+  "$(campo "${PROGRAMAS[1]}" 4)" "$(campo "${PROGRAMAS[1]}" 5)"
+
+cat <<'PIE'
+
+Write-Output ""
+Write-Output "-- ICONOS QUE VERA EL PERSONAL"
+Get-ChildItem (Join-Path $env:PUBLIC "Desktop") -Filter *.lnk -ErrorAction SilentlyContinue |
+  ForEach-Object {
+    $a = $ws.CreateShortcut($_.FullName)
+    "   {0,-24} -> {1}" -f $_.BaseName, $a.TargetPath
+  }
+if ($script:huboFallo) { Write-Output ""; Write-Output "   [FALLO] algo no quedo conectado" }
+PIE
+} > "$GUION"
+
+SALIDA=$(mktemp); trap 'rm -f "$GUION" "$SALIDA"' EXIT
+"$EN_WIN" --guion "$GUION" > "$SALIDA" 2>&1
+sed -i 's/\x1b\[[0-9;]*m//g' "$SALIDA"
+
+if grep -q '\[FALLO\]' "$SALIDA"; then
+  TIT="No se pudo conectar del todo"; ICO="dialog-error"
+  FIN_TXT="Revisa el nombre del servidor, la cuenta y la contraseña.\n\n<b>Nada de lo que ya funcionaba se ha roto.</b>"
+else
+  TIT="Conectado al centro"; ICO="dialog-information"
+  FIN_TXT="Abre el icono nuevo del escritorio de Windows.\n\nPedirá el usuario <b>de SALMI</b>, que es el personal de cada quien\n— no la contraseña de la carpeta compartida."
+fi
+
+yad --class=redhornoma --center --borders=14 --width=680 --height=440 \
+    --title="$TIT" --text-info --filename="$SALIDA" --fontname="monospace 9" \
+    --button="Cerrar:0" >/dev/null 2>&1
+
+yad --class=redhornoma --center --borders=14 --width=440 --image="$ICO" \
+    --title="$TIT" --text="$(printf '%b' "$FIN_TXT")" --button="Entendido:0" >/dev/null 2>&1

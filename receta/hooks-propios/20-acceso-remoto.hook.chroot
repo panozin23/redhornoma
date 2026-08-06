@@ -53,11 +53,37 @@ UNIDAD
 # 3 · Comprobar aquí mismo que el ajuste dice lo que tiene que decir.
 #     Un arreglo que se cuela mal en la ISO no se descubre hasta que alguien
 #     está delante de una máquina a tres horas de camino.
+#
+# Se miran SOLO las líneas que systemd obedece, las que empiezan por
+# «ExecStartPre=». La primera versión de esta comprobación buscaba
+# «ssh-keygen -A» en todo el archivo y lo encontraba DOS veces: una en el
+# comentario de arriba, que lo nombra para explicarlo, y otra en la orden de
+# verdad. Dos números donde se esperaba uno, y la construcción entera murió
+# con «Illegal number: 7\n10» a los once minutos.
+#
+# Un comentario que menciona algo no es ese algo.
 A=/etc/systemd/system/ssh.service.d/10-redhornoma-llaves.conf
-if grep -q '^ExecStartPre=$' "$A" && \
-   [ "$(grep -n 'ssh-keygen -A' "$A" | cut -d: -f1)" -lt "$(grep -n 'sshd -t' "$A" | cut -d: -f1)" ]; then
+ORDENES=$(grep -n '^ExecStartPre=' "$A" || true)
+
+BORRA=$(echo "$ORDENES" | grep -c ':ExecStartPre=$' || true)
+LLAVES=$(echo "$ORDENES" | grep 'ssh-keygen -A' | head -1 | cut -d: -f1)
+PRUEBA=$(echo "$ORDENES" | grep 'sshd -t'       | head -1 | cut -d: -f1)
+
+# Cada pieza por separado, para que el mensaje diga cuál falta en vez de un
+# «mal orden» que no ayuda a nadie.
+FALLO=""
+[ "$BORRA" -ge 1 ] 2>/dev/null || FALLO="falta la línea «ExecStartPre=» vacía que borra la lista de Debian"
+case "$LLAVES" in ''|*[!0-9]*) FALLO="no aparece ExecStartPre= con ssh-keygen -A" ;; esac
+case "$PRUEBA" in ''|*[!0-9]*) FALLO="no aparece ExecStartPre= con sshd -t" ;; esac
+if [ -z "$FALLO" ] && [ "$LLAVES" -ge "$PRUEBA" ]; then
+  FALLO="ssh-keygen -A (línea $LLAVES) va DESPUÉS de sshd -t (línea $PRUEBA)"
+fi
+
+if [ -z "$FALLO" ]; then
   echo "P: RedHornoma — SSH: llaves antes de la comprobación, orden correcto"
 else
-  echo "E: RedHornoma — el ajuste de SSH quedó en mal orden"
+  echo "E: RedHornoma — el ajuste de SSH no sirve: $FALLO"
+  echo "E: esto es lo que quedó escrito en $A —"
+  sed 's/^/E:    /' "$A"
   exit 1
 fi

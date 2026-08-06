@@ -1,10 +1,10 @@
 Package: redhornoma-panel
-Version: 1.0.0
+Version: 1.0.3
 Section: admin
 Priority: optional
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
-Depends: redhornoma-base (>= 1.0.0), yad, coreutils, findutils
+Depends: redhornoma-base (>= 1.0.1), yad, coreutils, findutils
 Recommends: redhornoma-virtualizacion, redhornoma-respaldo, redhornoma-red,
  avahi-utils, cups-client, xdg-utils
 Description: La pantalla única de control de RedHornoma

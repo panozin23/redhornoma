@@ -1,0 +1,2 @@
+qemu-system-x86_64: warning: host doesn't support requested feature: CPUID.01H:EDX.ss [bit 27]
+qemu-system-x86_64: warning: host doesn't support requested feature: CPUID.01H:EDX.ss [bit 27]

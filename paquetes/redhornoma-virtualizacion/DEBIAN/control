@@ -1,12 +1,12 @@
 Package: redhornoma-virtualizacion
-Version: 1.0.7
+Version: 1.0.11
 Section: admin
 Priority: optional
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
-Depends: redhornoma-base (>= 1.0.0), libvirt-clients, libvirt-daemon-system,
+Depends: redhornoma-base (>= 1.0.1), libvirt-clients, libvirt-daemon-system,
  virtinst, qemu-system-x86, qemu-utils, qemu-system-modules-spice,
- ovmf, swtpm, swtpm-tools, virt-viewer
+ ovmf, swtpm, swtpm-tools, virt-viewer, python3
 Recommends: virt-manager, xorriso, libarchive-tools, libbde-utils
 Description: Windows dentro de RedHornoma, adaptado a cada máquina
  Los programas del Ministerio —SALMI, SNIS, SOAPS— solo existen para

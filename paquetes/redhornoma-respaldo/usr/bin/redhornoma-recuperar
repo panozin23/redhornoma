@@ -1,0 +1,123 @@
+#!/bin/bash
+# redhornoma-recuperar — Devolver la información del centro, sin terminal.
+#
+# El respaldo se hace solo y se comprueba solo. Pero recuperarlo era, hasta
+# hoy, escribir «sudo redhornoma-respaldo --rescatar» en una terminal. Y eso
+# significa que el día que algo se rompa —un martes, en un centro rural, con
+# quien sabe hacerlo a tres horas de camino— nadie puede.
+#
+# Un respaldo que solo sabe recuperar una persona protege a esa persona, no
+# al centro.
+#
+# Aquí se elige la copia en una lista, se ve cuántos pacientes tiene, y se
+# confirma. El trabajo de verdad lo sigue haciendo redhornoma-respaldo: esto
+# es su cara, no un segundo camino que pueda desviarse del primero.
+#
+# Uso:
+#   redhornoma-recuperar          la ventana
+#   redhornoma-recuperar --texto  lo mismo en la terminal
+set -u
+
+BASE=/var/lib/redhornoma
+COPIAS="$BASE/respaldos"
+HISTORIAL="$BASE/verificacion.tsv"
+MOTOR=/usr/bin/redhornoma-respaldo
+
+export GDK_BACKEND=x11
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; RO=$'\033[1;31m'
+mal(){ printf "   ${RO}✗${V} %s\n" "$1" >&2; }
+
+hay_pantalla(){ [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v yad >/dev/null 2>&1; }
+
+if [ "${1:-}" = "--texto" ] || ! hay_pantalla; then
+  # Sin escritorio no hay nada que dibujar. Se pasa el mando al de siempre,
+  # que sabe hacerlo entero por terminal.
+  exec sudo "$MOTOR" --rescatar
+fi
+
+[ -x "$MOTOR" ] || { mal "falta redhornoma-respaldo"; exit 1; }
+
+aviso(){ yad --class=redhornoma --center --borders=14 --width=430 \
+             --title="$1" --image="$3" --text="$2" --button="Entendido:0" >/dev/null 2>&1; }
+
+# ── Reunir lo que hay ────────────────────────────────────────────────
+# Solo carpetas con un archivo .sal dentro: es lo único que
+# redhornoma-respaldo sabe devolver. Las «antes-del-rescate-*» guardan las
+# bases crudas por si acaso, pero no se restauran por esta vía; ofrecerlas
+# en la lista sería prometer algo que luego falla.
+FILAS=(); N=0
+while IFS= read -r C; do
+  [ -d "$C" ] || continue
+  ls "$C"/*.sal >/dev/null 2>&1 || continue
+  F=$(basename "$C")
+  DAT=$(grep -P "\t$F\t" "$HISTORIAL" 2>/dev/null | tail -1)
+  PAC=$(echo "$DAT" | cut -f5); PRES=$(echo "$DAT" | cut -f6)
+  MARCA="sin comprobar"; [ -f "$C/CORRECTO" ] && MARCA="comprobada"
+  # La fecha, en cristiano: 2026-08-05_1847 → 05/08/2026 a las 18:47
+  BONITA=$(echo "$F" | sed -E 's|^([0-9]{4})-([0-9]{2})-([0-9]{2})_([0-9]{2})([0-9]{2})$|\3/\2/\1  a las \4:\5|')
+  FILAS+=("$F" "$BONITA" "${PAC:-?}" "${PRES:-?}" "$MARCA")
+  N=$((N+1))
+done < <(find "$COPIAS" -maxdepth 1 -type d -name '20*' 2>/dev/null | sort -r)
+
+if [ "$N" = 0 ]; then
+  aviso "No hay ninguna copia que devolver" \
+"En esta computadora todavía no hay respaldos guardados.\n\nSe guardan en:\n<b>$COPIAS</b>\n\nPara hacer el primero, abre el panel del centro y pulsa\n«Respaldar ahora»." \
+"dialog-information"
+  exit 1
+fi
+
+# ── Elegir ───────────────────────────────────────────────────────────
+ELEGIDA=$(yad --class=redhornoma --center --borders=14 --width=640 --height=360 \
+  --title="Recuperar la información del centro" \
+  --text="<b>Elige la copia que quieres devolver a Windows.</b>\n\nSe reemplazará la información que hay ahora mismo en SALMI.\nTodo lo registrado <b>después</b> de la fecha que elijas se pierde." \
+  --list --print-column=1 --hide-column=1 --separator="" \
+  --column="id" --column="Cuándo se hizo" --column="Pacientes" --column="Prestaciones" --column="Estado" \
+  "${FILAS[@]}" \
+  --button="Cancelar:1" --button="Continuar:0" 2>/dev/null)
+[ -n "$ELEGIDA" ] || exit 0
+
+# Datos de la elegida, para el aviso
+DAT=$(grep -P "\t$ELEGIDA\t" "$HISTORIAL" 2>/dev/null | tail -1)
+E_PAC=$(echo "$DAT" | cut -f5); E_PRES=$(echo "$DAT" | cut -f6)
+E_FECHA=$(echo "$ELEGIDA" | sed -E 's|^([0-9]{4})-([0-9]{2})-([0-9]{2})_([0-9]{2})([0-9]{2})$|\3/\2/\1 a las \4:\5|')
+
+# ── Confirmar, con lo que se pierde delante ──────────────────────────
+# Una casilla que hay que marcar a mano. No es burocracia: esto reemplaza la
+# información de un centro de salud, y un clic de más en el sitio equivocado
+# no debe bastar.
+yad --class=redhornoma --center --borders=16 --width=520 \
+  --title="Confirmar la recuperación" --image="dialog-warning" \
+  --text="<b>Se va a devolver la copia del $E_FECHA</b>\n\nQuedarán <b>${E_PAC:-?} pacientes</b> y <b>${E_PRES:-?} prestaciones</b>.\n\n<b>Lo que se haya registrado en SALMI después de esa fecha\nse pierde.</b> Antes de escribir nada se guardará una copia\nde lo que hay ahora, por si hubiera que volver atrás.\n\nSALMI tiene que estar cerrado en el Windows del centro." \
+  --form --field="He avisado a quien esté usando SALMI y quiero continuar:CHK" FALSE \
+  --button="Cancelar:1" --button="Recuperar ahora:0" 2>/dev/null | grep -qi '^TRUE' || exit 0
+
+# ── Hacerlo ──────────────────────────────────────────────────────────
+# pkexec pide la contraseña con una ventana del escritorio. El trabajo lo
+# hace redhornoma-respaldo, el mismo de siempre: aquí no se copia ni un
+# archivo, para que no haya dos formas distintas de recuperar que puedan
+# separarse con el tiempo.
+SALIDA=$(mktemp); trap 'rm -f "$SALIDA"' EXIT
+pkexec "$MOTOR" --rescatar "$ELEGIDA" --confirmo > "$SALIDA" 2>&1
+CODIGO=$?
+
+# Fuera los códigos de color, que en una ventana se ven como basura.
+sed -i 's/\x1b\[[0-9;]*m//g' "$SALIDA"
+
+if [ "$CODIGO" = 0 ]; then
+  TITULO="Recuperación terminada"; ICONO="dialog-information"
+  CIERRE="\n\n<b>Abre SALMI y comprueba que están los pacientes.</b>"
+elif [ "$CODIGO" = 126 ] || [ "$CODIGO" = 127 ]; then
+  TITULO="No se dio permiso"; ICONO="dialog-error"
+  CIERRE="\n\n<b>No se tocó nada.</b> Hace falta la contraseña de administrador."
+else
+  TITULO="La recuperación NO se completó"; ICONO="dialog-error"
+  CIERRE="\n\n<b>Lo de antes está guardado.</b> Anota este mensaje y consúltalo."
+fi
+
+yad --class=redhornoma --center --borders=14 --width=680 --height=460 \
+  --title="$TITULO" --text-info --filename="$SALIDA" --fontname="monospace 9" \
+  --button="Cerrar:0" >/dev/null 2>&1
+
+aviso "$TITULO" "$(printf 'Copia del %s%b' "$E_FECHA" "$CIERRE")" "$ICONO"
+exit "$CODIGO"

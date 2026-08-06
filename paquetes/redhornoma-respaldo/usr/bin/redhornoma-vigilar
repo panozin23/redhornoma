@@ -1,0 +1,160 @@
+#!/bin/bash
+# redhornoma-vigilar — ¿Siguen respaldando todos los centros?
+#
+# El respaldo se hace solo, se comprueba solo y sube a la nube solo. Pero
+# hasta hoy, cuando fallaba, NADIE se enteraba. El .101 de Hornoma estuvo un
+# día entero caído y se supo por casualidad, yendo a mirar.
+#
+# Un aviso por correo no arregla eso: una máquina apagada no manda correos.
+# Lo único que funciona con una máquina muerta es que se note su SILENCIO.
+#
+# Por eso cada respaldo deja una señal fechada en la nube, y esto las lee
+# todas. Si un centro deja de dar señales, aquí se ve en rojo —desde el
+# portátil, desde otra ciudad, sin entrar en ninguna máquina—.
+#
+# Uso:
+#   redhornoma-vigilar              la tabla
+#   redhornoma-vigilar --ventana    lo mismo, en una ventana
+#   redhornoma-vigilar --nube drive:  si la señal está en otro sitio
+set -u
+
+NUBE_POR_DEFECTO=""
+VENTANA=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ventana) VENTANA=1; shift ;;
+    --nube)    NUBE_POR_DEFECTO="${2:-}"; shift 2 ;;
+    -h|--ayuda|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "no entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+mal(){ printf "   ${RO}✗${V} %s\n" "$1"; }
+nota(){ printf "   ${GR}%s${V}\n" "$1"; }
+
+command -v rclone >/dev/null 2>&1 || { mal "falta rclone"; exit 1; }
+
+# ── Dónde mirar ──────────────────────────────────────────────────────
+# Si esta máquina respalda, se saca de su propia configuración. Si no
+# —el portátil de euflo, por ejemplo— se usa la primera cuenta que haya.
+if [ -z "$NUBE_POR_DEFECTO" ]; then
+  N=$(grep -oP '^nube=\K.*' /var/lib/redhornoma/respaldo.conf 2>/dev/null | head -1)
+  [ -n "$N" ] && NUBE_POR_DEFECTO="${N%%:*}:"
+fi
+[ -n "$NUBE_POR_DEFECTO" ] || NUBE_POR_DEFECTO=$(rclone listremotes 2>/dev/null | head -1)
+if [ -z "$NUBE_POR_DEFECTO" ]; then
+  mal "no hay ninguna cuenta de nube configurada en este equipo"
+  nota "Configúrala con:  rclone config"
+  exit 1
+fi
+SENALERO="${NUBE_POR_DEFECTO%%:*}:SENALES-REDHORNOMA"
+
+# ── Traerlas ─────────────────────────────────────────────────────────
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+if ! rclone copy "$SENALERO" "$TMP" --retries 2 >/dev/null 2>&1; then
+  mal "no se pudo leer la nube"
+  nota "Comprueba la conexión, o prueba:  rclone lsd ${NUBE_POR_DEFECTO%%:*}:"
+  exit 1
+fi
+
+N_SENALES=$(find "$TMP" -name '*.txt' 2>/dev/null | wc -l)
+if [ "$N_SENALES" = 0 ]; then
+  titulo "TODAVÍA NO HAY NINGUNA SEÑAL"
+  nota "Ningún centro ha dejado señal en $SENALERO."
+  nota "Se dejan solas en cada respaldo, desde la versión 1.0.9."
+  nota "Si un centro ya respalda pero no aparece, actualízalo:"
+  nota "   sudo apt update && sudo apt install redhornoma-completo"
+  exit 1
+fi
+
+# ── Leerlas ──────────────────────────────────────────────────────────
+AHORA=$(date +%s)
+FILAS=(); HAY_ALARMA=0; HAY_AVISO=0
+
+for S in "$TMP"/*.txt; do
+  [ -f "$S" ] || continue
+  leer(){ grep -oP "^$1=\K.*" "$S" 2>/dev/null | head -1; }
+  C=$(leer centro); M=$(leer maquina); SEG=$(leer segundos)
+  PAC=$(leer pacientes); CONF=$(leer confirmado); CADA=$(leer cada_dias)
+  CADA="${CADA:-1}"; SEG="${SEG:-0}"
+
+  DIAS=$(( (AHORA - SEG) / 86400 ))
+  HORAS=$(( (AHORA - SEG) / 3600 ))
+  if   [ "$HORAS" -lt 1 ]  ; then CUANDO="hace $(( (AHORA-SEG)/60 )) minutos"
+  elif [ "$HORAS" -lt 24 ] ; then CUANDO="hace $HORAS horas"
+  elif [ "$DIAS"  = 1 ]    ; then CUANDO="ayer"
+  else                            CUANDO="hace $DIAS días"; fi
+
+  # Qué es «tarde» depende del ritmo de cada centro, pero con poca manga.
+  #
+  # El primer intento avisaba al DOBLE del ritmo y alarmaba al triple: con
+  # respaldo cada dos días, tres días sin copia salían en verde y cinco días
+  # solo en amarillo. Eso es mentir en la dirección peligrosa. Un tablero que
+  # tranquiliza cuando no debe es peor que no tener tablero.
+  #
+  # Ahora: un día de gracia sobre su ritmo, y alarma al doble más uno.
+  #   cada 2 días  →  avisa a los 3, alarma a los 5
+  #   cada día     →  avisa a los 2, alarma a los 3
+  LIMITE_AVISO=$(( CADA + 1 )); LIMITE_ALARMA=$(( CADA * 2 + 1 ))
+  if [ "$CONF" != "si" ]; then
+    COLOR="$RO"; MARCA="✗"; ESTADO="el último respaldo NO era de fiar"; HAY_ALARMA=1; SEV=3
+  elif [ "$DIAS" -ge "$LIMITE_ALARMA" ]; then
+    COLOR="$RO"; MARCA="✗"; ESTADO="SIN RESPALDAR — algo pasa ahí"; HAY_ALARMA=1; SEV=3
+  elif [ "$DIAS" -ge "$LIMITE_AVISO" ]; then
+    COLOR="$AM"; MARCA="!"; ESTADO="va con retraso"; HAY_AVISO=1; SEV=2
+  else
+    COLOR="$VE"; MARCA="●"; ESTADO="al día"; SEV=1
+  fi
+  # Se ordena por gravedad y, dentro de ella, por antigüedad: lo que hay que
+  # mirar hoy va arriba, no perdido entre los que están bien.
+  FILAS+=("$COLOR$MARCA$V|$C|$M|$CUANDO|${PAC:-?}|$ESTADO|$SEV|$DIAS")
+done
+
+# ── Mostrarlas ───────────────────────────────────────────────────────
+titulo "RESPALDOS DE TODOS LOS CENTROS"
+printf "   %-2s %-18s %-18s %-18s %10s  %s\n" "" "CENTRO" "MÁQUINA" "ÚLTIMO RESPALDO" "PACIENTES" "ESTADO"
+printf "   %s\n" "────────────────────────────────────────────────────────────────────────────────────"
+printf '%s\n' "${FILAS[@]}" | sort -t'|' -k7,7rn -k8,8rn | while IFS='|' read -r MK C M CU PA ES _ _; do
+  printf "   %-2s %-18s %-18s %-18s %10s  %s\n" "$MK" "$C" "$M" "$CU" "$PA" "$ES"
+done
+printf "\n"
+
+if [ "$HAY_ALARMA" = 1 ]; then
+  mal "Hay al menos un centro sin respaldar. Míralo hoy."
+  nota "Si la máquina está apagada o sin luz, su señal deja de llegar:"
+  nota "eso es exactamente lo que se ve aquí en rojo."
+elif [ "$HAY_AVISO" = 1 ]; then
+  printf "   ${AM}!${V} Algún centro va con retraso. Todavía no es grave.\n"
+else
+  printf "   ${VE}●${V} Todos los centros respaldaron a tiempo.\n"
+fi
+printf "\n"
+nota "Las señales viven en $SENALERO"
+nota "Cada respaldo deja la suya. Un centro que calla es un centro parado."
+
+# ── En ventana, si se pide ───────────────────────────────────────────
+if [ "$VENTANA" = 1 ] && command -v yad >/dev/null 2>&1 \
+   && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+  export GDK_BACKEND=x11
+  DATOS=()
+  for f in "${FILAS[@]}"; do
+    IFS='|' read -r MK C M CU PA ES _ _ <<< "$f"
+    # Fuera los códigos de color: en una tabla se verían como basura
+    MK=$(printf '%s' "$MK" | sed 's/\x1b\[[0-9;]*m//g')
+    case "$MK" in "●") IC="✅" ;; "!") IC="⚠️" ;; *) IC="❌" ;; esac
+    DATOS+=("$IC" "$C" "$M" "$CU" "$PA" "$ES")
+  done
+  yad --class=redhornoma --center --borders=14 --width=760 --height=340 \
+    --title="Respaldos de todos los centros" \
+    --text="<b>Un centro que deja de dar señales es un centro parado.</b>\nAunque esté sin luz o sin internet, aquí se nota." \
+    --list --no-selection \
+    --column=" " --column="Centro" --column="Máquina" --column="Último respaldo" \
+    --column="Pacientes" --column="Estado" \
+    "${DATOS[@]}" --button="Cerrar:0" >/dev/null 2>&1
+fi
+
+[ "$HAY_ALARMA" = 1 ] && exit 1
+exit 0

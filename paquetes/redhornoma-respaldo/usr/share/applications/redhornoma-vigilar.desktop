@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=¿Respaldaron todos los centros?
+GenericName=Vigilancia de respaldos
+Comment=Ver de un vistazo cuándo respaldó por última vez cada centro
+Exec=redhornoma-vigilar --ventana
+Icon=view-refresh
+Terminal=false
+Categories=System;Monitor;
+Keywords=vigilar;respaldo;centros;copias;aviso;alarma;
+StartupNotify=true

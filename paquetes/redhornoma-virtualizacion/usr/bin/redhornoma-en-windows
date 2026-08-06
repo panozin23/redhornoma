@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+# redhornoma-en-windows — Pregúntale algo al Windows sin abrir su ventana.
+#
+# Un centro tiene el Windows dentro de Linux, y casi siempre está encendido
+# sin que nadie mire su pantalla. Cuando hay que comprobar algo —¿arrancó el
+# SQL Server?, ¿cuánto ocupa la base de SALMI?, ¿queda disco?— abrir la
+# pantalla gráfica cuesta un minuto, ocupa la máquina y hay que ir con el
+# ratón. Y si el centro está a tres horas de camino, no se hace.
+#
+# Esto lo pregunta desde fuera, en dos segundos, y desde otra computadora si
+# hace falta. La respuesta se puede guardar y comparar con la de ayer.
+#
+# Quien lo hace posible es el agente invitado (qemu-guest-agent), el mismo
+# que permite congelar el disco para respaldar sin apagar nada. Si el agente
+# no está, esta herramienta lo dice claro en vez de quedarse colgada.
+#
+# Uso:
+#   redhornoma-en-windows --estado                 informe del Windows
+#   redhornoma-en-windows "dir C:\"                una orden de las de cmd
+#   redhornoma-en-windows --powershell "Get-Date"  una línea de PowerShell
+#   redhornoma-en-windows --guion revisar.ps1      un guion entero
+#   redhornoma-en-windows --maquina NOMBRE ...     cuando hay varias
+
+import argparse
+import base64
+from datetime import datetime
+import json
+import subprocess
+import sys
+import time
+
+VIRSH = ["virsh", "-c", "qemu:///system"]
+
+V = "\033[0m"; AZ = "\033[1;34m"; VE = "\033[1;32m"; RO = "\033[1;31m"; GR = "\033[0;90m"
+
+
+def mal(t):  print(f"   {RO}✗{V} {t}", file=sys.stderr)
+def nota(t): print(f"   {GR}{t}{V}")
+
+
+def virsh(*args, entrada=None):
+    return subprocess.run(VIRSH + list(args), capture_output=True, text=True,
+                          input=entrada, timeout=60)
+
+
+# ── Elegir la máquina ────────────────────────────────────────────────
+# Mismo criterio que redhornoma-entrar: si solo hay una, es esa; si hay
+# varias pero solo una encendida, es la encendida. Preguntar cuando la
+# respuesta es evidente solo sirve para molestar.
+def elegir_maquina(pedida):
+    todas = [l for l in virsh("list", "--all", "--name").stdout.split("\n") if l.strip()]
+    if not todas:
+        mal("no hay ninguna máquina de Windows en esta computadora")
+        return None
+    if pedida:
+        if pedida not in todas:
+            mal(f"no hay ninguna máquina llamada «{pedida}»")
+            for m in todas:
+                print(f"        {m}", file=sys.stderr)
+            return None
+        return pedida
+    if len(todas) == 1:
+        return todas[0]
+    encendidas = [l for l in virsh("list", "--name").stdout.split("\n") if l.strip()]
+    if len(encendidas) == 1:
+        return encendidas[0]
+    mal("hay varias máquinas — elige una con --maquina")
+    for m in todas:
+        print(f"        {m}", file=sys.stderr)
+    return None
+
+
+def agente(vm, peticion):
+    r = virsh("qemu-agent-command", vm, json.dumps(peticion))
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or "").strip() or "el agente no contestó")
+    return json.loads(r.stdout)["return"]
+
+
+def comprobar_agente(vm):
+    try:
+        agente(vm, {"execute": "guest-ping"})
+        return True
+    except Exception:
+        mal(f"«{vm}» no responde al agente invitado")
+        nota("Puede ser que el Windows esté apagado o arrancando todavía,")
+        nota("o que le falte el agente. Para instalarlo, dentro de Windows:")
+        nota("   abrir el CD virtio-win  →  virtio-win-guest-tools.exe")
+        return False
+
+
+def ejecutar(vm, programa, argumentos, espera):
+    pid = agente(vm, {"execute": "guest-exec",
+                      "arguments": {"path": programa, "arg": argumentos,
+                                    "capture-output": True}})["pid"]
+    # El agente no avisa cuando termina; hay que preguntarle. Medio segundo
+    # entre preguntas: el servidor del centro suele tener dos hilos y los
+    # comparte con el propio Windows.
+    limite = time.time() + espera
+    while time.time() < limite:
+        estado = agente(vm, {"execute": "guest-exec-status", "arguments": {"pid": pid}})
+        if estado.get("exited"):
+            return estado
+        time.sleep(0.5)
+    raise TimeoutError(f"la orden no terminó en {espera} segundos")
+
+
+def texto(estado, clave):
+    """Windows contesta en su codificación, que no es la de Linux."""
+    if not estado.get(clave):
+        return ""
+    crudo = base64.b64decode(estado[clave])
+    for cod in ("cp850", "cp1252", "utf-8"):
+        try:
+            return crudo.decode(cod)
+        except UnicodeDecodeError:
+            continue
+    return crudo.decode("utf-8", "replace")
+
+
+def por_powershell(guion):
+    """Manda un guion de PowerShell sin que nadie lo toque por el camino.
+
+    Una orden escrita a mano atraviesa varios programas antes de llegar a
+    Windows, y cada uno se queda con parte de las comillas: un `$_.Length`
+    no sobrevive el viaje. Con -EncodedCommand viaja en base64 y llega
+    exactamente como se escribió.
+
+    La primera línea calla las barras de progreso: PowerShell las manda por
+    el canal de errores y ensucian toda la respuesta.
+    """
+    completo = "$ProgressPreference='SilentlyContinue'\n" + guion
+    b64 = base64.b64encode(completo.encode("utf-16-le")).decode("ascii")
+    return "powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", b64]
+
+
+# ── El informe ───────────────────────────────────────────────────────
+# Lo que de verdad hay que saber de un Windows que guarda la información de
+# un centro de salud. Nada más, para que quepa en una pantalla.
+INFORME = r'''
+function T($t) { Write-Output ""; Write-Output "-- $t" }
+
+T "QUIEN ES"
+"   {0}  ({1})" -f (Get-CimInstance Win32_OperatingSystem).Caption, $env:COMPUTERNAME
+"   encendido desde {0}" -f (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+
+T "EL RELOJ"
+# Un Windows con la zona horaria equivocada no da ningun error: sigue
+# funcionando y anota cada receta, cada dispensacion y cada prestacion con
+# una hora que no es. Cerca de medianoche cambia hasta el DIA, y en un
+# cambio de mes el registro entra en el concentrado equivocado -- el que se
+# entrega al SEDES.
+#
+# Se descubrio el 2026-08-05 en servidor-ciudad: Windows creia estar en
+# Mexico (UTC-6), dos horas atras de Bolivia.
+$tz = Get-TimeZone
+"   hora:              {0}" -f (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+"   zona horaria:      {0}" -f $tz.Id
+"   desfase UTC:       {0}" -f $tz.BaseUtcOffset
+if ($tz.BaseUtcOffset.TotalHours -eq -4) {
+  "   [ok] UTC-4, que es la de Bolivia"
+} else {
+  "   [OJO] NO es UTC-4. Bolivia es UTC-4 todo el ano, sin horario de verano."
+  "         Corregirlo:  tzutil /s ""SA Western Standard Time"""
+}
+# Se compara con el reloj de Linux, que sincroniza por NTP y es de fiar.
+#
+# Antes se miraba si el servicio w32time estaba corriendo, y eso NO significa
+# nada: fuera de un dominio, Windows lo arranca, sincroniza y lo apaga. El
+# aviso saltaba en todas las maquinas del mundo -- y un aviso que salta
+# siempre ensena a la gente a ignorar los avisos, que es peor que no avisar.
+#
+# Lo que importa no es que un servicio corra, sino que la hora sea la buena.
+$anfitrion = [datetime]"@HORA_ANFITRION@"
+$dif = [math]::Round([math]::Abs(((Get-Date) - $anfitrion).TotalSeconds))
+if ($dif -le 90) {
+  "   [ok] coincide con el reloj de Linux ({0} s de diferencia)" -f $dif
+} elseif ($dif -lt 3600) {
+  "   [OJO] va {0} minutos desviado del reloj de Linux." -f [math]::Round($dif/60)
+  "         Corregirlo:  w32tm /resync /force"
+} else {
+  "   [OJO] va {0} horas desviado del reloj de Linux." -f [math]::Round($dif/3600,1)
+  "         Cada registro de SALMI lleva esa hora equivocada."
+  "         Corregirlo:  w32tm /resync /force"
+}
+
+T "DISCO"
+Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
+  "   {0}  {1,6:N1} GB libres de {2:N0} GB" -f $_.DeviceID, ($_.FreeSpace/1GB), ($_.Size/1GB)
+}
+
+T "PROGRAMAS DE SALUD"
+foreach ($p in @("C:\SALMI-PN_Dispensacion_BO","C:\SOAPS7","C:\SOAPS")) {
+  if (Test-Path $p) { "   [si] $p" } else { "   [no] $p" }
+}
+
+T "BASES DE DATOS Y CUANDO SE TOCARON POR ULTIMA VEZ"
+# Solo donde de verdad viven. Rastrear C:\ entero tarda mas de dos minutos
+# en una maquina de dos hilos con disco mecanico —se probo y se colgo— y no
+# encuentra nada que no este en estas carpetas.
+$sitios = @("C:\SALMI-PN_Dispensacion_BO","C:\SOAPS7","C:\SOAPS","C:\SNIS",
+            "C:\Program Files\Microsoft SQL Server","C:\Program Files (x86)\Microsoft SQL Server")
+$vistas = @()
+foreach ($s in $sitios) {
+  if (Test-Path $s) {
+    $vistas += Get-ChildItem $s -Include *.mdb,*.mdf -Recurse -ErrorAction SilentlyContinue |
+               Where-Object { $_.Length -gt 1MB }
+  }
+}
+if ($vistas) {
+  $vistas | Sort-Object LastWriteTime -Descending | Select-Object -First 12 |
+    ForEach-Object { "   {0,-26} {1,8:N1} MB   {2}" -f $_.Name, ($_.Length/1MB), $_.LastWriteTime.ToString("yyyy-MM-dd HH:mm") }
+} else { "   ninguna base encontrada" }
+
+T "SQL SERVER (lo usa SOAPS)"
+$s = Get-Service | Where-Object { $_.Name -like "MSSQL*" -or $_.Name -like "SQLBrowser*" }
+if ($s) { $s | ForEach-Object { "   {0,-24} {1}" -f $_.Name, $_.Status } }
+else { "   no hay SQL Server en esta maquina" }
+
+T "CARPETAS DE RED CONECTADAS"
+$n = Get-CimInstance Win32_NetworkConnection -ErrorAction SilentlyContinue
+if ($n) { $n | ForEach-Object { "   {0} -> {1}" -f $_.LocalName, $_.RemoteName } }
+else { "   ninguna (normal si nadie ha iniciado sesion)" }
+
+T "QUIEN TIENE SESION ABIERTA"
+$q = (quser 2>$null)
+if ($q) { $q | ForEach-Object { "   $_" } } else { "   nadie" }
+'''
+
+
+def main():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--maquina")
+    p.add_argument("--estado", action="store_true")
+    p.add_argument("--powershell", action="store_true")
+    p.add_argument("--guion")
+    p.add_argument("--espera", type=int, default=120)
+    p.add_argument("-h", "--ayuda", "--help", action="store_true", dest="ayuda")
+    p.add_argument("orden", nargs="*")
+    a = p.parse_args()
+
+    if a.ayuda or (not a.estado and not a.guion and not a.orden):
+        with open(__file__, encoding="utf-8") as f:
+            for l in f.read().split("\n")[1:25]:
+                print(l.lstrip("#").lstrip() if l.startswith("#") else l)
+        return 0
+
+    vm = elegir_maquina(a.maquina)
+    if not vm or not comprobar_agente(vm):
+        return 1
+
+    if a.estado:
+        # La hora de Linux viaja dentro del guion, para que Windows pueda
+        # compararse con ella. Este equipo sincroniza por NTP; el Windows de
+        # dentro, casi nunca.
+        informe = INFORME.replace("@HORA_ANFITRION@",
+                                  datetime.now().strftime("%Y-%m-%dT%H:%M:%S"))
+        programa, argumentos = por_powershell(informe)
+        print(f"\n{AZ}══════════════════════════════════════════════════════{V}")
+        print(f"{AZ} EL WINDOWS DE «{vm}», POR DENTRO{V}")
+        print(f"{AZ}══════════════════════════════════════════════════════{V}")
+    elif a.guion:
+        contenido = sys.stdin.read() if a.guion == "-" else open(a.guion, encoding="utf-8").read()
+        programa, argumentos = por_powershell(contenido)
+    elif a.powershell:
+        programa, argumentos = por_powershell(" ".join(a.orden))
+    else:
+        programa, argumentos = "cmd.exe", ["/c"] + a.orden
+
+    try:
+        estado = ejecutar(vm, programa, argumentos, a.espera)
+    except Exception as e:
+        mal(str(e))
+        return 1
+
+    for linea in (texto(estado, "out-data") + texto(estado, "err-data")).splitlines():
+        if linea.strip():
+            print("  " + linea.rstrip())
+
+    codigo = estado.get("exitcode", 0)
+    if codigo:
+        nota(f"(Windows terminó con código {codigo})")
+        return codigo
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

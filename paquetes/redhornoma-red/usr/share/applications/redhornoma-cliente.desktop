@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Conectar al servidor del centro
+GenericName=Puesto de consultorio
+Comment=Usar SALMI y SOAPS del servidor, sobre la misma información que los demás
+Exec=redhornoma-cliente
+Icon=network-workgroup
+Terminal=false
+Categories=System;Network;
+Keywords=cliente;consultorio;puesto;salmi;soaps;servidor;conectar;red;
+StartupNotify=true

@@ -1,10 +1,10 @@
 Package: redhornoma-perifericos
-Version: 1.0.2
+Version: 1.0.6
 Section: admin
 Priority: optional
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
-Depends: redhornoma-base (>= 1.0.0), samba, samba-common-bin
+Depends: redhornoma-base (>= 1.0.1), samba, samba-common-bin
 Recommends: cups, sane-utils
 Description: Una carpeta que ven Linux y Windows a la vez
  Pasar un archivo al Windows virtual no debería obligar a grabar un CD ni

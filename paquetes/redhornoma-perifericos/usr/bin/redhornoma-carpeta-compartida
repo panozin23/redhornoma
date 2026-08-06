@@ -23,11 +23,20 @@ USUARIO_SMB=redhornoma
 CONF_SMB=/etc/samba/smb.conf
 RESP=/var/backups/redhornoma
 
-CREAR=0; ABRIR_CENTRO=0
+CREAR=0; ABRIR_CENTRO=0; SOLO_VISIBLE=0
 for a in "$@"; do
   case "$a" in
     --crear) CREAR=1 ;;
     --tambien-el-centro) ABRIR_CENTRO=1 ;;
+    # Solo la parte que se ve: el enlace del escritorio y el acceso en el
+    # gestor de archivos. Corre al iniciar sesión, como la propia persona y
+    # SIN sudo.
+    #
+    # Va aparte porque es cuestión de MOMENTO: el servicio de arranque corre
+    # como root, y en ese instante la carpeta «Escritorio» del usuario puede
+    # no existir todavía —se crea al iniciar sesión—. El enlace no aparecería
+    # y nadie sabría por qué.
+    --visible) SOLO_VISIBLE=1 ;;
     --ayuda|-h) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   esac
 done
@@ -40,6 +49,144 @@ ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
 mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
 avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
 d(){   printf "   %-24s %s\n" "$1" "$2"; }
+
+# ── Que se VEA ────────────────────────────────────────────────────────
+#
+# Hasta aquí la carpeta funciona, pero vive en /var/lib/libvirt/compartido.
+# Nadie que no sea informático va a escribir esa ruta, y quien no la
+# encuentra acaba enchufando un pendrive — que es exactamente lo que esto
+# venía a evitar.
+#
+# Objetivo 6 de euflo, con sus palabras: «sin usar código, todo en un
+# entorno gráfico de jalar y soltar».
+#
+# Se pone un enlace en el escritorio y un acceso en la barra lateral del
+# gestor de archivos. Un ENLACE a la carpeta, no un lanzador .desktop: al
+# enlace se le pueden arrastrar archivos encima y al lanzador no. Jalar y
+# soltar tiene que funcionar de verdad, no parecerlo.
+visible_para_el_usuario(){
+  local U="$1" CASA ESCRITORIO ENLACE
+  CASA=$(getent passwd "$U" 2>/dev/null | cut -d: -f6)
+  [ -n "$CASA" ] && [ -d "$CASA" ] || return 0
+
+  # El nombre de la carpeta cambia con el idioma: «Escritorio» en español,
+  # «Desktop» en inglés. Se le pregunta al sistema en vez de adivinar.
+  #
+  # Esto corre de dos maneras: como root desde el servicio de arranque, y
+  # como la propia persona al iniciar sesión. En el segundo caso no hay
+  # sudo ni hace falta.
+  if [ "$(id -un)" = "$U" ]; then
+    ESCRITORIO=$(xdg-user-dir DESKTOP 2>/dev/null)
+  else
+    ESCRITORIO=$(sudo -u "$U" env HOME="$CASA" xdg-user-dir DESKTOP 2>/dev/null)
+  fi
+  if [ -z "$ESCRITORIO" ] || [ "$ESCRITORIO" = "$CASA" ] || [ ! -d "$ESCRITORIO" ]; then
+    for posible in "$CASA/Escritorio" "$CASA/Desktop"; do
+      [ -d "$posible" ] && ESCRITORIO="$posible" && break
+    done
+  fi
+
+  if [ -n "$ESCRITORIO" ] && [ -d "$ESCRITORIO" ]; then
+    ENLACE="$ESCRITORIO/Pasar a Windows"
+    if [ ! -e "$ENLACE" ] || [ -L "$ENLACE" ]; then
+      ln -sfn "$CARPETA" "$ENLACE"
+      chown -h "$U":"$U" "$ENLACE" 2>/dev/null
+      ok "en el escritorio de $U: «Pasar a Windows»"
+    fi
+  else
+    avi "no encontré el escritorio de $U; no puse el enlace"
+  fi
+
+  # ── La barra lateral de Dolphin ───────────────────────────────────
+  #
+  # Solo se toca si el archivo ya existe: si Dolphin no se ha abierto nunca,
+  # lo crea él al arrancar y machacaría lo que pusiéramos.
+  #
+  # Se inserta el texto justo antes de </xbel>, SIN releer y reescribir el
+  # XML entero. El primer intento usaba ElementTree y corrompía el archivo:
+  # al reescribirlo descartaba la declaración «xmlns:bookmark» de la primera
+  # línea y dejaba huérfana la etiqueta «bookmark:icon». Dolphin se quedaba
+  # sin barra lateral —«unbound prefix»— y nadie habría sabido por qué.
+  #
+  # Tocar lo mínimo deja el resto del archivo byte por byte como estaba.
+  local LUGARES="$CASA/.local/share/user-places.xbel"
+  if [ -f "$LUGARES" ] && command -v python3 >/dev/null 2>&1; then
+    if python3 - "$LUGARES" "$CARPETA" <<'PY'
+import sys, xml.etree.ElementTree as ET
+ruta, carpeta = sys.argv[1], sys.argv[2]
+url = "file://" + carpeta
+texto = open(ruta, encoding="utf-8").read()
+
+# Ya está: esto corre en cada arranque y no debe duplicar.
+if 'href="%s"' % url in texto:
+    sys.exit(0)
+if "</xbel>" not in texto:
+    sys.exit(1)
+
+entrada = (' <bookmark href="%s">\n'
+           '  <title>Pasar a Windows</title>\n'
+           '  <info>\n'
+           '   <metadata owner="http://freedesktop.org">\n'
+           '    <bookmark:icon name="folder-windows"/>\n'
+           '   </metadata>\n'
+           '  </info>\n'
+           ' </bookmark>\n') % url
+
+nuevo = texto.replace("</xbel>", entrada + "</xbel>", 1)
+
+# Comprobar ANTES de escribir. Un archivo de lugares roto deja al usuario
+# sin barra lateral, y arreglarlo a mano no está al alcance de nadie en un
+# centro de salud.
+try:
+    ET.fromstring(nuevo)
+except ET.ParseError:
+    sys.exit(1)
+
+open(ruta, "w", encoding="utf-8").write(nuevo)
+PY
+    then
+      chown "$U":"$U" "$LUGARES" 2>/dev/null
+      ok "en la barra lateral del gestor de archivos"
+    fi
+  fi
+
+  # ── Los gestores de archivos de GTK ───────────────────────────────
+  #
+  # NUNCA se crea .config aquí. La primera versión hacía
+  #
+  #     mkdir -p "$CASA/.config/gtk-3.0"
+  #
+  # y como esto llegó a ejecutarse como root antes del primer inicio de
+  # sesión, dejaba **/home/usuario/.config perteneciendo a root**. Después
+  # KDE, que corre como la persona, no podía escribir nada dentro: ksmserver,
+  # kded6, kcminit y KDE Connect llenaban la pantalla de avisos de
+  # «archivo de configuración no escribible». Un escritorio inservible por
+  # querer añadir un marcador.
+  #
+  # Se vio el 2026-08-06 al arrancar la ISO en el banco de pruebas.
+  #
+  # Ahora: solo se escribe si la carpeta YA existe, y eso solo ocurre cuando
+  # la persona ya ha iniciado sesión alguna vez. Si no existe, no pasa nada:
+  # el enlace del escritorio y el acceso de Dolphin ya cumplen el objetivo.
+  local GTK="$CASA/.config/gtk-3.0/bookmarks"
+  if [ -d "$CASA/.config/gtk-3.0" ] \
+     && ! grep -qs "^file://$CARPETA " "$GTK" 2>/dev/null; then
+    printf 'file://%s Pasar a Windows\n' "$CARPETA" >> "$GTK"
+    [ "$(id -u)" = "0" ] && chown "$U":"$U" "$GTK" 2>/dev/null
+  fi
+}
+
+# ── Modo «solo lo que se ve» ──────────────────────────────────────────
+# Lo lanza /etc/xdg/autostart al iniciar sesión, como la propia persona.
+# No necesita sudo, no toca Samba, y sale en silencio si no hay nada que
+# hacer: se ejecuta en CADA inicio de sesión y no debe molestar.
+if [ "$SOLO_VISIBLE" = "1" ]; then
+  [ -d "$CARPETA" ] || exit 0
+  visible_para_el_usuario "$(id -un)" >/dev/null 2>&1
+  exit 0
+fi
+
+echo
 
 titulo "CARPETA COMPARTIDA CON WINDOWS"
 
@@ -143,7 +290,14 @@ fi
 
 # ── Publicar la carpeta ───────────────────────────────────────────────
 echo
-cp -f "$CONF_SMB" "$RESP/smb.conf.antes-de-$(date '+%Y%m%d-%H%M')" 2>/dev/null
+# Se guarda el nombre exacto de ESTA copia. Antes se restauraba con un
+# comodín —«smb.conf.antes-de-*»— y eso funciona la primera vez y solo la
+# primera: en cuanto hay dos copias, el comodín devuelve dos nombres y
+# «cp» falla porque el destino no es una carpeta. Es decir, la recuperación
+# se rompía exactamente el día que hiciera falta usarla.
+mkdir -p "$RESP"
+COPIA_PREVIA="$RESP/smb.conf.antes-de-$(date '+%Y%m%d-%H%M%S')"
+cp -f "$CONF_SMB" "$COPIA_PREVIA" 2>/dev/null || COPIA_PREVIA=""
 sed -i '/^\[compartido\]/,/^$/d' "$CONF_SMB" 2>/dev/null
 
 PERMITIDOS="192.168.122. 127."
@@ -171,10 +325,21 @@ if testparm -s >/dev/null 2>&1; then
   ok "la configuración de Samba es correcta"
 else
   mal "la configuración de Samba tiene un error"
-  echo "      Se restaura la anterior."
-  cp -f "$RESP/smb.conf.antes-de-"* "$CONF_SMB" 2>/dev/null
+  if [ -n "$COPIA_PREVIA" ] && [ -f "$COPIA_PREVIA" ]; then
+    if cp -f "$COPIA_PREVIA" "$CONF_SMB"; then
+      ok "se restauró la configuración anterior — Samba sigue como estaba"
+    else
+      mal "NO se pudo restaurar. La copia buena está en:"
+      echo "      $COPIA_PREVIA"
+    fi
+  else
+    mal "no hay copia de la configuración anterior que restaurar"
+  fi
   exit 1
 fi
+
+
+[ "$DUENO" != "root" ] && visible_para_el_usuario "$DUENO"
 
 systemctl enable --now smbd >/dev/null 2>&1
 systemctl restart smbd >/dev/null 2>&1

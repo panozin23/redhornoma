@@ -1,4 +1,4 @@
-# Crear la carpeta compartida en el primer arranque.
+# Mantener publicada la carpeta compartida, en cada arranque.
 #
 # Pasar un archivo de Linux a Windows es de las cosas que más se hacen en un
 # centro: los catálogos que manda el Ministerio, los respaldos, los informes.
@@ -10,12 +10,30 @@
 #
 # Solo la ve la máquina virtual de este mismo equipo. Para abrirla al centro
 # entero hay que pedirlo a mano, y entonces sí pide contraseña.
+#
+# ── Por qué se ejecuta SIEMPRE y no solo la primera vez ──────────────
+#
+# Antes tenía:  ConditionPathExists=!/var/lib/libvirt/compartido
+#
+# Es decir, «ejecútate solo si la carpeta no existe». Suena razonable, pero
+# comprueba lo que no es: el trabajo de este servicio no es crear una
+# carpeta, es que esa carpeta ESTÉ PUBLICADA para Windows. Son cosas
+# distintas.
+#
+# Con aquella condición, si alguien reinstalaba Samba, editaba smb.conf, o
+# la herramienta fallaba a mitad —carpeta creada, publicación sin escribir—
+# el servicio no volvía a ejecutarse NUNCA, porque la carpeta seguía ahí. El
+# canal entre Linux y Windows quedaba muerto sin que nada avisara.
+#
+# Ahora corre en cada arranque. No cuesta: la herramienta mira cómo está
+# todo, reescribe su bloque de smb.conf, lo comprueba con testparm y
+# restaura el anterior si quedó mal. Repetirla es seguro, y así el centro se
+# arregla solo al encender en vez de esperar a que alguien se dé cuenta.
 
 [Unit]
 Description=Carpeta compartida entre Linux y Windows
 After=smbd.service network.target
 Wants=smbd.service
-ConditionPathExists=!/var/lib/libvirt/compartido
 
 [Service]
 Type=oneshot

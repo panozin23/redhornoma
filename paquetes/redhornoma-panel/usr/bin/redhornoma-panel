@@ -424,6 +424,25 @@ if command -v redhornoma-respaldo >/dev/null 2>&1; then
   CAMPOS+=(--field="Respaldar ahora!document-save:fbtn"
            "bash -c 'x-terminal-emulator -e bash -c \"sudo redhornoma-respaldo --ahora; echo; read -p \\\"Pulsa Enter para cerrar\\\"\" &'")
 fi
+# Recuperar va justo detrás de respaldar, y no escondido en un menú: el día
+# que haga falta, quien lo busque estará nervioso y con prisa.
+if command -v redhornoma-recuperar >/dev/null 2>&1; then
+  CAMPOS+=(--field="Recuperar información!document-revert:fbtn"
+           "bash -c 'redhornoma-recuperar &'")
+fi
+# Solo en los puestos: en el servidor, este botón invita a conectarse a sí
+# mismo, que no tiene sentido y confunde a quien lo vea.
+if command -v redhornoma-cliente >/dev/null 2>&1 \
+   && [ "$(cat "$CONF/papel" 2>/dev/null)" != "servidor" ]; then
+  CAMPOS+=(--field="Conectar al servidor del centro!network-workgroup:fbtn"
+           "bash -c 'redhornoma-cliente &'")
+fi
+# La vigilancia de TODOS los centros, no solo de este. Un centro que deja
+# de dar señales es un centro parado, y eso solo se ve mirando desde fuera.
+if command -v redhornoma-vigilar >/dev/null 2>&1; then
+  CAMPOS+=(--field="¿Respaldaron todos los centros?!view-refresh:fbtn"
+           "bash -c 'redhornoma-vigilar --ventana &'")
+fi
 if command -v redhornoma-equipos >/dev/null 2>&1; then
   CAMPOS+=(--field="Ver las otras computadoras!network-workgroup:fbtn"
            "bash -c 'redhornoma-equipos &'")

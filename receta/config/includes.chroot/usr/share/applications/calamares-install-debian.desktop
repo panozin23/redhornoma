@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Instalar RedHornoma
+GenericName=Instalador del sistema
+Comment=Instalar RedHornoma en el disco de esta computadora
+Exec=calamares-install-debian
+Icon=install-debian
+Terminal=false
+StartupNotify=true
+Categories=System;
+Keywords=instalar;instalador;sistema;redhornoma;calamares;disco;
+NoDisplay=false

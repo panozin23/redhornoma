@@ -6,13 +6,32 @@
 # propósito: «systemctl enable» no funciona dentro del chroot donde se
 # construye la ISO, y al fallar en silencio dejaba el servicio apagado.
 # Pasó el 2026-08-02 y solo se vio revisando el sistema construido.
-#
-# Aquí solo se avisa a systemd de que hay algo nuevo, cuando lo hay.
 set -e
 
 case "$1" in
   configure)
-    [ -d /run/systemd/system ] && systemctl daemon-reload >/dev/null 2>&1 || true
+    # /run/systemd/system solo existe en una máquina encendida de verdad.
+    # Dentro del chroot de la ISO no está, y por eso ahí no se hace nada:
+    # allí basta con el enlace, que systemd leerá al arrancar.
+    if [ -d /run/systemd/system ]; then
+      systemctl daemon-reload >/dev/null 2>&1 || true
+
+      # Ponerlo en marcha AHORA, no en el próximo reinicio.
+      #
+      # Sin esto, un centro que se actualiza con «apt upgrade» se queda con
+      # el servicio instalado y parado hasta que alguien apague la máquina.
+      # Y el servidor de un centro de salud no se apaga: está justamente
+      # para no apagarse.
+      #
+      # Se vio el 2026-08-05 en servidor-ciudad: el servicio llevaba tres
+      # días instalado sin haberse ejecutado NUNCA. La carpeta compartida
+      # funcionaba solo porque alguien corrió la herramienta a mano.
+      #
+      # Repetirlo no hace daño: la herramienta borra su propio bloque de
+      # smb.conf antes de volver a escribirlo, comprueba el resultado con
+      # testparm, y si queda mal restaura la configuración anterior.
+      systemctl start redhornoma-carpeta-compartida.service >/dev/null 2>&1 || true
+    fi
     ;;
 esac
 

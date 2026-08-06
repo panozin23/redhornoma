@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Carpeta para pasar archivos a Windows
+Comment=Deja el enlace «Pasar a Windows» en el escritorio y en el gestor de archivos
+Exec=/usr/bin/redhornoma-carpeta-compartida --visible
+Terminal=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+OnlyShowIn=KDE;GNOME;XFCE;LXQt;MATE;Cinnamon;

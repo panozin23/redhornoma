@@ -1328,6 +1328,56 @@ done
                       || ok "no había ninguno que sobrara"
 
 # ═════════════════════════════════════════════════════════════════════
+#  LA SEÑAL — para que se sepa desde fuera que este centro sigue vivo
+# ═════════════════════════════════════════════════════════════════════
+#
+# El problema que resuelve: cuando un respaldo falla, o cuando la máquina
+# lleva días apagada, NADIE se entera. El .101 de Hornoma estuvo un día
+# entero caído y se supo por casualidad, yendo a mirar.
+#
+# Un aviso por correo no sirve para eso: una máquina apagada no manda
+# correos. Lo único que funciona con una máquina muerta es que se note su
+# SILENCIO.
+#
+# Por eso cada respaldo deja una señal fechada en la nube. Quien la mire
+# —desde el portátil, desde el teléfono, desde otra ciudad— ve cuándo
+# respaldó cada centro por última vez. Si una señal deja de actualizarse,
+# eso ES la alarma, y llega igual aunque la máquina esté sin luz.
+#
+# Pesa menos de 300 bytes: se sube SIEMPRE, aunque el respaldo entero solo
+# viaje a la nube cada dos o tres días.
+if [ -n "${NUBE:-}" ] && command -v rclone >/dev/null 2>&1; then
+  SENAL="$BASE/senal.txt"
+  MI_CENTRO=$(grep -oP '^centro=\K.*' /etc/redhornoma/centro.conf 2>/dev/null | head -1)
+  MI_NOMBRE=$(grep -oP '^nombre=\K.*' /etc/redhornoma/centro.conf 2>/dev/null | head -1)
+  MI_CENTRO="${MI_CENTRO:-sin-centro}"
+  MI_NOMBRE="${MI_NOMBRE:-$(cat /proc/sys/kernel/hostname 2>/dev/null || echo equipo)}"
+
+  {
+    printf 'centro=%s\n'        "$MI_CENTRO"
+    printf 'maquina=%s\n'       "$MI_NOMBRE"
+    printf 'fecha=%s\n'         "$(date '+%Y-%m-%d %H:%M')"
+    printf 'segundos=%s\n'      "$(date +%s)"
+    printf 'confirmado=%s\n'    "$([ "$BIEN" = 1 ] && echo si || echo NO)"
+    printf 'pacientes=%s\n'     "${N_PAC:-0}"
+    printf 'prestaciones=%s\n'  "${N_PRES:-0}"
+    printf 'cada_dias=%s\n'     "$CADA_DIAS"
+    printf 'copias_fuera=%s\n'  "${FUERA:-0}"
+  } > "$SENAL"
+
+  # El nombre lleva centro y máquina: dos servidores del mismo centro no
+  # deben pisarse la señal el uno al otro.
+  SENALERO="${NUBE%%:*}:SENALES-REDHORNOMA"
+  if rclone copyto "$SENAL" "$SENALERO/${MI_CENTRO}--${MI_NOMBRE}.txt" \
+       --retries 2 >/dev/null 2>&1; then
+    ok "señal dejada en la nube — desde fuera se sabe que este centro respaldó"
+  else
+    avi "no se pudo dejar la señal en la nube"
+    echo "         Sin ella, nadie sabrá desde fuera si este centro sigue respaldando."
+  fi
+fi
+
+# ═════════════════════════════════════════════════════════════════════
 # El titular tiene que decir la verdad. Antes ponía «RESPALDO HECHO»
 # pasara lo que pasara, y quien lo lee de un vistazo se queda con eso.
 if [ "$BIEN" = "1" ]; then

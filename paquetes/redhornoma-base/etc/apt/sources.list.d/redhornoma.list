@@ -1,0 +1,10 @@
+# De aquí salen las mejoras de RedHornoma.
+#
+# Una máquina de un centro de salud no se reinstala para corregir un guion.
+# Con este origen puesto, un «apt upgrade» trae las correcciones: pesan
+# kilobytes, no gigabytes, y eso es la diferencia entre bajarlas por internet
+# rural y no bajarlas nunca.
+#
+# La firma se comprueba contra /usr/share/keyrings/redhornoma.gpg. Si alguien
+# cambiara los paquetes por el camino, apt lo rechazaría.
+deb [signed-by=/usr/share/keyrings/redhornoma.gpg] https://panozin23.github.io/redhornoma trixie main

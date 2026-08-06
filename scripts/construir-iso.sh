@@ -7,7 +7,8 @@
 #
 # Uso:  sudo bash scripts/construir-iso.sh
 #
-# Tarda entre 40 y 90 minutos y descarga unos 3 GB.
+# La primera vez tarda entre 40 y 90 minutos y descarga unos 3 GB. Las
+# siguientes, unos 12 minutos: los paquetes descargados se conservan.
 set -u
 
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
@@ -66,9 +67,21 @@ if [ -d "$RECETA/chroot" ] || [ -d "$RECETA/binary" ]; then
   echo "   Hay restos de una construcción anterior."
   echo "   Se borran para empezar limpio (las ISOs ya generadas no se tocan)."
   echo
-  lb clean --purge >/dev/null 2>&1
+  # «lb clean» a secas, NO «--purge».
+  #
+  # --purge activa RM_CACHE y hace «rm -rf cache»: borra los ~3 GB de
+  # paquetes ya descargados. Cada construcción volvía a bajarlos enteros,
+  # y por eso tardaba una hora y cada intento era una lotería con la red.
+  # El 2026-08-05 se perdieron dos construcciones seguidas por eso.
+  #
+  # El sistema a medio construir (chroot, binary) sí hay que borrarlo: eso
+  # es lo que ensucia. Los paquetes descargados no ensucian nada — llevan
+  # su versión en el nombre, y si sale una más nueva, apt la baja igual.
+  lb clean >/dev/null 2>&1
   rm -rf "$RECETA/chroot" "$RECETA/binary" "$RECETA/cache/stages"
   ok "limpio"
+  GUARDADOS=$(ls -1 "$RECETA/cache/packages.chroot"/*.deb 2>/dev/null | wc -l)
+  [ "$GUARDADOS" -gt 0 ] && ok "se conservan $GUARDADOS paquetes ya descargados"
 else
   ok "no había nada que limpiar"
 fi
@@ -156,9 +169,14 @@ fi
 # ── Construir ─────────────────────────────────────────────────────────
 titulo "3 · CONSTRUIR"
 
+if [ "${GUARDADOS:-0}" -gt 100 ]; then
+  TIEMPO="Con $GUARDADOS paquetes ya descargados, esto suele tardar unos 15 minutos."
+else
+  TIEMPO="La primera vez tarda entre 40 y 90 minutos y descarga unos 3 GB."
+fi
 cat <<AVISO
 
-   Esto tarda entre 40 y 90 minutos y descarga unos 3 GB.
+   $TIEMPO
 
    Puedes dejarlo trabajando. Si se corta la luz o cierras la terminal,
    se puede volver a lanzar desde el principio sin problema.
@@ -188,6 +206,45 @@ GENERADA=$(find "$RECETA" -maxdepth 1 -name 'live-image-amd64.hybrid.iso' -o \
                           -maxdepth 1 -name '*.iso' 2>/dev/null | head -1)
 
 if [ -z "$GENERADA" ] || [ ! -f "$GENERADA" ]; then
+  # ── El fallo de «target is busy» ────────────────────────────────────
+  #
+  # live-build monta /sys, /proc y /dev/pts dentro del sistema que
+  # construye, y al terminar los desmonta. Si en ese preciso instante
+  # cualquier programa está mirando dentro de receta/chroot, el desmontaje
+  # falla y la construcción entera muere después de veinte minutos.
+  #
+  # Pasó el 2026-08-06: mientras el ISO se construía, se leyeron archivos
+  # de receta/chroot para comprobar algo. Bastó eso. Un editor con la
+  # carpeta abierta, un buscador de archivos o un antivirus harían igual.
+  #
+  # No es culpa de la receta ni hay nada roto: es cuestión de un segundo.
+  # Por eso se reintenta una vez en lugar de mandar a empezar de cero.
+  if grep -q 'target is busy' "$RECETA/build.log" 2>/dev/null; then
+    avi "algo estaba mirando dentro de la construcción y no se pudo cerrar"
+    echo
+    echo "   No hay nada roto. Ocurre si un programa —un editor, un buscador—"
+    echo "   tiene abierta la carpeta receta/chroot justo al terminar."
+    echo
+    echo "   Se vuelve a intentar una vez. Mientras tanto, NO abras esa carpeta."
+    echo
+
+    for i in 1 2 3; do
+      umount -l "$RECETA/chroot/sys" 2>/dev/null
+      umount -l "$RECETA/chroot/proc" 2>/dev/null
+      umount -l "$RECETA/chroot/dev/pts" 2>/dev/null
+      sleep 2
+    done
+    mount | grep -q "$RECETA/chroot" && avi "aún queda algo montado; puede volver a fallar"
+
+    printf "   Reintentando a las %s…\n\n" "$(date '+%H:%M')"
+    lb build >>"$RECETA/build.log" 2>&1 || true
+
+    GENERADA=$(find "$RECETA" -maxdepth 1 -name 'live-image-amd64.hybrid.iso' -o \
+                              -maxdepth 1 -name '*.iso' 2>/dev/null | head -1)
+  fi
+fi
+
+if [ -z "$GENERADA" ] || [ ! -f "$GENERADA" ]; then
   mal "no se generó ninguna ISO  (${MINUTOS} minutos)"
   echo
   echo "   Últimas líneas del registro:"
@@ -205,8 +262,22 @@ mv "$GENERADA" "$ISOS/$NOMBRE"
 chown "${SUDO_USER:-root}:${SUDO_USER:-root}" "$ISOS/$NOMBRE" 2>/dev/null
 
 BYTES=$(stat -c%s "$ISOS/$NOMBRE")
-sha256sum "$ISOS/$NOMBRE" | awk '{print $1}' > "$ISOS/$NOMBRE.sha256"
+
+# La huella se guarda CON el nombre del archivo al lado, que es el formato
+# que entiende «sha256sum -c». Antes se guardaba el número a secas, y
+# entonces la comprobación fallaba con «no properly formatted checksum
+# lines found»: el archivo existía y parecía correcto, pero no servía para
+# lo único que hace falta —comprobar que un pendrive se grabó entero—.
+( cd "$ISOS" && sha256sum "$NOMBRE" > "$NOMBRE.sha256" )
 chown "${SUDO_USER:-root}:${SUDO_USER:-root}" "$ISOS/$NOMBRE.sha256" 2>/dev/null
+
+# Comprobarlo aquí mismo. Una huella que no verifica su propio archivo es
+# peor que ninguna: da por buena una grabación que nadie ha comprobado.
+if ( cd "$ISOS" && sha256sum -c --quiet "$NOMBRE.sha256" >/dev/null 2>&1 ); then
+  ok "huella comprobada contra la ISO"
+else
+  mal "la huella NO verifica la ISO — no te fíes de este archivo"
+fi
 
 ok "ISO generada en ${MINUTOS} minutos"
 echo

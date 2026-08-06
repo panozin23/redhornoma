@@ -36,3 +36,10 @@ isos/
 # Los .deb que se generan para meter en la ISO
 receta/config/packages.chroot/
 paquetes/deb/
+
+# ── El repositorio APT ───────────────────────────────────────────────
+# repositorio/ se arma solo a partir de paquetes/deb/ y tiene su propio
+# git, apuntando a la rama gh-pages de ESTE MISMO repositorio. Si se
+# rastreara también desde main, los .deb acabarían duplicados dentro del
+# código fuente y las dos ramas pelearían por los mismos archivos.
+repositorio/

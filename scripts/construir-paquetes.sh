@@ -69,6 +69,23 @@ for nombre in "${ORDEN[@]}"; do
   ARBOL="$TMP/$nombre"
   rm -rf "$ARBOL"; cp -a "$ORIG" "$ARBOL"
 
+  # ── Fuera lo que no es del paquete ─────────────────────────────────
+  # Python deja un __pycache__ al lado de cualquier guion que se compruebe
+  # con «py_compile», y los editores dejan lo suyo. Nada de eso pertenece
+  # al programa, pero se copia igual y acaba dentro del .deb, subido al
+  # repositorio y instalado en las máquinas de los centros.
+  #
+  # Pasó el 2026-08-05: un .pyc de 13 kB viajó hasta servidor-ciudad porque
+  # se comprobó la sintaxis de una herramienta antes de empaquetarla. No
+  # hacía daño, pero un paquete debe contener lo que dice contener.
+  #
+  # Se limpia aquí y no a mano: lo que depende de que alguien se acuerde,
+  # tarde o temprano se olvida.
+  find "$ARBOL" \( -name '__pycache__' -o -name '.mypy_cache' \) -type d -prune -exec rm -rf {} + 2>/dev/null || true
+  find "$ARBOL" \( -name '*.pyc' -o -name '*.pyo' -o -name '*~' \
+                   -o -name '*.orig' -o -name '*.rej' -o -name '.DS_Store' \) \
+       -type f -delete 2>/dev/null || true
+
   # Permisos que dpkg espera. Sin esto lintian se queja y algunos sistemas
   # instalan los programas sin permiso de ejecución.
   find "$ARBOL" -type d -exec chmod 755 {} +
@@ -108,6 +125,46 @@ printf "   construidos: %s      fallidos: %s\n" "$HECHOS" "$FALLOS"
 printf "   quedaron en: %s\n" "$SALIDA"
 
 [ "$FALLOS" -gt 0 ] && exit 1
+
+# ── Llevarlos a la receta ────────────────────────────────────────────
+# Esto se hacía a mano, y el 2026-08-05 se descubrió que llevaba días sin
+# hacerse: la receta seguía con respaldo 1.0.4 —la versión que decía «HECHO»
+# con una base vacía— mientras el 1.0.6 corregido esperaba aquí. Un pendrive
+# construido ese día habría instalado la versión rota.
+#
+# Construir un paquete y no llevarlo a la receta es no haberlo construido.
+RECETA="$BASE/receta/config/packages.chroot"
+if [ -d "$RECETA" ]; then
+  titulo "LLEVARLOS A LA RECETA"
+  QUITADOS=0; PUESTOS=0
+  for DEB in "${CONSTRUIDOS[@]}"; do
+    NOMBRE=$(basename "$DEB" | sed 's/_.*//')
+    # Fuera las versiones viejas del mismo paquete: si quedaran las dos,
+    # live-build instalaría cualquiera de ellas.
+    for VIEJO in "$RECETA/${NOMBRE}"_*.deb; do
+      [ -e "$VIEJO" ] || continue
+      [ "$(basename "$VIEJO")" = "$(basename "$DEB")" ] && continue
+      rm -f "$VIEJO"; QUITADOS=$((QUITADOS+1))
+      printf "   quitado  %s\n" "$(basename "$VIEJO")"
+    done
+    cp -f "$DEB" "$RECETA/" && PUESTOS=$((PUESTOS+1))
+  done
+
+  # Comprobar de verdad, byte por byte. Un cp que falló en silencio deja la
+  # receta atrasada igual que si no se hubiera copiado nada.
+  for DEB in "${CONSTRUIDOS[@]}"; do
+    if cmp -s "$DEB" "$RECETA/$(basename "$DEB")"; then
+      ok "en la receta: $(basename "$DEB")"
+    else
+      mal "NO llegó a la receta: $(basename "$DEB")"
+      exit 1
+    fi
+  done
+  printf "\n   %s puestos, %s versiones viejas retiradas\n" "$PUESTOS" "$QUITADOS"
+else
+  mal "no encuentro la receta en $RECETA — los paquetes NO están en el pendrive"
+  exit 1
+fi
 
 if [ "$INSTALAR" = 1 ]; then
   titulo "INSTALAR EN ESTE EQUIPO"

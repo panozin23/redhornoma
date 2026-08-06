@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Recuperar información del centro
+GenericName=Recuperación de respaldos
+Comment=Devolver a SALMI una copia guardada, eligiéndola de una lista
+Exec=redhornoma-recuperar
+Icon=document-revert
+Terminal=false
+Categories=System;Utility;
+Keywords=recuperar;restaurar;respaldo;copia;salmi;rescate;pacientes;emergencia;
+StartupNotify=true

@@ -10,6 +10,22 @@
 
 set -e
 
+# Por qué estas opciones de apt:
+#
+#   Retries=5      deb.debian.org es una red de servidores repartidos por el
+#                  mundo; alguno falla de vez en cuando. Reintentar sale
+#                  gratis y evita perder una construcción entera.
+#
+#   ForceIPv4      El 2026-08-05 una construcción murió a los 20 minutos con
+#                  187 paquetes sin bajar, TODOS por «Network is unreachable»
+#                  hacia direcciones IPv6. Aquí no hay IPv6 que funcione, pero
+#                  apt lo intenta igual porque el servidor la anuncia. Pedir
+#                  IPv4 quita esa lotería. En una red con IPv6 bueno no
+#                  estorba: IPv4 funciona en todas partes.
+#
+# Estaba puesto a mano en config/common, que git ignora: se habría perdido en
+# cuanto alguien clonara el proyecto. La receta es esto, no lo que quedó en
+# una carpeta de trabajo.
 lb config noauto \
   --distribution trixie \
   --parent-distribution trixie \
@@ -29,6 +45,7 @@ lb config noauto \
   --bootappend-live "boot=live components quiet splash locales=es_BO.UTF-8 keyboard-layouts=es keyboard-model=pc105 timezone=America/La_Paz username=redhornoma hostname=redhornoma" \
   --bootloaders "grub-efi syslinux" \
   --uefi-secure-boot enable \
+  --apt-options "--yes -o Acquire::Retries=5 -o Acquire::ForceIPv4=true" \
   --mirror-bootstrap "http://deb.debian.org/debian/" \
   --mirror-chroot "http://deb.debian.org/debian/" \
   --mirror-binary "http://deb.debian.org/debian/" \
