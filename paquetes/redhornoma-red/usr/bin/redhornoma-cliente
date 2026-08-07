@@ -77,8 +77,31 @@ FIN
 # Hornoma el servidor es un Windows que ya estaba, y ese no se anuncia.
 buscar_servidores(){
   command -v avahi-browse >/dev/null 2>&1 || return 0
-  timeout 6 avahi-browse -atrp 2>/dev/null \
-    | awk -F';' '/^=/ && $3=="IPv4" {print $7}' | sed 's/\.local$//' | sort -u
+  local YO
+  YO=$(cat /proc/sys/kernel/hostname 2>/dev/null)
+
+  # Se ofrece la dirección del WINDOWS del servidor, que es la que hace
+  # falta — no la del Linux.
+  #
+  # Un servidor de RedHornoma tiene dos: «servidor-ciudad.local» es el
+  # Linux, y su Windows está en otra. Las carpetas SALMI y SOAPS viven en
+  # el Windows. Apuntar al Linux da «no se llega a \\servidor-ciudad\SALMI»
+  # y manda a revisar la contraseña, que era lo único correcto. Costó una
+  # vuelta entera el 2026-08-07.
+  #
+  # Desde redhornoma-red 1.0.5 el servidor anuncia esa dirección él mismo.
+  # Si no la anuncia —un servidor viejo, o con su Windows apagado— no se
+  # sugiere nada: es mejor un campo vacío que una dirección equivocada.
+  timeout 6 avahi-browse -prt _redhornoma._tcp 2>/dev/null \
+    | awk -F';' -v yo="$YO" '
+        $1=="=" && $3=="IPv4" && $0 ~ /papel=servidor/ {
+          n = $7; sub(/\.local$/, "", n)
+          if (n == yo) next
+          if (match($0, /windows=[0-9.]+/)) {
+            ip = substr($0, RSTART+8, RLENGTH-8)
+            if (ip != "") print ip
+          }
+        }' | sort -u
 }
 
 if ! hay_pantalla; then
@@ -102,9 +125,9 @@ SUGERIDOS=$(buscar_servidores | paste -sd'!' -)
 DATOS=$(yad --class=redhornoma --center --borders=16 --width=520 \
   --title="Conectar esta computadora al centro" \
   --image="network-workgroup" \
-  --text="<b>Esta computadora va a usar los programas del servidor.</b>\n\nNo se copia ninguna base de datos: se abre la del servidor,\nla misma que ven los demás consultorios." \
+  --text="<b>Esta computadora va a usar los programas del servidor.</b>\n\nNo se copia ninguna base de datos: se abre la del servidor,\nla misma que ven los demás consultorios.\n\n<b>Ojo con la dirección:</b> hace falta la del <b>Windows</b> del servidor,\nno la del Linux. Son distintas — el Linux suele acabar en .110\ny su Windows en .50. Se ve en el propio servidor, en el panel." \
   --form \
-  --field="Servidor (nombre o dirección)":CBE "${SUGERIDOS:-}" \
+  --field="Dirección del WINDOWS del servidor":CBE "${SUGERIDOS:-}" \
   --field="Cuenta de la carpeta compartida" "salmired" \
   --field="Contraseña":H "" \
   --field="Conectar SALMI:CHK" TRUE \
@@ -174,7 +197,12 @@ function Conectar($recurso, $programa, $titulo, $iconoLocal) {
   # sin depender de ninguna sesion.
   if (-not (Test-Path $ruta)) {
     Write-Output ("   [FALLO] no se llega a " + $ruta)
-    Write-Output "          Comprueba la direccion del servidor, la cuenta y la contrasena."
+    Write-Output "          Tres cosas que mirar, por orden:"
+    Write-Output "          1. LA DIRECCION. Tiene que ser la del WINDOWS del servidor,"
+    Write-Output "             no la del Linux. Son maquinas distintas con direcciones"
+    Write-Output "             distintas: el Linux suele acabar en .110 y su Windows en .50."
+    Write-Output "          2. La cuenta y la contrasena de la carpeta compartida."
+    Write-Output "          3. Que el Windows del servidor este encendido."
     $script:huboFallo = $true
     return
   }

@@ -1,0 +1,202 @@
+#!/bin/bash
+# redhornoma-asistente — Poner en marcha una computadora recién instalada.
+#
+# Es el momento que más se repite en el proyecto: llega una máquina al centro
+# y hay que decirle qué va a ser, y darle lo que necesite. Hoy eso son cuatro
+# programas distintos, todos por terminal:
+#
+#     redhornoma-probar-equipo     ¿aguanta Windows?
+#     redhornoma-papel             ¿qué es esta computadora?
+#     redhornoma-windows           crear el Windows
+#     redhornoma-importar          o traer uno que ya existe
+#     redhornoma-cliente           o conectarse al servidor
+#
+# Quien monta un centro de salud no tiene por qué saberse esos cinco nombres
+# ni en qué orden van. Aquí se pregunta lo mismo con ventanas, y el asistente
+# llama a los de siempre.
+#
+# NO reimplementa nada: cada paso ejecuta la herramienta que ya existe y
+# enseña lo que dice. Si mañana cambia una de ellas, esto la sigue.
+#
+# Objetivo 6 de euflo: «sin usar código, todo en un entorno gráfico».
+#
+# Uso:
+#   redhornoma-asistente
+set -u
+
+CONF=/etc/redhornoma
+export GDK_BACKEND=x11
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; RO=$'\033[1;31m'
+mal(){ printf "   ${RO}✗${V} %s\n" "$1" >&2; }
+
+hay_pantalla(){ [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v yad >/dev/null 2>&1; }
+if ! hay_pantalla; then
+  printf "\n   Esto necesita el escritorio.\n"
+  printf "   Sin él, las herramientas de siempre siguen funcionando:\n\n"
+  printf "      sudo redhornoma-papel --configurar\n"
+  printf "      sudo redhornoma-windows\n\n"
+  exit 1
+fi
+
+Y(){ yad --class=redhornoma --center --borders=16 "$@" 2>/dev/null; }
+
+aviso(){ # titulo texto icono
+  Y --width=460 --title="$1" --image="${3:-dialog-information}" \
+    --text="$2" --button="Entendido:0" >/dev/null
+}
+
+# Enseñar lo que dijo una herramienta, tal cual, sin resumirlo.
+# Se le quitan los colores: en una ventana se ven como basura.
+mostrar(){ # titulo archivo
+  sed -i 's/\x1b\[[0-9;]*m//g' "$2" 2>/dev/null
+  Y --width=700 --height=460 --title="$1" --text-info --filename="$2" \
+    --fontname="monospace 9" --button="Continuar:0" >/dev/null
+}
+
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+
+# ── Bienvenida ───────────────────────────────────────────────────────
+NOMBRE_ACTUAL=$(cat /proc/sys/kernel/hostname 2>/dev/null)
+PAPEL_ACTUAL=$(cat "$CONF/papel" 2>/dev/null)
+CENTRO_ACTUAL=$(grep -oP '^centro=\K.*' "$CONF/centro.conf" 2>/dev/null)
+
+if [ -n "$PAPEL_ACTUAL" ]; then
+  SEGUIR=$(Y --width=470 --image="dialog-question" \
+    --title="Esta computadora ya está configurada" \
+    --text="Ahora mismo es:\n\n   Centro:  <b>${CENTRO_ACTUAL:-sin asignar}</b>\n   Papel:   <b>$PAPEL_ACTUAL</b>\n   Nombre:  <b>$NOMBRE_ACTUAL</b>\n\n¿Quieres volver a configurarla?" \
+    --button="No, salir:1" --button="Sí, seguir:0"; echo $?)
+  [ "$SEGUIR" = 0 ] || exit 0
+fi
+
+# ── 1 · Mirar de qué es capaz la máquina ─────────────────────────────
+#
+# Antes de prometer nada. Un equipo sin virtualización no podrá tener el
+# Windows dentro, y es mejor saberlo ahora que después de media hora.
+if command -v redhornoma-probar-equipo >/dev/null 2>&1; then
+  Y --width=460 --image="utilities-system-monitor" --title="Paso 1 de 4 — Mirar esta computadora" \
+    --text="Primero vamos a ver de qué es capaz este equipo:\nmemoria, procesador, y si puede llevar Windows dentro.\n\nNo se toca nada." \
+    --button="Cancelar:1" --button="Mirar:0" >/dev/null || exit 0
+  pkexec /usr/bin/redhornoma-probar-equipo > "$TMP/equipo.txt" 2>&1 < /dev/null
+  mostrar "Lo que puede esta computadora" "$TMP/equipo.txt"
+  # ¿Salió que no puede con Windows? Se avisa, pero no se prohíbe: un puesto
+  # de administración no necesita Windows para nada.
+  if grep -qiE 'no (puede|podrá)|sin virtualizaci' "$TMP/equipo.txt"; then
+    aviso "Esta computadora no puede llevar Windows dentro" \
+      "Le falta la virtualización por hardware, o está apagada en la BIOS.\n\nPuede seguir siendo un <b>puesto</b> que use los programas del servidor,\npero no puede ser el servidor." "dialog-warning"
+  fi
+fi
+
+# ── 2 · Qué va a ser ─────────────────────────────────────────────────
+DATOS=$(Y --width=520 --image="network-workgroup" --title="Paso 2 de 4 — Qué es esta computadora" \
+  --text="<b>Cada computadora del centro tiene un papel.</b>\n\nEl nombre sirve para encontrarla sin recordar direcciones:\ndesde otra máquina bastará escribir <b>ese-nombre.local</b>" \
+  --form \
+  --field="Nombre del centro":TEXT "${CENTRO_ACTUAL:-}" \
+  --field="Qué será esta computadora":CB "servidor — guarda la información y los programas!puesto — un consultorio que usa el servidor!administracion — para informes y papeleo" \
+  --field="Cómo se llamará":TEXT "${NOMBRE_ACTUAL}" \
+  --separator="|" --button="Cancelar:1" --button="Continuar:0") || exit 0
+
+CENTRO=$(echo "$DATOS" | cut -d'|' -f1)
+PAPEL=$(echo "$DATOS"  | cut -d'|' -f2 | cut -d' ' -f1)
+NOMBRE=$(echo "$DATOS" | cut -d'|' -f3)
+
+[ -n "$CENTRO" ] || { aviso "Falta el centro" "Hace falta el nombre del centro de salud." "dialog-warning"; exit 1; }
+[ -n "$NOMBRE" ] || { aviso "Falta el nombre" "Hace falta un nombre para esta computadora." "dialog-warning"; exit 1; }
+
+pkexec /usr/bin/redhornoma-papel --configurar --papel "$PAPEL" \
+       --centro "$CENTRO" --nombre "$NOMBRE" > "$TMP/papel.txt" 2>&1 < /dev/null
+CODIGO=$?
+mostrar "Papel de esta computadora" "$TMP/papel.txt"
+if [ "$CODIGO" != 0 ]; then
+  aviso "No se pudo guardar el papel" "Revisa el mensaje de arriba.\n\n<b>No se ha cambiado nada más.</b>" "dialog-error"
+  exit 1
+fi
+
+# ── 3 · Windows, solo si hace falta ──────────────────────────────────
+if [ "$PAPEL" = "puesto" ] || [ "$PAPEL" = "administracion" ]; then
+  # Un puesto no crea Windows: usa el del servidor. Se le ofrece conectarse.
+  if command -v redhornoma-cliente >/dev/null 2>&1; then
+    Y --width=470 --image="network-workgroup" --title="Paso 3 de 4 — Conectar al servidor" \
+      --text="Esta computadora es un <b>$PAPEL</b>.\n\nNo necesita su propio Windows: usará los programas\ndel servidor del centro.\n\n¿Lo conectamos ahora?" \
+      --button="Más tarde:1" --button="Conectar ahora:0" >/dev/null \
+      && exec /usr/bin/redhornoma-cliente
+  fi
+  aviso "Listo" "Esta computadora ya es un <b>$PAPEL</b> del centro <b>$CENTRO</b>.\n\nCuando quieras conectarla a los programas, abre\n«Conectar al servidor del centro»." "dialog-information"
+  exit 0
+fi
+
+# ── Servidor: ¿ya hay un Windows, o hay que crearlo? ─────────────────
+#
+# Se mira ANTES de preguntar. Si hay un disco de Windows huérfano —de una
+# instalación anterior, o traído de otra máquina— importarlo es mucho mejor
+# que crear uno nuevo: conserva los programas y la información.
+HUERFANOS=""
+if command -v redhornoma-importar >/dev/null 2>&1; then
+  pkexec /usr/bin/redhornoma-importar > "$TMP/discos.txt" 2>&1 < /dev/null || true
+  sed -i 's/\x1b\[[0-9;]*m//g' "$TMP/discos.txt" 2>/dev/null
+  HUERFANOS=$(grep -oE '/var/lib/libvirt/images/[^ ]+\.qcow2' "$TMP/discos.txt" 2>/dev/null | sort -u)
+fi
+
+if [ -n "$HUERFANOS" ]; then
+  N=$(echo "$HUERFANOS" | grep -c .)
+  ELEGIR=$(Y --width=520 --image="drive-harddisk" --title="Paso 3 de 4 — Se encontró un Windows" \
+    --text="<b>Hay $N disco(s) de Windows en esta computadora sin usar.</b>\n\nSi vienen de una instalación anterior o de otra máquina,\nconservan sus programas y su información: es mejor\ntraerlos que empezar de cero." \
+    --list --print-column=1 --separator="" --column="Disco encontrado" $HUERFANOS \
+    --button="Crear uno nuevo:2" --button="Traer el elegido:0"; echo "|$?")
+  RESP=${ELEGIR##*|}; DISCO=${ELEGIR%|*}
+else
+  RESP=2
+fi
+
+if [ "$RESP" = 0 ] && [ -n "${DISCO:-}" ]; then
+  pkexec /usr/bin/redhornoma-importar --disco "$DISCO" --nombre "salud-servidor" \
+         > "$TMP/importar.txt" 2>&1 < /dev/null
+  mostrar "Trayendo el Windows que ya existía" "$TMP/importar.txt"
+elif [ "$RESP" = 2 ]; then
+  # Se le pregunta TODO lo que la herramienta necesita: si falta un dato,
+  # ella lo pide por terminal —y desde una ventana nadie puede contestarle—.
+  CREAR=$(Y --width=540 --title="Paso 3 de 4 — Crear el Windows del servidor" \
+    --image="media-optical" \
+    --text="<b>Hace falta la imagen de instalación de Windows.</b>\n\nEs un archivo que acaba en <b>.iso</b>, el que se descarga\nde la página de Microsoft." \
+    --form \
+    --field="Archivo de Windows":FL "" \
+    --field="Qué versión es":CB "10!11!8!7" \
+    --separator="|" \
+    --button="Más tarde:1" --button="Crear:0") || {
+      aviso "Servidor a medias" "El papel quedó guardado, pero <b>todavía no hay Windows</b>.\n\nCuando tengas el archivo .iso, vuelve a abrir este asistente." "dialog-warning"
+      exit 0; }
+  ISO=$(echo "$CREAR" | cut -d'|' -f1)
+  VERSION=$(echo "$CREAR" | cut -d'|' -f2)
+  [ -f "$ISO" ] || { aviso "No encuentro ese archivo" "Elige un archivo .iso que exista." "dialog-error"; exit 1; }
+  pkexec /usr/bin/redhornoma-windows --papel servidor --version "$VERSION" \
+         --iso "$ISO" --nombre "salud-servidor" \
+         > "$TMP/crear.txt" 2>&1 < /dev/null
+  mostrar "Creando el Windows del servidor" "$TMP/crear.txt"
+fi
+
+# ── 4 · Resumen ──────────────────────────────────────────────────────
+RESUMEN="$TMP/final.txt"
+{
+  echo "COMO QUEDO ESTA COMPUTADORA"
+  echo
+  printf "   Centro:   %s\n" "$CENTRO"
+  printf "   Papel:    %s\n" "$PAPEL"
+  printf "   Nombre:   %s\n" "$NOMBRE"
+  echo
+  if command -v virsh >/dev/null 2>&1; then
+    echo "   Windows en esta computadora:"
+    virsh -c qemu:///system list --all 2>/dev/null | sed -n '3,8p' | sed 's/^/  /'
+  fi
+  echo
+  echo "LO QUE FALTA"
+  echo
+  echo "   1. Instalar Windows en la maquina virtual, si es nueva"
+  echo "   2. Poner dentro SALMI y SOAPS"
+  echo "   3. Programar el respaldo:  boton «Respaldar ahora» del panel"
+  echo "   4. Conectar los demas consultorios a este servidor"
+} > "$RESUMEN"
+mostrar "Paso 4 de 4 — Resumen" "$RESUMEN"
+
+aviso "Esta computadora ya es el servidor de $CENTRO" \
+  "Lo siguiente está en el panel del centro:\n\n   • <b>Entrar a los programas de salud</b>\n   • <b>Respaldar ahora</b>\n\nÁbrelo desde el menú, se llama <b>Centro de Salud</b>." \
+  "dialog-information"

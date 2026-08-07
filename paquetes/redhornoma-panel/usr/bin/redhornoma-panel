@@ -99,7 +99,7 @@ detectar_equipo(){
     puesto)         fila 🟢 "Este puesto"     "en marcha desde hace $desde" ;;
     administracion) fila 🟢 "Administración"  "en marcha desde hace $desde" ;;
     *)              fila 🟡 "Esta computadora" "sin papel definido todavía"
-                    pendiente "Definir qué es esta computadora:  sudo redhornoma-papel --configurar" ;;
+                    pendiente "Poner en marcha esta computadora — ábrelo desde el menú: «Poner en marcha esta computadora»" ;;
   esac
 }
 
@@ -436,6 +436,13 @@ if command -v redhornoma-cliente >/dev/null 2>&1 \
    && [ "$(cat "$CONF/papel" 2>/dev/null)" != "servidor" ]; then
   CAMPOS+=(--field="Conectar al servidor del centro!network-workgroup:fbtn"
            "bash -c 'redhornoma-cliente &'")
+fi
+# El asistente de puesta en marcha, solo mientras haga falta. Cuando la
+# computadora ya tiene su papel, este botón estorba más que ayuda: lo que se
+# usa a diario está arriba.
+if command -v redhornoma-asistente >/dev/null 2>&1 && [ -z "${PAPEL:-}" ]; then
+  CAMPOS+=(--field="Poner en marcha esta computadora!preferences-system:fbtn"
+           "bash -c 'redhornoma-asistente &'")
 fi
 # La vigilancia de TODOS los centros, no solo de este. Un centro que deja
 # de dar señales es un centro parado, y eso solo se ve mirando desde fuera.

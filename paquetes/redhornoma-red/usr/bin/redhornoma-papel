@@ -295,6 +295,32 @@ if [ -x /usr/sbin/avahi-daemon ] || command -v avahi-daemon >/dev/null 2>&1; the
   # Que la máquina no solo diga cómo se llama, sino QUÉ ES. Así, quien
   # administre el centro las descubre solas, con su papel puesto, sin
   # tener que apuntar direcciones en ninguna parte.
+  # ── La dirección del Windows de dentro ──────────────────────────────
+  #
+  # Un servidor de RedHornoma tiene DOS direcciones, y confundirlas cuesta
+  # una tarde: la del Linux —la que responde a «servidor-ciudad.local»— y la
+  # de su Windows, que es donde de verdad viven SALMI y SOAPS.
+  #
+  #     servidor-ciudad   192.168.0.110   el Linux
+  #     su Windows        192.168.0.50    las carpetas compartidas
+  #
+  # Un consultorio que apunte al Linux no encontrará nada: allí no hay
+  # ninguna carpeta SALMI. Pasó el 2026-08-07 y el mensaje de error hablaba
+  # de contraseñas, que era lo único que no fallaba.
+  #
+  # Por eso el servidor la anuncia. Se le pregunta al agente invitado, que
+  # es quien la sabe de verdad; si no contesta, no se anuncia nada —mejor
+  # callar que dar una dirección inventada—.
+  IP_WIN=""
+  if [ "$PAPEL" = "servidor" ] && command -v virsh >/dev/null 2>&1; then
+    for VM in $(virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
+      IP_WIN=$(virsh -c qemu:///system domifaddr "$VM" --source agent 2>/dev/null \
+               | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' \
+               | grep -v '^127\.' | grep -v '^192\.168\.122\.' | head -1)
+      [ -n "$IP_WIN" ] && break
+    done
+  fi
+
   mkdir -p /etc/avahi/services
   cat > /etc/avahi/services/redhornoma.service <<AVAHI
 <?xml version="1.0" standalone='no'?>
@@ -308,9 +334,14 @@ if [ -x /usr/sbin/avahi-daemon ] || command -v avahi-daemon >/dev/null 2>&1; the
     <txt-record>papel=$PAPEL</txt-record>
     <txt-record>centro=$CENTRO</txt-record>
     <txt-record>nombre=$NOMBRE</txt-record>
+    <txt-record>windows=$IP_WIN</txt-record>
   </service>
 </service-group>
 AVAHI
+  if [ "$PAPEL" = "servidor" ]; then
+    [ -n "$IP_WIN" ] && ok "anuncia que su Windows está en $IP_WIN" \
+                     || avi "no se pudo saber la dirección de su Windows (¿apagado?)"
+  fi
   chmod 644 /etc/avahi/services/redhornoma.service
   ok "se anuncia como «$PAPEL» del centro «$CENTRO»"
 
