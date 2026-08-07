@@ -5,20 +5,20 @@ Codename: trixie
 Architectures: all amd64
 Components: main
 Description: Paquetes de RedHornoma para centros de salud
-Date: Fri, 07 Aug 2026 10:13:19 +0000
+Date: Fri, 07 Aug 2026 10:21:21 +0000
 MD5Sum:
- 44f98564d4fe067e2da8a149e7a72d18              206 Release
- 4076c71070c9c3a07dad711d6e53fc3d             7477 main/binary-all/Packages
- e2fe101f48415000b8513b1aec7cde5d             3202 main/binary-all/Packages.gz
+ 520c5b059116b0cc9f4cde596b117ea6              206 Release
+ 9c8abe64d1726086db21c59a948b4d33             7477 main/binary-all/Packages
+ 946a2e4651c2115e66a285a2a5c25b30             3207 main/binary-all/Packages.gz
 SHA1:
- 4360db90bd43858e1a848ebbfc197e41c46471b6              206 Release
- 7732c3031aa917f73ff09d2c1687e7da6bb89ee2             7477 main/binary-all/Packages
- ee9e06d36b5498c96f98c149ce94dd3f22142511             3202 main/binary-all/Packages.gz
+ 4b9f0eb2845b0f42e470269a199888602bbadeaf              206 Release
+ 9fe77fdc396ffbe9e084c560771d899a36c913c9             7477 main/binary-all/Packages
+ 79a45f567227ec031aad6d2a274b41c3e9085ef7             3207 main/binary-all/Packages.gz
 SHA256:
- a86bd9e52485a856e2b4aa3c3bd7033ca62739bcebfa0e03742a7deea9563e43              206 Release
- d26d63490ad0665b2da66777d49b8e4eb7b8e0ff224679606fb5b169ba1a06b3             7477 main/binary-all/Packages
- c4a117e98c3862b5f3c37b74f692af8817b7c8f27c30e63fd6aa2cbd1f2a8627             3202 main/binary-all/Packages.gz
+ c4230a07b0435a4a00d48c288e82a5375d421d9ab6c141a92aeb2c2d2c13d30e              206 Release
+ 65edac48130a00610253d38b16a156e171583c7371684193a45e21d3f034ec93             7477 main/binary-all/Packages
+ 3d0215e7a331e887afc8ce66b682315253667f9d2dd2924f6c3fae9763d4208b             3207 main/binary-all/Packages.gz
 SHA512:
- 49ad6abaa242c9cc02a627d9425497dbdb38f1ec2f8a4068c5d361864559eb9aa4976c17e3467b7f67f204121e6bfb3062ffe23704aebbdd92130515f70c4d61              206 Release
- ddeae9244d4ce6b52e3050b9e425d4c29022aab16506aa4d72fe04ecdd7c2883d2a4fa30b115bb9ffc2b487ef46b38a16b280ae98cc7994784134e170cc87629             7477 main/binary-all/Packages
- 1995b9e50b1584248ed7cec6e759712fe846cbbf99194d28da5693e6e7144c426a43d9bc5d0821a4a63d54694835aa29e6476c5929afa9b7e29efe4c3aea24ac             3202 main/binary-all/Packages.gz
+ ddb84be8767bae779bb0275a818b6b175cbe4eedc2082e25ddd4279402ce430e639c4d6d4e9c1bcdc0a1a767291c9819b327e5a2c1bfe93a1a55843fd6c20296              206 Release
+ 54b007b34284f2967f60d44300e39c4fd2684ea4fec3c821150d2256ca492aac4f4b292a1683c466d29e0a9bd920c2bb29762d71447a6bcbcea80ffa30cae72b             7477 main/binary-all/Packages
+ 832b32ed7d1c40fbd12bf22bbb4554f3d2213648a3bc418d9da121a1d65b4772206e4bd09d7cac60324fdfe6b00feb5994c457c099db3304ed0d8c99d072a42d             3207 main/binary-all/Packages.gz
