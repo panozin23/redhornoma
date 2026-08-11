@@ -6,9 +6,9 @@ Depends: iproute2, usbutils, pciutils, procps, util-linux
 Recommends: yad, libvirt-clients
 Filename: pool/main/redhornoma-base_1.0.1_all.deb
 Size: 7088
-MD5sum: d633660071609905c8f798b0ed420387
-SHA1: 423aaceed1f7db41261bd2a0f36d1be25088d717
-SHA256: 9e65978923aa4bac6187b1314399a510434bd0147cebcbe7e21a88f8c242f5d2
+MD5sum: ff0ace4ff2f6ae89504bd24486753f7e
+SHA1: e8920693af2392867490b65aa9eb96f4a4b65be2
+SHA256: 3e9af766593bc72c95f1d531327ffb0f251719c0dfc4671b735bbe0fa75a84ef
 Section: admin
 Priority: optional
 Description: Radiografía de un equipo de RedHornoma
@@ -28,9 +28,9 @@ Depends: redhornoma-base (>= 1.0.1), redhornoma-virtualizacion (>= 1.0.11),
  redhornoma-perifericos (>= 1.0.6), redhornoma-panel (>= 1.0.4)
 Filename: pool/main/redhornoma-completo_1.0.32_all.deb
 Size: 964
-MD5sum: 153609469cf9c21a25d4e28aa87592cf
-SHA1: 61d014fd5d253305c6625de3b81d5e3f944873f6
-SHA256: 2452cee27cab99000a4b67f60bb61e0d52715f6e224aa3cf077de597e9a3b2f1
+MD5sum: 8295cb6a0bfd1911c5708a72032703f9
+SHA1: 93e2c1af56cb66abe54697a5d5e29eb6359191ac
+SHA256: 1ef8bd81b123aae7ededd858ef36773c905d7f75b9ed9e5c7cfb953d75855ef1
 Section: admin
 Priority: optional
 Description: RedHornoma entero, en un solo paquete
@@ -50,9 +50,9 @@ Recommends: redhornoma-virtualizacion, redhornoma-respaldo, redhornoma-red,
  avahi-utils, cups-client, xdg-utils
 Filename: pool/main/redhornoma-panel_1.0.8_all.deb
 Size: 16964
-MD5sum: dc4d9703f533e890e9399486cde1729c
-SHA1: 6e76b4194540a33fa3180324217ff90bbc60510b
-SHA256: 6d51dc2a99953a34ff2f8c8f7e3bd9f711f99602d62612d56c2d0eac5d41ed3b
+MD5sum: a77469dfb86f0b6035bccc05e234c539
+SHA1: 515b4816b32e83aa610f6d091c8a70f3307bd8de
+SHA256: 4cd4b6c08251e26123d36cf80ca01a25f041481917c2d08770374e935580e1a2
 Section: admin
 Priority: optional
 Description: La pantalla única de control de RedHornoma
@@ -83,9 +83,9 @@ Depends: redhornoma-base (>= 1.0.1), samba, samba-common-bin, pkexec,
 Recommends: cups, sane-utils
 Filename: pool/main/redhornoma-perifericos_1.0.10_all.deb
 Size: 15968
-MD5sum: 0c63b3c5537e4f9ba2343875418c2aa0
-SHA1: f1c30e20b671711350cb8ff981a3b10fc3cb6639
-SHA256: 7f02c2abe11cdf0b6aff85ea59e7d394620e2e90f56040b0e427a2fddcb176e6
+MD5sum: f539645df757cf18c2f24f7fe68841e5
+SHA1: e170bd8cdf8766b1f5758dbe927fdf07aba9e19b
+SHA256: 88a49494bafa324f34861df930a9e31ee3421119e0836adda83febed4df90189
 Section: admin
 Priority: optional
 Description: Una carpeta que ven Linux y Windows a la vez
@@ -111,9 +111,9 @@ Recommends: yad, virt-viewer, samba-common-bin,
  redhornoma-virtualizacion (>= 1.0.11)
 Filename: pool/main/redhornoma-red_1.0.6_all.deb
 Size: 21900
-MD5sum: c976435ec137d7dc21e7dd241824397b
-SHA1: 5683e70f7f76cfb24a2c1293f3f10151e614dde0
-SHA256: b6efbe6dd675e29924951d47b6eb3eef5ee4258c1616b08f057cc71852ae7cde
+MD5sum: a5d62403e182171471290981548eb94c
+SHA1: bef3ee13b626f11d9b8d0c213e18ecaf76533278
+SHA256: ced6c6ac7461e502e588165e4ea8d71c8e47b1b22c08f73f10c14a6bf52fa5b6
 Section: admin
 Priority: optional
 Description: La red interna de un centro de salud
@@ -139,9 +139,9 @@ Depends: redhornoma-base (>= 1.0.1), libvirt-clients, python3,
 Recommends: rclone, smbclient, cifs-utils, yad, pkexec
 Filename: pool/main/redhornoma-respaldo_1.0.17_all.deb
 Size: 31912
-MD5sum: 85b6167e3e0a15a38ba62f46ac595b80
-SHA1: 571cab445e611cf459c344b679cabed88ec41104
-SHA256: fe9cb4252d79ed93cadf9ca0161fdaccb3421d12db7343a9e1fdb80c439bd2a4
+MD5sum: ec6cb87b76ee4c5966bc6a04e31cf57d
+SHA1: 2bbc73c3b5b1a1c28df25f748f9ae5060c2ab3f9
+SHA256: 87bdd336d76ea1925f105d16462c32677aa5e9ed8c1eba661d277e95b8f6cae0
 Section: admin
 Priority: optional
 Description: Guarda la información del centro, sola, cada día
@@ -157,7 +157,7 @@ Description: Guarda la información del centro, sola, cada día
  encender.
 
 Package: redhornoma-virtualizacion
-Version: 1.0.14
+Version: 1.0.15
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
 Depends: redhornoma-base (>= 1.0.1), libvirt-clients, libvirt-daemon-system,
@@ -165,11 +165,11 @@ Depends: redhornoma-base (>= 1.0.1), libvirt-clients, libvirt-daemon-system,
  ovmf, swtpm, swtpm-tools, virt-viewer, python3
 Recommends: virt-manager, gir1.2-spiceclientgtk-3.0, gir1.2-spiceclientglib-2.0,
  xorriso, libarchive-tools, libbde-utils
-Filename: pool/main/redhornoma-virtualizacion_1.0.14_all.deb
-Size: 30464
-MD5sum: a04631b2765e655327a54f6fbc3f7f03
-SHA1: 9b3b1c1b831e31a661a5223c33cec2b7d117da1f
-SHA256: ea524f7684d34c9cebc523d152d362c228d95798f837c78fab02e64d3d88ad7a
+Filename: pool/main/redhornoma-virtualizacion_1.0.15_all.deb
+Size: 31420
+MD5sum: 7948793428caa0d8bbe3ccb278382543
+SHA1: 7eb1df067aa0082e8e9c0755623474fbf5c459bc
+SHA256: 03826be4a07903b038f8a68c41db9187cc1815fb436c2cb67aa21a7c1ad50c5d
 Section: admin
 Priority: optional
 Description: Windows dentro de RedHornoma, adaptado a cada máquina
@@ -187,4 +187,9 @@ Description: Windows dentro de RedHornoma, adaptado a cada máquina
  Y «entrar a los programas»: un solo gesto que enciende la máquina si
  hace falta y pone su pantalla delante. Quien atiende pacientes no tiene
  por qué saber que ahí abajo hay una máquina virtual.
+ .
+ Y desde 1.0.15, «redhornoma-entrar --en OTRA-COMPUTADORA» abre la pantalla
+ del Windows de otro equipo por la red, sin abrir ningún puerto: viaja todo
+ por la misma conexión cifrada de SSH. Era el hueco que obligaba a
+ levantarse e ir hasta la máquina.
 
