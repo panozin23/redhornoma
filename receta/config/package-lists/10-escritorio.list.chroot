@@ -37,3 +37,9 @@ wireplumber
 
 # Navegador — para consultar el sitio del Ministerio
 firefox-esr
+
+# Permitir que el instalador (que corre como administrador) dibuje en la
+# pantalla de la persona. Lo usa «redhornoma-instalar» con xhost.
+# Entraba de arrastre con el escritorio; declararlo es lo que impide que
+# una actualización de Debian lo quite y nadie se entere.
+x11-xserver-utils

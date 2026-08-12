@@ -51,3 +51,4 @@ repositorio/
 pruebas/**/qemu.log
 pruebas/**/vars.fd
 pruebas/fotos-arranque/
+receta/.lock
