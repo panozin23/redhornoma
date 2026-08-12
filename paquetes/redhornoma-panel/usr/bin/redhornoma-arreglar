@@ -1,0 +1,492 @@
+#!/bin/bash
+# redhornoma-arreglar — Que el centro pueda arreglarse solo.
+#
+# El panel ya sabía decir qué iba mal. Lo que hacía después era darle a la
+# persona una lista de deberes:
+#
+#     Lo que habría que hacer
+#        ·  Van más de dos días sin copia:  sudo redhornoma-respaldo --ahora
+#
+# Eso no es arreglarse solo. Es saber el nombre de la enfermedad y que te
+# manden a buscar la farmacia. En un centro rural, un martes, con la
+# enfermera atendiendo, ese renglón no lo escribe nadie: se llama por
+# teléfono a euflo, y hasta que euflo conteste el centro está parado.
+#
+# Aquí se hace lo que allí se pedía. Y se hace en este orden, que importa:
+#
+#   1 · MIRAR      qué pasa de verdad, ahora, preguntándoselo a la máquina
+#   2 · EXPLICAR   qué significa, en español, y qué se va a hacer
+#   3 · ARREGLAR   solo lo que la persona autoriza
+#   4 · COMPROBAR  que quedó arreglado — y decirlo solo si es cierto
+#
+# El paso 4 es el que no se puede saltar. Un programa que dice «listo»
+# porque el comando no dio error es exactamente igual de inútil que el
+# respaldo que se creía hecho durante cinco semanas.
+#
+# Lo que NO hace, a propósito: nada que pueda perder información. Recuperar
+# un respaldo encima de la base viva, borrar copias o cambiar el papel del
+# equipo siguen estando donde estaban, pidiendo contraseña y confirmación
+# cada vez. Esto solo enciende lo que estaba apagado y copia lo que faltaba
+# por copiar.
+#
+# Uso:
+#   redhornoma-arreglar             la ventana
+#   redhornoma-arreglar --texto     lo mismo en la terminal, sin escritorio
+#   redhornoma-arreglar --cuantos   dice cuántas cosas hay que arreglar
+set -u
+
+export GDK_BACKEND=x11
+
+SELF="$(readlink -f "$0")"
+CONF=/etc/redhornoma
+BASE=/var/lib/redhornoma
+RESPALDOS="$BASE/respaldos"
+AYUDANTE=/usr/lib/redhornoma/arreglos
+# En inglés siempre que se vaya a LEER: virsh en español dice
+# «ejecutando» y no «running». Ver el comentario largo en el panel.
+vsh(){ LC_ALL=C virsh -c qemu:///system "$@"; }
+
+MODO=ventana
+case "${1:-}" in
+  --texto)   MODO=texto ;;
+  --cuantos) MODO=cuantos ;;
+  -h|--help) sed -n '2,34p' "$0" | sed 's/^# \?//'; exit 0 ;;
+  "")        ;;
+  *)         echo "no entiendo «$1»"; exit 1 ;;
+esac
+
+PAPEL=$(cat "$CONF/papel" 2>/dev/null)
+YO=$(cat /proc/sys/kernel/hostname 2>/dev/null || uname -n)
+LOGO=/usr/share/pixmaps/redhornoma.png
+[ -f "$LOGO" ] || LOGO=applications-system
+GTKRC=""
+[ -f /usr/share/redhornoma/centro.css ] && GTKRC="--gtkrc=/usr/share/redhornoma/centro.css"
+
+esc(){ printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+# ── Lo que se encuentra ───────────────────────────────────────────────
+# Cuatro datos por problema, en listas paralelas:
+#   CLAVE     el nombre interno
+#   TITULO    lo que se le enseña a la persona
+#   EXPLICA   qué significa y qué se hará
+#   ACCION    la palabra que entiende el ayudante — vacía si no se puede
+CLAVE=(); TITULO=(); EXPLICA=(); ACCION=()
+anotar(){ CLAVE+=("$1"); TITULO+=("$2"); EXPLICA+=("$3"); ACCION+=("${4:-}"); }
+
+hace(){
+  local s=$1
+  if   [ "$s" -lt 3600 ]  ; then echo "hace $((s/60)) minutos"
+  elif [ "$s" -lt 86400 ] ; then echo "hace $((s/3600)) horas"
+  elif [ "$s" -lt 172800 ]; then echo "ayer"
+  else echo "hace $((s/86400)) días"; fi
+}
+
+# La dirección que el servidor anuncia por la red. La misma que usa
+# redhornoma-cliente: si se cambiara aquí, un puesto y su diagnóstico
+# dejarían de hablar del mismo servidor.
+anuncio(){  # campo: windows | linux
+  command -v avahi-browse >/dev/null 2>&1 || return 0
+  timeout 6 avahi-browse -prt _redhornoma._tcp 2>/dev/null \
+    | awk -F';' -v yo="$YO" -v q="$1" '
+        $1=="=" && $3=="IPv4" && $0 ~ /papel=servidor/ {
+          n = $7; sub(/\.local$/, "", n); if (n == yo) next
+          if (q == "linux" && $8 ~ /^[0-9.]+$/) print $8
+          if (q == "windows" && match($0, /windows=[0-9.]+/))
+            print substr($0, RSTART+8, RLENGTH-8)
+        }' | sort -u | head -1
+}
+
+# ══ 1 · MIRAR ═════════════════════════════════════════════════════════
+
+# El Windows del servidor. Si está apagado, el centro entero está parado:
+# SALMI, SOAPS y SNIS viven dentro de él. Es el problema más grave que
+# puede tener un centro y también el más fácil de arreglar.
+mirar_windows(){
+  [ "${PAPEL:-}" = "servidor" ] || return 0
+  command -v virsh >/dev/null 2>&1 || return 0
+  vsh list --all --name >/dev/null 2>&1 || return 0
+
+  local vm todas
+  todas=$(vsh list --all --name 2>/dev/null | grep -v '^$')
+  [ -n "$todas" ] || return 0
+  vm=$(cat "$CONF/maquina" 2>/dev/null)
+  echo "$todas" | grep -qx "${vm:-}" || vm=$(echo "$todas" | head -1)
+
+  vsh domstate "$vm" 2>/dev/null | grep -q '^running' && return 0
+  anotar "windows-apagado" \
+    "Los programas de salud están apagados" \
+    "SALMI, SOAPS y SNIS viven dentro de «$vm», y «$vm» no está encendido.
+Mientras siga así, ningún puesto del centro puede entrar a ellos.
+Se va a encender. Tarda un par de minutos en estar listo por dentro." \
+    "encender-windows"
+}
+
+# Sin este anuncio los puestos no encuentran solos al servidor, y hay que
+# ir máquina por máquina escribiendo su dirección a mano.
+mirar_anuncio(){
+  command -v avahi-browse >/dev/null 2>&1 || return 0
+  systemctl is-active avahi-daemon >/dev/null 2>&1 && return 0
+  anotar "anuncio-red" \
+    "El servidor no se anuncia en la red" \
+    "Las computadoras del centro se encuentran solas porque el servidor
+va diciendo dónde está. Ese aviso está apagado, así que los puestos
+no lo ven aunque el cable esté bien.
+Se va a encender, y a dejarlo encendido también para las próximas veces." \
+    "encender-anuncio-red"
+}
+
+# Las carpetas compartidas son por donde los puestos abren los programas
+# del Ministerio. Reiniciar el servicio no toca ni un archivo.
+mirar_carpetas(){
+  [ "${PAPEL:-}" = "servidor" ] || return 0
+  systemctl list-unit-files smbd.service >/dev/null 2>&1 || return 0
+  systemctl is-active smbd >/dev/null 2>&1 && return 0
+  anotar "carpetas-caidas" \
+    "Las carpetas compartidas están caídas" \
+    "Los puestos abren SALMI y los demás programas a través de una carpeta
+que sirve este equipo. Ese servicio está parado.
+Se va a volver a levantar. No se toca ningún archivo: solo se reinicia
+quien los reparte." \
+    "reiniciar-carpetas"
+}
+
+# El respaldo. Lo que más importa de todo el proyecto.
+mirar_respaldo(){
+  command -v redhornoma-respaldo >/dev/null 2>&1 || return 0
+
+  local ult seg
+  ult=$(find "$RESPALDOS" -maxdepth 1 -type d -name '20*' 2>/dev/null | sort | tail -1)
+
+  # Del respaldo del centro responde el SERVIDOR, y solo él. Ningún otro
+  # equipo guarda la información del centro, así que reclamársela es ruido,
+  # y el ruido enseña a ignorar los avisos que sí importan.
+  #
+  # Se aprendió en dos pasos el 09/08/2026. Primero le dijo al portátil de
+  # administración «no hay ni un solo respaldo» —cierto, porque el paquete
+  # le crea la carpeta vacía—. Se afinó a «solo si ya venía haciéndolos», y
+  # esa misma tarde euflo pulsó «Respaldar ahora» en el portátil sobre una
+  # máquina de pruebas: a partir de ahí SÍ había un respaldo, y la
+  # herramienta se puso a reclamar para siempre algo que no le tocaba.
+  [ "${PAPEL:-}" = "servidor" ] || return 0
+
+  if [ -z "$ult" ]; then
+    anotar "sin-respaldo" \
+      "No hay ni un solo respaldo" \
+      "Nunca se ha hecho una copia de la información del centro. Si hoy se
+rompiera el disco, se perdería todo lo registrado hasta ahora.
+Se va a hacer la primera copia y a comprobarla." \
+      "respaldar"
+    return
+  fi
+
+  seg=$(( $(date +%s) - $(stat -c %Y "$ult" 2>/dev/null || echo 0) ))
+  if [ ! -f "$ult/CORRECTO" ]; then
+    # Que falte la marca NO significa «sin comprobar». redhornoma-respaldo
+    # verifica SIEMPRE nada más terminar: si la marca no está, es que la
+    # comprobó y la RECHAZÓ. Volver a verificarla daría exactamente lo
+    # mismo, y ofrecerlo sería prometer un arreglo que no puede funcionar.
+    #
+    # Se dijo mal el 09/08/2026 —«está sin comprobar», con un botón para
+    # verificarla— hasta que una copia rechazada de verdad dejó la oferta
+    # dando vueltas sin fin.
+    #
+    # El porqué está en el historial: cada línea guarda tablas, registros,
+    # pacientes y prestaciones. Si las dos últimas son casi cero, no es que
+    # el respaldo saliera mal — es que esa máquina no guarda la información
+    # del centro, y eso no se arregla respaldando otra vez.
+    local hist pac pres
+    hist=$(grep -F "$(basename "$ult")" "$BASE/verificacion.tsv" 2>/dev/null | tail -1)
+    pac=$(echo "$hist"  | cut -f5); pres=$(echo "$hist" | cut -f6)
+
+    if [ -n "$hist" ] && [ "${pac:-0}" -le 5 ] 2>/dev/null && [ "${pres:-0}" -le 5 ] 2>/dev/null; then
+      anotar "respaldo-de-maquina-vacia" \
+        "La última copia salió de una base vacía" \
+        "Se hizo una copia $(hace $seg) y al comprobarla tenía ${pac:-0} pacientes
+y ${pres:-0} prestaciones. Un centro en marcha tiene miles de los dos.
+Casi seguro que se respaldó la máquina equivocada: una instalación
+limpia o de pruebas, no la que guarda la información del centro.
+Repetir el respaldo daría lo mismo. Hay que mirar QUÉ máquina se está
+copiando, en /etc/redhornoma/maquina." ""
+    else
+      anotar "respaldo-rechazado" \
+        "La última copia NO pasó la comprobación" \
+        "Se hizo una copia $(hace $seg) y al abrirla no resultó de fiar, así
+que quedó marcada como no válida. La buena sigue siendo una anterior.
+Se va a hacer una copia nueva y a comprobarla. Si vuelve a salir mal,
+el problema está en los datos y hace falta que alguien lo mire." \
+        "respaldar"
+    fi
+  elif [ "$seg" -gt 129600 ]; then
+    anotar "respaldo-viejo" \
+      "Van $(hace $seg | sed 's/^hace //') sin respaldar" \
+      "La última copia buena es de $(hace $seg). Todo lo que se haya
+registrado desde entonces no está en ninguna copia.
+Se va a hacer una copia nueva ahora y a comprobarla." \
+      "respaldar"
+  fi
+}
+
+# Sin este permiso, la persona ve el Windows pero no puede encenderlo.
+mirar_permiso(){
+  command -v virsh >/dev/null 2>&1 || return 0
+  vsh list --all --name >/dev/null 2>&1 && return 0
+  id -nG 2>/dev/null | tr ' ' '\n' | grep -qx libvirt && return 0
+  anotar "permiso-libvirt" \
+    "Esta cuenta no tiene permiso sobre los programas" \
+    "El usuario «$(id -un)» no puede manejar la máquina de Windows, así que
+esta pantalla no puede ni ver si está encendida.
+Se va a dar el permiso. Ojo: no vale hasta cerrar la sesión y volver
+a entrar — los permisos se leen al entrar, no después." \
+    "permiso-libvirt"
+}
+
+# Y el que más llamadas de teléfono provoca: «no entra al SALMI».
+#
+# No se puede arreglar desde aquí —la avería puede estar en el cable, en
+# el otro extremo o en la corriente— pero sí se puede decir CUÁL de las
+# cuatro cosas es. Eso convierte una llamada de media hora en una frase.
+mirar_servidor(){
+  [ "${PAPEL:-}" = "puesto" ] || return 0
+
+  local ruta ip_srv ip_win detalle=""
+  ruta=$(ip route show default 2>/dev/null | head -1)
+  if [ -z "$ruta" ]; then
+    anotar "sin-red" \
+      "Esta computadora está fuera de la red" \
+      "No tiene salida a la red: es el cable, la roseta o el aparato de red.
+Mira que el cable esté bien puesto en los dos extremos — en la
+computadora y en la caja de la pared — y que su lucecita parpadee.
+Esto no se puede arreglar desde aquí." ""
+    return
+  fi
+
+  ip_srv=$(anuncio linux)
+  ip_win=$(anuncio windows)
+
+  if [ -z "$ip_srv" ] && [ -z "$ip_win" ]; then
+    anotar "sin-servidor" \
+      "No se ve el servidor del centro" \
+      "Esta computadora está en la red, pero el servidor no aparece.
+Puede ser que esté apagado, que se haya reiniciado hace poco y aún
+esté arrancando, o que su cable se haya soltado.
+Lo que hay que mirar: si el servidor está encendido.
+Esto no se puede arreglar desde aquí." ""
+    return
+  fi
+
+  if [ -n "$ip_win" ] && ! ping -c1 -W2 "$ip_win" >/dev/null 2>&1; then
+    detalle="El servidor sí responde, pero su Windows —donde están SALMI, SOAPS
+y SNIS— no. Casi siempre es que está apagado.
+Quien esté delante del servidor tiene que abrir su panel y pulsar
+«Arreglar»: desde ahí se enciende en un clic."
+    anotar "windows-servidor-apagado" \
+      "El servidor responde, pero sus programas no" \
+      "$detalle" ""
+  fi
+}
+
+mirar_todo(){
+  CLAVE=(); TITULO=(); EXPLICA=(); ACCION=()
+  mirar_permiso
+  mirar_windows
+  mirar_carpetas
+  mirar_anuncio
+  mirar_respaldo
+  mirar_servidor
+}
+
+# ══ 4 · COMPROBAR ═════════════════════════════════════════════════════
+# Se vuelve a mirar la máquina. NO se lee lo que dijo el ayudante: que un
+# comando termine sin error no significa que el problema esté resuelto.
+# Es la misma regla que salvó el respaldo de SOAPS.
+#
+# Ojo con el detalle que costó una reescritura: volver a mirar RELLENA las
+# mismas listas que se están recorriendo. Por eso quien vaya a comprobar
+# se guarda antes su propia copia de la lista original.
+sigue_roto(){  # clave → 0 si el problema PERSISTE
+  local c="$1" i
+  mirar_todo
+  for i in "${!CLAVE[@]}"; do [ "${CLAVE[$i]}" = "$c" ] && return 0; done
+  return 1
+}
+
+# ══ 2 y 3 · EXPLICAR y ARREGLAR ═══════════════════════════════════════
+
+# Todo lo que necesite al administrador va en UNA sola llamada, para que
+# la contraseña se pida una vez. Pedirla cinco veces seguidas enseña a la
+# gente a teclearla sin leer qué está autorizando.
+#
+# Al ayudante solo le llegan PALABRAS de su lista cerrada. Ningún texto
+# escrito por nadie llega nunca a una orden de administrador.
+lanzar_ayudante(){  # palabras...
+  [ $# -gt 0 ] || return 0
+  if [ "$MODO" = "texto" ]; then sudo "$AYUDANTE" "$@"
+  else pkexec "$AYUDANTE" "$@"; fi
+}
+
+# El informe de qué quedó de verdad. Recibe las claves y los títulos que se
+# intentaron —su propia copia, no las listas vivas— y comprueba una a una.
+comprobar_lo_intentado(){  # clave1 titulo1 clave2 titulo2 ...
+  ARREGLADAS=(); SIGUEN=()
+  while [ $# -ge 2 ]; do
+    if sigue_roto "$1"; then SIGUEN+=("$2"); else ARREGLADAS+=("$2"); fi
+    shift 2
+  done
+}
+
+# ── Sin escritorio ────────────────────────────────────────────────────
+modo_texto(){
+  mirar_todo
+  echo
+  echo "REVISIÓN DEL EQUIPO — $YO${PAPEL:+ ($PAPEL)}"
+  echo "══════════════════════════════════════════════════════"
+  if [ "${#CLAVE[@]}" -eq 0 ]; then
+    echo "   ✅ No encuentro nada que arreglar."; echo; return 0
+  fi
+
+  local i palabras=() intentadas=()
+  for i in "${!CLAVE[@]}"; do
+    echo
+    if [ -n "${ACCION[$i]}" ]; then
+      echo "   🔧 ${TITULO[$i]}"
+      palabras+=("${ACCION[$i]}"); intentadas+=("${CLAVE[$i]}" "${TITULO[$i]}")
+    else
+      echo "   ⚠️  ${TITULO[$i]}"
+    fi
+    printf '%s\n' "${EXPLICA[$i]}" | sed 's/^/      /'
+  done
+  echo
+
+  if [ "${#palabras[@]}" -eq 0 ]; then
+    echo "   Ninguna se arregla desde aquí. Arriba dice qué hay que mirar."; echo; return 0
+  fi
+
+  printf '   ¿Arreglo lo que se puede (%s)? [s/N] ' "${#palabras[@]}"
+  read -r r
+  case "$r" in [sSyY]*) ;; *) echo "   No se toca nada."; return 0 ;; esac
+
+  echo; lanzar_ayudante "${palabras[@]}" | sed 's/^/   /'
+  echo; echo "   Comprobando de verdad si quedó arreglado…"
+  comprobar_lo_intentado "${intentadas[@]}"
+  local t
+  for t in ${ARREGLADAS[@]+"${ARREGLADAS[@]}"}; do echo "      ✅ $t"; done
+  for t in ${SIGUEN[@]+"${SIGUEN[@]}"};     do echo "      ❌ sigue igual: $t"; done
+  echo
+  if [ "${#SIGUEN[@]}" -gt 0 ]; then
+    echo "   Lo que sigue mal necesita ayuda de fuera."
+    echo "   Prepara el informe con:  redhornoma-panel --ayuda"
+    echo
+  fi
+}
+
+# ── Con escritorio ────────────────────────────────────────────────────
+# Una sola ventana con TODO lo encontrado y un botón. Se probó primero con
+# casillas para elegir problema por problema y se quitó: ninguna de estas
+# acciones puede perder información, así que elegir cuáles hacer es una
+# pregunta de técnico, no de quien atiende. Y cada pregunta de más es una
+# oportunidad de que alguien cierre la ventana sin arreglar nada.
+modo_ventana(){
+  mirar_todo
+
+  if [ "${#CLAVE[@]}" -eq 0 ]; then
+    yad --class=redhornomapanel $GTKRC --borders=18 --center --width=420 \
+      --title="RedHornoma — revisión" --window-icon="$LOGO" \
+      --image=dialog-ok --image-on-top --align=left \
+      --text="<span size=\"large\"><b>Todo en orden</b></span>
+
+No encuentro nada que arreglar en esta computadora." \
+      --button="Cerrar:0" >/dev/null 2>&1
+    return 0
+  fi
+
+  local i TEXTO="" palabras=() intentadas=() nolocal=0
+  for i in "${!CLAVE[@]}"; do
+    if [ -n "${ACCION[$i]}" ]; then
+      TEXTO="$TEXTO\n<b>🔧  $(esc "${TITULO[$i]}")</b>\n"
+      palabras+=("${ACCION[$i]}"); intentadas+=("${CLAVE[$i]}" "${TITULO[$i]}")
+    else
+      TEXTO="$TEXTO\n<b>⚠️  $(esc "${TITULO[$i]}")</b>\n"
+      nolocal=$((nolocal+1))
+    fi
+    TEXTO="$TEXTO<span size=\"small\">$(esc "${EXPLICA[$i]}")</span>\n"
+  done
+
+  local BOTONES=(--button="Entendido:1")
+  if [ "${#palabras[@]}" -gt 0 ]; then
+    BOTONES=(--button="No tocar nada:1"
+             --button="Arreglar $( [ "${#palabras[@]}" -gt 1 ] && echo "las ${#palabras[@]}" || echo "eso" ):0")
+  fi
+
+  yad --class=redhornomapanel $GTKRC --borders=16 --center --width=680 \
+    --title="RedHornoma — qué le pasa a esta computadora" \
+    --window-icon="$LOGO" --image="$LOGO" --image-on-top --align=left \
+    --selectable-labels \
+    --text="<span size=\"large\"><b>Encontré ${#CLAVE[@]} cosa(s)</b></span>
+$(printf '%b' "$TEXTO")" "${BOTONES[@]}" >/dev/null 2>&1 || return 0
+  [ "${#palabras[@]}" -gt 0 ] || return 0
+
+  # El arreglo, con una barra que no miente: no sabe cuánto falta, así que
+  # va y viene en lugar de fingir un porcentaje. Un respaldo puede tardar
+  # varios minutos y la pantalla no puede parecer colgada.
+  local REG; REG=$(mktemp /tmp/redhornoma-arreglo-XXXXXX.log)
+  lanzar_ayudante "${palabras[@]}" >"$REG" 2>&1 &
+  local PID=$!
+  ( while kill -0 "$PID" 2>/dev/null; do echo; sleep 1; done ) \
+    | yad --class=redhornomapanel $GTKRC --center --width=400 --borders=18 \
+          --title="RedHornoma" --window-icon="$LOGO" --no-buttons \
+          --progress --pulsate --auto-close --undecorated \
+          --text="Arreglando…  no apagues la computadora" >/dev/null 2>&1
+  wait "$PID" 2>/dev/null
+
+  comprobar_lo_intentado "${intentadas[@]}"
+
+  local RESUMEN="" t
+  for t in ${ARREGLADAS[@]+"${ARREGLADAS[@]}"}; do RESUMEN="$RESUMEN\n✅  $(esc "$t")"; done
+  for t in ${SIGUEN[@]+"${SIGUEN[@]}"};     do RESUMEN="$RESUMEN\n❌  $(esc "$t") — <b>sigue igual</b>"; done
+
+  # El permiso de libvirt es distinto y hay que decirlo: el cambio se hizo,
+  # pero no vale hasta volver a entrar. Los grupos se leen al iniciar
+  # sesión. Decir «arreglado» aquí dejaría a la persona dando vueltas.
+  printf '%s\n' "${palabras[@]}" | grep -qx "permiso-libvirt" && \
+    RESUMEN="$RESUMEN\n\n<i>El permiso ya está dado, pero no funciona hasta que
+cierres la sesión y vuelvas a entrar.</i>"
+
+  # Y si algo del ayudante se quejó, se enseña. Un fallo que no dice por
+  # qué obliga a investigar dos veces.
+  local QUEJAS; QUEJAS=$(grep '^MAL ' "$REG" 2>/dev/null | sed 's/^MAL //' | head -3)
+  [ -n "$QUEJAS" ] && RESUMEN="$RESUMEN\n\n<span size=\"small\">$(esc "$QUEJAS")</span>"
+  rm -f "$REG"
+
+  local BOT=(--button="Cerrar:0")
+  [ "${#SIGUEN[@]}" -gt 0 ] && BOT=(--button="Preparar informe para pedir ayuda:2" --button="Cerrar:0")
+
+  yad --class=redhornomapanel $GTKRC --borders=18 --center --width=560 \
+    --title="RedHornoma — resultado" --window-icon="$LOGO" --align=left \
+    --image="$( [ "${#SIGUEN[@]}" -gt 0 ] && echo dialog-warning || echo dialog-ok )" \
+    --image-on-top \
+    --text="<span size=\"large\"><b>Esto es lo que quedó</b></span>
+$(printf '%b' "$RESUMEN")" "${BOT[@]}" >/dev/null 2>&1
+  if [ $? -eq 2 ] && command -v redhornoma-panel >/dev/null 2>&1; then
+    redhornoma-panel --ayuda &
+  fi
+  return 0
+}
+
+ARREGLADAS=(); SIGUEN=()
+
+case "$MODO" in
+  cuantos)
+    mirar_todo
+    n=0
+    for i in "${!CLAVE[@]}"; do [ -n "${ACCION[$i]}" ] && n=$((n+1)); done
+    echo "${#CLAVE[@]} $n"   # encontrados · arreglables desde aquí
+    ;;
+  texto)   modo_texto ;;
+  ventana)
+    if [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || ! command -v yad >/dev/null 2>&1; then
+      MODO=texto; modo_texto
+    else
+      modo_ventana
+    fi
+    ;;
+esac

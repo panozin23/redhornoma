@@ -9,12 +9,18 @@
 # archivos SIN QUE NADIE ABRA NADA, comprueba que sirven, y los deja en
 # varios sitios.
 #
+# SOAPS y SNIS no se pueden copiar así: SOAPS vive en un SQL Server con sus
+# bases abiertas, y copiar esos archivos da una copia rota. Sus copias las
+# hace el propio Windows cada noche y las deja en la carpeta compartida.
+# Se pone en marcha con --preparar-programas, y solo hace falta una vez.
+#
 # Uso:
 #   redhornoma-respaldo               qué hay y cuándo fue el último
 #   sudo redhornoma-respaldo --ahora
 #   sudo redhornoma-respaldo --programar     lo deja hecho cada día
 #   sudo redhornoma-respaldo --verificar     comprueba que el último sirve
 #   sudo redhornoma-respaldo --rescatar      devuelve un respaldo a Windows
+#   sudo redhornoma-respaldo --preparar-programas   SOAPS y SNIS, una vez
 #
 # Un respaldo que nunca se ha restaurado no es un respaldo: es una esperanza.
 set -u
@@ -48,16 +54,17 @@ while [ $# -gt 0 ]; do
     --confirmo)  CONFIRMADO=1; shift ;;
     --maquina)   VM="${2:-}"; shift 2 ;;
     --silencioso) ACCION=ahora; SILENCIO=1; shift ;;
-    --ayuda|-h)  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --preparar-programas) ACCION=preparar_programas; shift ;;
+    --ayuda|-h)  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Opción desconocida: $1"; exit 1 ;;
   esac
 done
 SILENCIO="${SILENCIO:-0}"; CUAL="${CUAL:-}"; CONFIRMADO="${CONFIRMADO:-0}"
 
 if [ -t 1 ] && [ "$SILENCIO" = "0" ]; then
-  V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+  V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
 else
-  V=""; AZ=""; VE=""; RO=""; AM=""
+  V=""; AZ=""; VE=""; RO=""; AM=""; GR=""
 fi
 titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
           printf "${AZ} %s${V}\n" "$1"
@@ -65,6 +72,7 @@ titulo(){ printf "\n${AZ}══════════════════�
 ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
 mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
 avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "   ${GR}%s${V}\n" "$1"; }
 d(){   printf "   %-28s %s\n" "$1" "$2"; }
 anota(){ mkdir -p "$BASE"; printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" >> "$REGISTRO"; }
 
@@ -302,6 +310,36 @@ PY
 # por semana: sale gratis.
 HISTORIAL="$BASE/verificacion.tsv"
 
+# ¿Esto es el equipo del centro, o una instalación limpia?
+#
+# Un centro en funcionamiento no tiene menos de diez pacientes y menos de
+# diez prestaciones. Cuando aparece eso, casi siempre se está respaldando
+# la máquina equivocada: una recién instalada, o una de pruebas.
+#
+# Vive aquí, en una función, y no suelta dentro del respaldo, porque el
+# 09/08/2026 se descubrió que solo la hacía «--ahora» y NO «--verificar».
+# El registro del portátil lo enseñaba entero:
+#
+#     07:01   SIN CONFIRMAR: 2026-08-09_0701
+#     07:05   verificado correcto: 2026-08-09_0701     ← la misma carpeta
+#
+# Un respaldo rechazado al hacerlo quedaba APROBADO al verificarlo. Y
+# «--verificar» era justo lo que el panel mandaba escribir, así que el
+# propio consejo del panel blanqueaba respaldos malos. Con la marca puesta,
+# el panel lo enseña en verde y --rescatar restauraría desde él.
+#
+# Una comprobación que no está en todos los caminos no es una comprobación.
+base_casi_vacia(){  # pacientes prestaciones → 0 si lo está
+  [ "${1:-0}" -lt 10 ] && [ "${2:-0}" -lt 10 ]
+}
+
+avisar_base_vacia(){  # pacientes prestaciones
+  mal "ESTA BASE ESTÁ PRÁCTICAMENTE VACÍA: $1 pacientes, $2 prestaciones"
+  echo "      Un centro en funcionamiento tiene miles de los dos."
+  echo "      Lo más probable es que esta máquina no sea la que guarda"
+  echo "      la información del centro, sino una instalación limpia."
+}
+
 analizar_base(){  # archivo  →  "tablas registros pacientes prestaciones"
   local f="$1" tablas=0 total=0 pac=0 pres=0 n
   command -v mdb-tables >/dev/null 2>&1 || { echo "0 0 0 0"; return 1; }
@@ -414,6 +452,27 @@ salmi_abierto(){
 # ── ¿Es un archivo de Access de verdad? ───────────────────────────────
 # No basta con que exista y pese algo: se mira su firma. Un archivo
 # cortado a medias tiene el tamaño casi bien y no sirve para nada.
+# ── ¿Este paquete abre de verdad? ─────────────────────────────────────
+# Un .zip a medio escribir ocupa sitio, tiene fecha de hoy y parece un
+# respaldo. Solo se distingue de uno bueno intentando abrirlo. Se prueba
+# con «unzip» si está, y si no con Python, que ya hace falta para hablar
+# con el agente invitado.
+zip_entero(){  # archivo
+  [ -s "$1" ] || return 1
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -t -q "$1" >/dev/null 2>&1
+  else
+    python3 - "$1" <<'PY' >/dev/null 2>&1
+import sys, zipfile
+try:
+    with zipfile.ZipFile(sys.argv[1]) as z:
+        sys.exit(1 if z.testzip() is not None else 0)
+except Exception:
+    sys.exit(1)
+PY
+  fi
+}
+
 es_base_valida(){
   [ -s "$1" ] || return 1
   head -c 30 "$1" | grep -q 'Standard Jet DB\|Standard ACE DB'
@@ -464,6 +523,179 @@ if [ "$ACCION" = "mirar" ]; then
   else
     avi "NO está programado — hay que acordarse a mano"
     printf "         ${AZ}sudo redhornoma-respaldo --programar${V}\n"
+  fi
+  echo
+  exit 0
+fi
+
+# ═════════════════════════════════════════════════════════════════════
+#  QUE EL WINDOWS SE HAGA SUS PROPIAS COPIAS DE SOAPS Y SNIS
+# ═════════════════════════════════════════════════════════════════════
+# SALMI lo saca este guion desde fuera, porque sus archivos están siempre
+# en el mismo sitio y se pueden copiar con el disco congelado. SOAPS no:
+# vive en un SQL Server que tiene sus bases abiertas, y copiar esos
+# archivos da una copia rota. Hay que PEDIRLE al motor que haga el
+# respaldo, y eso solo se puede hacer desde dentro de Windows.
+#
+# Así que se deja allí un guion y una tarea que lo ejecuta cada día. El
+# paquete que genera cae en la carpeta compartida, que ya es un directorio
+# de este Linux: recogerlo no cuesta ni una transferencia.
+if [ "$ACCION" = "preparar_programas" ]; then
+  titulo "QUE EL WINDOWS RESPALDE SOAPS Y SNIS SOLO"
+  [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; exit 1; }
+
+  GUION_LOCAL=/usr/share/redhornoma/windows/respaldo-programas.ps1
+  [ -f "$GUION_LOCAL" ] || { mal "falta $GUION_LOCAL"; exit 1; }
+
+  # Un Windows que ya estaba en el centro no es una máquina virtual: no
+  # tiene agente invitado, y desde aquí no se le puede pedir nada. Ahí hay
+  # que ir una vez con el ratón. Decirlo claro es mejor que fallar raro.
+  if [ "$MODO" = "red" ]; then
+    avi "ese Windows no es una máquina virtual de este equipo"
+    echo "      Sin agente invitado no se puede preparar desde fuera."
+    echo
+    echo "      Hay que hacerlo UNA VEZ en esa computadora:"
+    echo
+    echo "      1) Copiar allí este archivo, a C:\\ProgramData\\RedHornoma\\ :"
+    echo "            $GUION_LOCAL"
+    echo "      2) Abrir el Símbolo del sistema COMO ADMINISTRADOR y pegar:"
+    echo
+    echo "            schtasks /Create /F /TN \"RedHornoma - Respaldo de programas\" ^"
+    echo "              /SC DAILY /ST 02:00 /RU SYSTEM /RL HIGHEST ^"
+    echo "              /TR \"powershell.exe -ExecutionPolicy Bypass -NonInteractive -File C:\\ProgramData\\RedHornoma\\respaldo-programas.ps1\""
+    echo
+    echo "      3) Probarla sin esperar a mañana:"
+    echo "            schtasks /Run /TN \"RedHornoma - Respaldo de programas\""
+    echo
+    echo "      El paquete queda en C:\\RESPALDOS. Para que este equipo lo"
+    echo "      recoja, en /var/lib/redhornoma/respaldo.conf:"
+    echo "            windows_extra=$WIN_RED"
+    echo "            windows_extra_carpeta=RESPALDOS"
+    echo
+    exit 1
+  fi
+
+  elegir_maquina || exit 1
+  ok "máquina: $VM"
+  agente '{"execute":"guest-ping"}' | grep -q "return" \
+    || { mal "el agente invitado de «$VM» no contesta"
+         echo "      Sin él no se puede preparar nada desde fuera."; exit 1; }
+  ok "el agente invitado contesta"
+
+  DESTINO_WIN='C:\ProgramData\RedHornoma'
+  TAREA="RedHornoma - Respaldo de programas"
+
+  printf "   %-30s " "dejando el guion dentro"
+  prog_win powershell.exe -NoProfile -Command \
+    "New-Item -ItemType Directory -Path '$DESTINO_WIN' -Force | Out-Null" >/dev/null 2>&1
+  if meter_archivo "$GUION_LOCAL" "$DESTINO_WIN\\respaldo-programas.ps1" >/dev/null 2>&1; then
+    printf "${VE}hecho${V}\n"
+  else
+    printf "${RO}falló${V}\n"; mal "no se pudo escribir dentro de Windows"; exit 1
+  fi
+
+  # A las 2 de la madrugada: el centro está cerrado, nadie tiene SOAPS ni
+  # SNIS abiertos, y a esa hora la copia de Access sale entera.
+  # SYSTEM puede pedirle el respaldo a SQL Server, que es lo que hace falta.
+  printf "   %-30s " "programando la tarea diaria"
+  SALIDA=$(prog_win schtasks.exe /Create /F /TN "$TAREA" /SC DAILY /ST 02:00 \
+             /RU SYSTEM /RL HIGHEST \
+             /TR "powershell.exe -ExecutionPolicy Bypass -NonInteractive -File $DESTINO_WIN\\respaldo-programas.ps1" 2>&1)
+  if printf '%s' "$SALIDA" | grep -qiE "correctamente|SUCCESS"; then
+    printf "${VE}hecho${V}\n"
+  else
+    printf "${RO}falló${V}\n"
+    printf '%s\n' "$SALIDA" | sed 's/^/      /'
+    mal "no se pudo programar la tarea"; exit 1
+  fi
+
+  # ── Que se recupere de un apagón ────────────────────────────────────
+  # Un centro de salud APAGA las computadoras por la noche. Si a las 2 de
+  # la madrugada el servidor está apagado, una tarea diaria normal se salta
+  # esa copia y no vuelve a intentarlo: al día siguiente espera otra vez a
+  # las 2, y así.
+  #
+  # El respaldo de Linux ya tenía esto resuelto desde el principio —mira
+  # arriba, donde se explica CADA_DIAS— y al programar la de Windows se me
+  # pasó aplicar la misma lección. Se vio el 08/08/2026, con el servidor
+  # apagado un sábado por la tarde.
+  #
+  # «StartWhenAvailable» le dice a Windows: si te perdiste la hora, hazlo
+  # en cuanto puedas. Con eso, la copia se hace al primer encendido.
+  #
+  # schtasks no sabe poner esa opción; hay que tocarla después. Y se
+  # COMPRUEBA leyéndola de vuelta: dar por hecho que se aplicó sería
+  # exactamente el verde falso que este proyecto no se permite.
+  printf "   %-30s " "que se recupere de un apagón"
+  AJUSTE=$(prog_win powershell.exe -NoProfile -Command \
+    "\$t = Get-ScheduledTask -TaskName '$TAREA' -ErrorAction Stop;
+     \$t.Settings.StartWhenAvailable = \$true;
+     Set-ScheduledTask -InputObject \$t | Out-Null;
+     (Get-ScheduledTask -TaskName '$TAREA').Settings.StartWhenAvailable" 2>&1)
+  if printf '%s' "$AJUSTE" | grep -qi "true"; then
+    printf "${VE}hecho${V}\n"
+    nota "si el servidor está apagado a las 2, la copia se hará al encenderlo"
+  else
+    printf "${AM}no se pudo${V}\n"
+    avi "la tarea quedó puesta, pero SIN recuperarse de un apagón"
+    echo "      Si el servidor está apagado a las 2 de la madrugada, esa noche"
+    echo "      no habrá copia de SOAPS ni de SNIS. El respaldo diario avisa"
+    echo "      cuando el paquete pasa de dos días, así que no será silencioso."
+    echo "      Para ponerlo a mano, dentro de Windows y como administrador:"
+    echo "         Programador de tareas → «$TAREA» → Propiedades →"
+    echo "         Condiciones → «Ejecutar la tarea lo antes posible tras un"
+    echo "         inicio programado que no se realizó»"
+    anota "AVISO: la tarea de respaldo de programas no se recupera de un apagón"
+  fi
+
+  # Probarla ahora mismo. Programar algo y no verlo funcionar es
+  # exactamente el error que nos trajo hasta aquí.
+  printf "\n   ${AZ}Probándola ahora, sin esperar a mañana${V}\n"
+  prog_win schtasks.exe /Run /TN "$TAREA" >/dev/null 2>&1
+  printf "   %-30s " "esperando a que termine"
+  CARP=$(leer_conf programas_carpeta)
+  [ -z "$CARP" ] && CARP=/var/lib/libvirt/compartido/RESPALDOS
+  DESDE=$(date +%s)
+  LOGRADO=0
+  for _ in $(seq 1 40); do   # hasta 10 minutos
+    sleep 15
+    NUEVO=$(ls -1t "$CARP"/programas-*.zip 2>/dev/null | head -1)
+    # Tiene que ser NUEVO, no el de ayer: si no, diríamos que funcionó
+    # enseñando el paquete de otro día. Eso es un verde falso.
+    [ -n "$NUEVO" ] && [ "$(stat -c %Y "$NUEVO")" -ge "$DESDE" ] || continue
+
+    # Y tiene que estar TERMINADO. La primera versión de esto anunciaba
+    # «14M» cuando el archivo acabó pesando 36: lo pilló a medio comprimir
+    # y dio por bueno un paquete que aún se estaba escribiendo. Se espera a
+    # que el tamaño deje de crecer, y luego se comprueba que abre.
+    T1=$(stat -c %s "$NUEVO"); sleep 5; T2=$(stat -c %s "$NUEVO")
+    [ "$T1" = "$T2" ] || continue
+    LOGRADO=1; break
+  done
+  if [ "$LOGRADO" = "1" ] && zip_entero "$NUEVO"; then
+    printf "${VE}hecho${V}\n"
+    ok "generó $(basename "$NUEVO") ($(du -h "$NUEVO" | cut -f1)), y abre bien"
+  elif [ "$LOGRADO" = "1" ]; then
+    printf "${RO}a medias${V}\n"
+    mal "el paquete $(basename "$NUEVO") NO abre: está incompleto o roto"
+    echo "      No cuentes con esa copia. Vuelve a lanzarla con:"
+    echo "         schtasks /Run /TN \"$TAREA\"   (dentro de Windows)"
+    anota "FALLÓ: el paquete de SOAPS/SNIS no abre"
+    echo; exit 1
+  fi
+  if [ "$LOGRADO" = "1" ]; then
+    case "$(basename "$NUEVO")" in
+      *CON-AVISOS*) avi "pero lo marcó CON AVISOS: mira el PARTE.txt de dentro" ;;
+    esac
+    echo
+    ok "listo: cada noche a las 2 el Windows dejará su copia de SOAPS y SNIS"
+    echo "      y este guion la recogerá en el respaldo del día."
+  else
+    printf "${RO}sin señales${V}\n"
+    avi "la tarea quedó programada, pero no vi aparecer el paquete"
+    echo "      Míralo mañana con: redhornoma-respaldo --verificar"
+    echo "      O a mano, dentro de Windows:"
+    echo "         schtasks /Run /TN \"RedHornoma - Respaldo de programas\""
   fi
   echo
   exit 0
@@ -606,6 +838,13 @@ if [ "$ACCION" = "verificar" ]; then
       d "Pacientes:" "$N_PAC"
       d "Prestaciones:" "$N_PRES"
       echo
+      # La misma comprobación que al hacer el respaldo, y por el mismo
+      # motivo. Sin esto, verificar era una segunda oportunidad para que
+      # colara lo que ya se había rechazado una vez.
+      if base_casi_vacia "${N_PAC:-0}" "${N_PRES:-0}"; then
+        avisar_base_vacia "$N_PAC" "$N_PRES"
+        BIEN=0
+      fi
       comparar_con_anterior "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES" \
         && ok "la información no ha menguado desde la vez anterior" || BIEN=0
     else
@@ -970,10 +1209,100 @@ done
 
 trap - EXIT INT TERM
 
+# ── Las copias de SOAPS y SNIS, que se hace el propio Windows ─────────
+# Hasta el 08/08/2026 estas dos copias las tenía que generar una persona a
+# mano, una vez al mes, desde cada programa. Al mirarlo de verdad, el
+# último respaldo de SOAPS era del 1 de julio: cinco semanas. **Un
+# respaldo que depende de que alguien se acuerde es un respaldo que no
+# ocurre.**
+#
+# Ahora las genera el propio Windows cada día (respaldo-programas.ps1) y
+# las deja en la carpeta compartida, que ES un directorio de este Linux:
+# recogerlas no cuesta ni una transferencia. Se instala con
+# «redhornoma-respaldo --preparar-programas».
+#
+# Aquí NO se comprueba si la copia es buena —eso ya lo hizo SQL Server al
+# generarla— pero sí si es VIEJA. Meter en el respaldo de hoy una copia de
+# SOAPS de hace tres semanas sin decirlo sería un verde falso.
+PROG_CARP=$(leer_conf programas_carpeta)
+[ -z "$PROG_CARP" ] && [ -d /var/lib/libvirt/compartido/RESPALDOS ] \
+  && PROG_CARP=/var/lib/libvirt/compartido/RESPALDOS
+
+if [ -n "$PROG_CARP" ] && [ -d "$PROG_CARP" ]; then
+  printf "\n   ${AZ}Copias de SOAPS y SNIS${V}\n"
+  ULTIMO=$(ls -1t "$PROG_CARP"/programas-*.zip 2>/dev/null | head -1)
+  if [ -z "$ULTIMO" ]; then
+    avi "no hay ninguna copia de SOAPS ni de SNIS"
+    echo "      Las genera el propio Windows. Para ponerlo en marcha:"
+    echo "         sudo redhornoma-respaldo --preparar-programas"
+    anota "AVISO: sin copias de SOAPS/SNIS en $PROG_CARP"
+  else
+    DIAS=$(( ( $(date +%s) - $(stat -c %Y "$ULTIMO") ) / 86400 ))
+    # Que abra. Si el Windows estaba escribiéndolo justo ahora, o se quedó
+    # a medias anoche, el archivo existe y pesa — pero no sirve para nada.
+    if ! zip_entero "$ULTIMO"; then
+      mal "$(basename "$ULTIMO") NO abre: incompleto o roto"
+      echo "      No se incluye. SOAPS y SNIS se quedan SIN copia hoy."
+      anota "FALLÓ: el paquete de SOAPS/SNIS no abre"
+    elif cp -f "$ULTIMO" "$CARPETA_DEST/"; then
+      printf "      %-34s %s\n" "$(basename "$ULTIMO")" "$(du -h "$ULTIMO" | cut -f1)"
+      # Un día de retraso es normal: el Windows la hace por la noche.
+      if [ "$DIAS" -gt 2 ]; then
+        avi "esa copia tiene $DIAS días — el Windows no la está generando"
+        echo "      Compruébalo con: sudo redhornoma-respaldo --preparar-programas"
+        anota "AVISO: copia de SOAPS/SNIS con $DIAS días"
+      else
+        ok "SOAPS y SNIS incluidos (copia de hace $DIAS día(s))"
+      fi
+      # El propio Windows marca el paquete cuando algo no fue redondo.
+      case "$(basename "$ULTIMO")" in
+        *CON-AVISOS*)
+          avi "el Windows marcó esa copia CON AVISOS — mira su PARTE.txt"
+          anota "AVISO: copia de SOAPS/SNIS marcada con avisos" ;;
+      esac
+    else
+      mal "no se pudo copiar $(basename "$ULTIMO")"
+      anota "FALLÓ: no se pudo recoger la copia de SOAPS/SNIS"
+    fi
+  fi
+fi
+
+# ── Los documentos que se pasan entre consultorios ────────────────────
+# La carpeta que crea «redhornoma-carpeta-compartida --documentos». Ahí
+# acaban informes, formularios y plantillas que los médicos se dejan unos
+# a otros. No es la base de datos de nadie, pero es trabajo hecho: si el
+# disco del servidor muere, se pierde igual que lo demás.
+#
+# Se avisa del tamaño, porque esta carpeta la llena la gente y puede
+# crecer sin freno. Todo lo que entre aquí viaja también a la nube, y la
+# nube de un centro rural no es infinita.
+DOCS=/var/lib/redhornoma/documentos
+if [ -d "$DOCS" ] && [ -n "$(ls -A "$DOCS" 2>/dev/null)" ]; then
+  printf "\n   ${AZ}Documentos del centro${V}\n"
+  TAM_KB=$(du -sk "$DOCS" 2>/dev/null | cut -f1)
+  TAM=$(du -sh "$DOCS" 2>/dev/null | cut -f1)
+  if cp -a "$DOCS" "$CARPETA_DEST/documentos-del-centro" 2>/dev/null; then
+    N_DOC=$(find "$CARPETA_DEST/documentos-del-centro" -type f 2>/dev/null | wc -l)
+    ok "$N_DOC archivo(s), $TAM"
+    # 500 MB: a partir de ahí el respaldo diario empieza a pesar de verdad
+    # en la subida a la nube, y conviene que alguien lo mire.
+    if [ "${TAM_KB:-0}" -gt 512000 ]; then
+      avi "esa carpeta ya ocupa $TAM y va entera en cada respaldo"
+      echo "      Conviene revisar si hay cosas que ya no hacen falta:"
+      echo "         $DOCS"
+      anota "AVISO: documentos del centro ocupan $TAM"
+    fi
+  else
+    mal "no se pudieron copiar los documentos del centro"
+    anota "FALLÓ: no se copió $DOCS"
+  fi
+fi
+
 # ── Lo que el centro deja en la carpeta compartida ────────────────────
-# SALMI se saca solo porque sus archivos están siempre ahí. SOAPS y SNIS
-# no: sus copias las genera una persona desde el programa, una vez al mes,
-# y las deja en una carpeta.
+# SALMI se saca solo porque sus archivos están siempre ahí. Esto de aquí
+# abajo es el camino ANTIGUO, para lo que alguien deje a mano: sigue
+# valiendo para un centro donde el Windows no sea de RedHornoma y no pueda
+# generarse sus copias solo.
 #
 # Aquí se recogen. Solo los archivos pequeños que sirven para recuperar
 # —el .wak de SOAPS, el .sal de SALMI, los formularios del SNIS— y nunca
@@ -985,7 +1314,10 @@ if [ -n "$EXTRA_RED" ]; then
   printf "\n   ${AZ}Recogiendo lo que dejó el centro${V}\n"
   mkdir -p "$CARPETA_DEST/del-centro"
   N_EXTRA=0
-  for PATRON in '*.wak' '*.sal' '*.ves' '*.xlsx' '*.xls'; do
+  # El .zip entra desde la 1.0.10: es el paquete que se genera solo el
+  # Windows con SOAPS y SNIS dentro. Comprimido baja de 330 MB a unos 35,
+  # y por eso ahora sí cabe donde antes no cabía.
+  for PATRON in '*.zip' '*.wak' '*.sal' '*.ves' '*.xlsx' '*.xls'; do
     LISTA=$(smbclient "$EXTRA_RED" -A "$WIN_CRED" -t 60 \
               -c "recurse ON; prompt OFF; cd \"$EXTRA_CARP\"; ls $PATRON" 2>/dev/null \
             | awk '$2=="A"{print $1}')
@@ -1058,9 +1390,18 @@ if [ "$MODO" = "virtual" ] && [ -n "${VM:-}" ]; then
   # arrancar y hay que indicárselo a mano la primera vez.
   NVRAM=$(grep -oP '<nvram[^>]*>\K[^<]+' "$CARPETA_DEST/maquina.xml" 2>/dev/null | head -1)
   if [ -n "$NVRAM" ] && [ -r "$NVRAM" ]; then
-    cp -f "$NVRAM" "$CARPETA_DEST/nvram.fd" 2>/dev/null \
-      && ok "nvram.fd — arrancará sin la pantalla azul de UEFI" \
-      || avi "no se pudo guardar la NVRAM"
+    if cp -f "$NVRAM" "$CARPETA_DEST/nvram.fd" 2>/dev/null; then
+      # El original solo lo puede leer root, y la copia hereda ese permiso.
+      # Eso hacía que al llevarse el respaldo a otro disco desde el portátil
+      # llegara todo MENOS este archivo, y sin él la máquina restaurada no
+      # encuentra qué arrancar. Se iguala al resto de la carpeta —que ya es
+      # legible— porque aquí dentro no guarda ningún secreto: son las
+      # variables de arranque de UEFI. Descubierto el 09/08/2026.
+      chmod 644 "$CARPETA_DEST/nvram.fd" 2>/dev/null
+      ok "nvram.fd — arrancará sin la pantalla azul de UEFI"
+    else
+      avi "no se pudo guardar la NVRAM"
+    fi
   fi
 
   # El estado del TPM emulado. Se guarda por UUID de la máquina.
@@ -1120,15 +1461,11 @@ if [ -f "$PRINCIPAL" ] && command -v mdb-tables >/dev/null 2>&1; then
     d "Pacientes:" "$N_PAC"
     d "Prestaciones:" "$N_PRES"
 
-    # Un centro con un paciente y ninguna prestación no existe: eso es una
-    # instalación recién puesta, sin datos. Compararlo con el respaldo
-    # anterior no lo detecta cuando ESTE es el primero, que es justo cuando
-    # más fácil es equivocarse de máquina. Por eso se mira también a solas.
-    if [ "${N_PAC:-0}" -lt 10 ] && [ "${N_PRES:-0}" -lt 10 ]; then
-      mal "ESTA BASE ESTÁ PRÁCTICAMENTE VACÍA: $N_PAC pacientes, $N_PRES prestaciones"
-      echo "      Un centro en funcionamiento tiene miles de los dos."
-      echo "      Lo más probable es que esta máquina no sea la que guarda"
-      echo "      la información del centro, sino una instalación limpia."
+    # Comparar con el respaldo anterior no basta: no detecta nada cuando
+    # ESTE es el primero —que es justo cuando más fácil es equivocarse de
+    # máquina— ni cuando el anterior estaba igual de vacío.
+    if base_casi_vacia "${N_PAC:-0}" "${N_PRES:-0}"; then
+      avisar_base_vacia "$N_PAC" "$N_PRES"
       BIEN=0
     fi
 
@@ -1197,13 +1534,43 @@ for m in /media/*/* /run/media/*/*; do
   fi
 done
 
-# 3) Otra computadora del centro
+# 3) Otra computadora — puede estar en el mismo centro o en OTRO
+#
+# Desde el 11/08/2026 los centros están unidos por un enlace que da la vuelta
+# por un servidor de reenvío en Brasil, porque los dos están detrás del
+# operador y no consiguen hablarse directos. Ese camino es gratis pero lento,
+# y eso cambia dos cosas:
+#
+# 1 · NO cruza el zip de los programas. Son SOAPS y SNIS, 44 MB que se
+#     reinstalan desde su instalador. Lo irreemplazable —el .sal y las bases—
+#     son 8 MB. Cruzar 44 MB de programas cada dos días por un enlace lento es
+#     gastar horas para proteger lo que no hace falta proteger.
+#
+#     Con «otra_computadora_todo=si» se manda entero, para cuando el destino
+#     esté en la misma red del centro y la velocidad no importe.
+#
+# 2 · La espera pasa de 60 segundos a 10 minutos. Con 60, un archivo grande
+#     por ese rodeo se queda callado más de eso y rsync aborta: el 11/08 se
+#     cortó justo en el zip, tras haber pasado bien los 8,7 MB de datos.
 OTRA=$(leer_conf otra_computadora)
 if [ -n "$OTRA" ]; then
-  if rsync -a --timeout=60 "$CARPETA_DEST" "$OTRA/" 2>/dev/null; then
-    ok "copiado a $OTRA"; FUERA=$((FUERA+1))
+  ARG_OTRA=(-a --partial --timeout=600)
+  QUE="entero"
+  if [ "$(leer_conf otra_computadora_todo)" != "si" ]; then
+    ARG_OTRA+=(--exclude='programas-*.zip')
+    QUE="solo los datos"
+  fi
+
+  # El error NO se tira a la basura, y el mensaje no manda a mirar donde no
+  # es. El anterior decía «¿está encendida?» y la máquina estaba encendida:
+  # lo que fallaba era el tamaño contra la espera.
+  SALIDA_OTRA=$(rsync "${ARG_OTRA[@]}" "$CARPETA_DEST" "$OTRA/" 2>&1)
+  if [ $? -eq 0 ]; then
+    ok "copiado a $OTRA ($QUE)"; FUERA=$((FUERA+1))
   else
-    avi "no se pudo copiar a $OTRA — ¿está encendida?"
+    avi "no se pudo copiar a $OTRA"
+    printf '%s\n' "$SALIDA_OTRA" | grep -iE "error|timeout|refused|denied" | head -2 | sed 's/^/         /'
+    nota "si tarda demasiado, mira que no esté cruzando archivos grandes"
   fi
 fi
 
@@ -1294,6 +1661,7 @@ else
   echo "      Configura los destinos en:  $CONF"
   echo "         carpeta_extra=/ruta/de/otro/disco"
   echo "         otra_computadora=usuario@equipo.local:/ruta"
+  echo "         otra_computadora_todo=si   (manda tambien los programas, 44 MB)"
   echo "         nube=drive:B-SALMI26"
 fi
 
@@ -1399,4 +1767,15 @@ cat <<FIN
       y apuntar al archivo terminado en ${AZ}.sal${V}
 
 FIN
-anota "OK: $FECHA, $COPIADOS archivos, $FUERA copias fuera"
+# El registro dice si la información está protegida FUERA, no cuántas
+# copias se hicieron hoy. No es lo mismo: la nube sube cada 3 días, así que
+# un día normal salen «0 copias fuera» y sin embargo la de ayer protege
+# igual. Leído a secas, ese renglón parece un centro desprotegido — y el
+# 09/08/2026 costó cinco minutos de susto y de revisar código.
+if [ "$FUERA" -gt 0 ]; then
+  anota "OK: $FECHA, $COPIADOS archivos, $FUERA copias fuera"
+elif [ "${PROTEGIDO_NUBE:-0}" = "1" ]; then
+  anota "OK: $FECHA, $COPIADOS archivos, protegida por la copia de la nube"
+else
+  anota "OK: $FECHA, $COPIADOS archivos, SIN NINGUNA COPIA FUERA"
+fi

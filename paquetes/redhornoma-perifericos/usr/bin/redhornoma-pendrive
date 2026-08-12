@@ -1,0 +1,256 @@
+#!/bin/bash
+# redhornoma-pendrive — Grabar RedHornoma en un pendrive sin poder equivocarse.
+#
+# Hasta hoy esto se hacía escribiendo a mano una orden como esta:
+#
+#     sudo dd if=archivo.iso of=/dev/sdX bs=4M status=progress conv=fsync
+#
+# Y ahí está el problema: esa «X». Escribir en el disco equivocado borra lo
+# que haya, sin preguntar y sin poder deshacerlo.
+#
+# El 09/08/2026 se grabó un pendrive en el servidor de Cochabamba. Enchufados
+# a esa máquina, al mismo tiempo, estaban su disco de sistema y el disco
+# personal de euflo con 557 GB — los dos por USB, igual que el pendrive. Se
+# acertó porque había alguien mirando tres columnas de «lsblk». Un centro no
+# tiene a nadie que haga eso.
+#
+# Aquí no se escribe ninguna letra. Solo aparecen los discos EXTRAÍBLES: el
+# disco de la computadora no puede salir en la lista ni por error. Y lo que
+# de verdad protege está en /usr/lib/redhornoma/grabar-pendrive, que vuelve a
+# comprobarlo todo por su cuenta después de pedir la contraseña.
+#
+# Uso:
+#   redhornoma-pendrive             la ventana
+#   redhornoma-pendrive --texto     lo mismo en la terminal
+#   redhornoma-pendrive --iso RUTA  una ISO concreta
+set -u
+
+export GDK_BACKEND=x11
+
+AYUDANTE=/usr/lib/redhornoma/grabar-pendrive
+ISOS_LOCALES="/home/${SUDO_USER:-$(id -un)}/PROYECTOS-CURSALIA/redhornoma/isos"
+MODO=ventana
+ISO=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --texto) MODO=texto; shift ;;
+    --iso)   ISO="${2:-}"; shift 2 ;;
+    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) echo "no entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "   ${GR}%s${V}\n" "$1"; }
+esc(){ printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+LOGO=/usr/share/pixmaps/redhornoma.png
+[ -f "$LOGO" ] || LOGO=drive-removable-media
+GTKRC=""
+[ -f /usr/share/redhornoma/centro.css ] && GTKRC="--gtkrc=/usr/share/redhornoma/centro.css"
+
+# ── Los pendrives, y SOLO los pendrives ───────────────────────────────
+# El filtro es «extraíble» (la columna RM de lsblk), no «va por USB». Es una
+# distinción que costó entender: el disco de 1 TB de euflo va por USB igual
+# que el pendrive, y si se filtrara por USB saldría en la lista. Lo que lo
+# separa es que el sistema lo declara NO extraíble.
+buscar_pendrives(){
+  lsblk -dnro NAME,SIZE,RM,TYPE,MODEL 2>/dev/null | while read -r n tam rm tipo resto; do
+    [ "$tipo" = "disk" ] || continue
+    [ "$rm" = "1" ]      || continue
+    # 256 GB de tope: por encima de eso es un disco de alguien, no un pendrive.
+    bytes=$(( $(cat "/sys/block/$n/size" 2>/dev/null || echo 0) * 512 ))
+    [ "$bytes" -gt 0 ] && [ "$bytes" -le 274877906944 ] || continue
+    # Qué lleva dentro, para que la persona reconozca el suyo. Se prefiere el
+    # NOMBRE que le puso alguien; si no hay, el tipo de formato. Y sin
+    # repetir: un pendrive con dos particiones iguales decía «RedHornoma
+    # iso9660 RedHornoma iso9660», que no ayuda a nadie.
+    dentro=$(lsblk -nro LABEL "/dev/$n" 2>/dev/null | grep . | sort -u | paste -sd', ' -)
+    [ -n "$dentro" ] || dentro=$(lsblk -nro FSTYPE "/dev/$n" 2>/dev/null | grep . | sort -u | paste -sd', ' -)
+    printf '%s\t%s\t%s\t%s\n' "$n" "$tam" "${resto:-sin nombre}" "${dentro:-vacío}"
+  done
+}
+
+elegir_iso(){
+  [ -n "$ISO" ] && { echo "$ISO"; return; }
+  local c
+  for c in "$ISOS_LOCALES" /var/lib/redhornoma/isos "$PWD" "$PWD/isos"; do
+    [ -d "$c" ] || continue
+    ls -1t "$c"/*.iso 2>/dev/null | head -1 | grep . && return
+  done
+}
+
+# ══ Sin escritorio ════════════════════════════════════════════════════
+modo_texto(){
+  titulo "GRABAR REDHORNOMA EN UN PENDRIVE"
+
+  ISO=$(elegir_iso)
+  if [ -z "$ISO" ] || [ ! -f "$ISO" ]; then
+    mal "no encuentro ninguna ISO"
+    echo "      Dile cuál con:  redhornoma-pendrive --texto --iso /ruta/al/archivo.iso"
+    exit 1
+  fi
+  ok "ISO: $(basename "$ISO")  ($(du -h "$ISO" | cut -f1))"
+
+  local LISTA; LISTA=$(buscar_pendrives)
+  if [ -z "$LISTA" ]; then
+    mal "no veo ningún pendrive"
+    echo "      Enchufa uno y vuelve a intentarlo."
+    echo "      (Los discos duros externos NO salen aquí a propósito.)"
+    exit 1
+  fi
+
+  echo
+  printf "   ${AZ}Pendrives que veo${V}\n\n"
+  local i=0 n tam modelo dentro
+  while IFS=$'\t' read -r n tam modelo dentro; do
+    i=$((i+1))
+    printf "      %s)  %-8s %-8s %s\n" "$i" "/dev/$n" "$tam" "$modelo"
+    printf "          ${GR}lleva dentro: %s${V}\n" "$dentro"
+  done <<< "$LISTA"
+
+  echo
+  printf "   ¿En cuál grabo? [1-%s, o Enter para no hacer nada] " "$i"
+  read -r elegido
+  [ -n "${elegido:-}" ] || { nota "no se toca nada"; exit 0; }
+  echo "$elegido" | grep -qE '^[0-9]+$' && [ "$elegido" -ge 1 ] && [ "$elegido" -le "$i" ] \
+    || { mal "«$elegido» no está en la lista"; exit 1; }
+
+  local FILA; FILA=$(echo "$LISTA" | sed -n "${elegido}p")
+  local DISCO="/dev/$(echo "$FILA" | cut -f1)"
+
+  echo
+  avi "SE BORRA TODO lo que haya en $DISCO"
+  printf "      %s\n" "$(echo "$FILA" | cut -f3)"
+  printf "      lleva dentro: %s\n\n" "$(echo "$FILA" | cut -f4)"
+  printf "   Escribe BORRAR para confirmar: "
+  read -r confirma
+  [ "$confirma" = "BORRAR" ] || { nota "no se toca nada"; exit 0; }
+
+  echo
+  sudo "$AYUDANTE" "$ISO" "$DISCO" || { echo; mal "no se pudo grabar"; exit 1; }
+  echo
+  ok "pendrive grabado y comprobado leyendo de él"
+}
+
+# ══ Con escritorio ════════════════════════════════════════════════════
+modo_ventana(){
+  ISO=$(elegir_iso)
+  if [ -z "$ISO" ] || [ ! -f "$ISO" ]; then
+    ISO=$(yad --class=redhornomapanel $GTKRC --center --title="RedHornoma" \
+          --file --file-filter="Imágenes de sistema (*.iso) | *.iso" \
+          --text="¿Qué archivo .iso quieres grabar?" 2>/dev/null) || return 0
+    [ -n "$ISO" ] && [ -f "$ISO" ] || return 0
+  fi
+
+  local LISTA; LISTA=$(buscar_pendrives)
+  if [ -z "$LISTA" ]; then
+    yad --class=redhornomapanel $GTKRC --borders=18 --center --width=440 \
+      --title="RedHornoma — grabar un pendrive" --window-icon="$LOGO" \
+      --image=drive-removable-media --image-on-top --align=left \
+      --text="<span size=\"large\"><b>No veo ningún pendrive</b></span>
+
+Enchufa uno y vuelve a abrir esta ventana.
+
+<span size=\"small\">Los discos duros externos no salen aquí a propósito:
+esta ventana solo enseña lo que el sistema declara extraíble,
+para que no se pueda borrar un disco con información dentro.</span>" \
+      --button="Cerrar:0" >/dev/null 2>&1
+    return 0
+  fi
+
+  # La lista, con lo que hace falta para reconocer el pendrive propio:
+  # su tamaño, su modelo y qué lleva dentro.
+  local FILAS=() n tam modelo dentro
+  while IFS=$'\t' read -r n tam modelo dentro; do
+    FILAS+=("/dev/$n" "$tam" "$modelo" "$dentro")
+  done <<< "$LISTA"
+
+  local ELEGIDO
+  ELEGIDO=$(yad --class=redhornomapanel $GTKRC --borders=14 --center \
+    --width=680 --height=300 \
+    --title="RedHornoma — grabar un pendrive" \
+    --window-icon="$LOGO" --image="$LOGO" --image-on-top --align=left \
+    --text="<span size=\"large\"><b>¿En qué pendrive lo grabo?</b></span>
+Se va a grabar <b>$(esc "$(basename "$ISO")")</b>.
+<span size=\"small\">Solo salen los discos extraíbles. El disco de esta computadora no puede aparecer aquí.</span>" \
+    --list --print-column=1 \
+    --column="Pendrive" --column="Tamaño" --column="Modelo" --column="Lleva dentro" \
+    --expand-column=4 "${FILAS[@]}" \
+    --button="Cancelar:1" --button="Continuar:0" 2>/dev/null) || return 0
+  ELEGIDO=$(printf '%s' "$ELEGIDO" | tr -d '|' | head -1)
+  [ -n "$ELEGIDO" ] || return 0
+
+  local FILA; FILA=$(echo "$LISTA" | grep -F "$(basename "$ELEGIDO")"$'\t' | head -1)
+
+  # La confirmación dice el nombre del disco y lo que se pierde. Un «¿seguro?»
+  # sin decir de qué se contesta que sí sin leerlo.
+  yad --class=redhornomapanel $GTKRC --borders=18 --center --width=480 \
+    --title="RedHornoma — atención" --window-icon="$LOGO" \
+    --image=dialog-warning --image-on-top --align=left \
+    --text="<span size=\"large\"><b>Se borra todo lo que haya en $(esc "$ELEGIDO")</b></span>
+
+<b>$(esc "$(echo "$FILA" | cut -f2)") · $(esc "$(echo "$FILA" | cut -f3)")</b>
+Lleva dentro: $(esc "$(echo "$FILA" | cut -f4)")
+
+Esto no se puede deshacer. Si ese pendrive tiene algo que
+te importe, cancela y cópialo antes.
+
+<span size=\"small\">Tarda unos minutos. Al terminar se comprueba
+leyendo del propio pendrive, no dando por bueno que se grabó.</span>" \
+    --button="Cancelar:1" --button="Borrar y grabar:0" >/dev/null 2>&1 || return 0
+
+  local REG; REG=$(mktemp /tmp/redhornoma-pendrive-XXXXXX.log)
+  pkexec "$AYUDANTE" "$ISO" "$ELEGIDO" >"$REG" 2>&1 &
+  local PID=$!
+  ( while kill -0 "$PID" 2>/dev/null; do echo; sleep 2; done ) \
+    | yad --class=redhornomapanel $GTKRC --center --width=420 --borders=18 \
+          --title="RedHornoma" --window-icon="$LOGO" --no-buttons \
+          --progress --pulsate --auto-close --undecorated \
+          --text="Grabando… no saques el pendrive
+ni apagues la computadora" >/dev/null 2>&1
+  wait "$PID"; local RES=$?
+
+  local HUELLA; HUELLA=$(grep '^OK: ' "$REG" | tail -1 | cut -d' ' -f2)
+  local QUEJA;  QUEJA=$(grep '^MAL: ' "$REG" | head -3 | sed 's/^MAL: //')
+  rm -f "$REG"
+
+  if [ "$RES" = "0" ] && [ -n "$HUELLA" ]; then
+    yad --class=redhornomapanel $GTKRC --borders=18 --center --width=520 \
+      --title="RedHornoma — listo" --window-icon="$LOGO" \
+      --image=dialog-ok --image-on-top --align=left \
+      --text="<span size=\"large\"><b>Pendrive listo</b></span>
+
+Ya puedes arrancar una computadora con él.
+
+<span size=\"small\">Comprobado leyendo del propio pendrive:
+<tt>$(esc "${HUELLA:0:32}")…</tt></span>" \
+      --button="Cerrar:0" >/dev/null 2>&1
+  else
+    yad --class=redhornomapanel $GTKRC --borders=18 --center --width=520 \
+      --title="RedHornoma — no se pudo" --window-icon="$LOGO" \
+      --image=dialog-error --image-on-top --align=left \
+      --text="<span size=\"large\"><b>No se grabó</b></span>
+
+$(esc "${QUEJA:-La grabación no llegó a terminar.}")
+
+<span size=\"small\">Ese pendrive no sirve para arrancar. Prueba con otro,
+o con otro puerto USB.</span>" \
+      --button="Cerrar:0" >/dev/null 2>&1
+  fi
+}
+
+case "$MODO" in
+  texto) modo_texto ;;
+  *)
+    if [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || ! command -v yad >/dev/null 2>&1; then
+      modo_texto
+    else
+      modo_ventana
+    fi ;;
+esac

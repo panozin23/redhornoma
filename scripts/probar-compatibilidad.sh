@@ -19,8 +19,22 @@
 #   probar-compatibilidad.sh antigua           probar una
 #   probar-compatibilidad.sh --todas           una detrás de otra
 #   probar-compatibilidad.sh --instalado antigua   arrancar lo ya instalado
+#   probar-compatibilidad.sh --desde-usb antigua   arrancar como PENDRIVE
 #   probar-compatibilidad.sh --resultados      qué salió en las pruebas
 set -u
+
+# ¿La ISO entra como CD o como pendrive?
+#
+# No es el mismo camino. Un CD arranca por El Torito, que va dentro del
+# sistema de archivos; un pendrive arranca por el sector de inicio del propio
+# disco, como un disco duro cualquiera. La ISO lleva los dos, pero hasta el
+# 09/08/2026 este guion solo había probado el del CD — y en un centro nadie
+# instala desde un CD: se instala desde un pendrive.
+#
+# La primera vez que se probó el camino del pendrive salió un defecto que
+# llevaba meses ahí: el menú de arranque de las máquinas antiguas enseñaba
+# «RedHornoma ГÖ probar sin instalar».
+DESDE_USB=0
 
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
 TRABAJO="$BASE/pruebas"
@@ -43,8 +57,17 @@ nota(){ printf "   %s%s%s\n" "$GR" "$1" "$V"; }
 # instrucciones que un Debian moderno da por supuestas en máquinas nuevas.
 # Si algo va a romperse por antigüedad, se rompe ahí.
 PERFILES=(
+  # «centro» es la que más importa y la que faltaba: está medida sobre
+  # servidor-ciudad, una máquina de escritorio real de un centro. Arranca por
+  # BIOS ANTIGUO —no UEFI, aunque lleve Windows 10—, dos núcleos y disco SATA
+  # de platos. Hasta el 08/08 se probaba de todo menos esto.
+  "centro|La que de verdad hay en los centros, medida sobre una real|bios|4096|2|core2duo|sata"
   "antigua|PC de escritorio de 2011, como el de Hornoma|bios|2048|2|core2duo|ide"
-  "minima|Lo más flaco que puede llegar a un centro|bios|1536|1|core2duo|ide"
+  # 2048 y no 1536: euflo, que es quien ve las máquinas que llegan, dice que
+  # de 1 GB ya no queda ninguna y que de 2 apenas. Probar con 1536 medía una
+  # computadora que ya no existe — y encima tardó 14 minutos en llegar al
+  # formulario de usuarios, con el procesador clavado, pareciendo colgada.
+  "minima|Lo más flaco que aún existe|bios|2048|1|core2duo|ide"
   "moderna|Equipo de hoy, arranque UEFI normal|uefi|4096|4|host|virtio"
   "segura|Equipo comprado hoy, tal como viene de fábrica|segura|4096|4|host|virtio"
   "portatil-viejo|Portátil de 2013, UEFI de primera generación|uefi|3072|2|Nehalem|sata"
@@ -204,7 +227,20 @@ probar(){
     virtio) ARG+=(-drive "file=$DISCO_ARCH,format=qcow2,if=virtio") ;;
   esac
 
-  ARG+=(-drive "file=$ISO,format=raw,media=cdrom,readonly=on")
+  if [ "$DESDE_USB" = "1" ]; then
+    # El controlador, según la época de la máquina. Una de 2011 no tiene
+    # USB 3: ponerle uno sería probar algo que allá no existe.
+    case "$FIRM" in
+      bios) ARG+=(-device usb-ehci,id=usbctl
+                  -drive "file=$ISO,format=raw,readonly=on,if=none,id=pincho"
+                  -device usb-storage,bus=usbctl.0,drive=pincho,bootindex=1) ;;
+      *)    ARG+=(-device qemu-xhci,id=usbctl
+                  -drive "file=$ISO,format=raw,readonly=on,if=none,id=pincho"
+                  -device usb-storage,bus=usbctl.0,drive=pincho,bootindex=1) ;;
+    esac
+  else
+    ARG+=(-drive "file=$ISO,format=raw,media=cdrom,readonly=on")
+  fi
 
   # «cd» = primero el disco duro, y si no arranca, el CD.
   #
@@ -218,7 +254,14 @@ probar(){
   #
   # Con «cd» el disco vacío no arranca, cae al CD, y una vez instalado
   # arranca solo — que es justo lo que hay que comprobar.
-  ARG+=(-boot order=cd,menu=on)
+  # Desde pendrive el orden no se pide por letras: se pide con «bootindex»,
+  # que es lo que entiende un arranque por USB. Mezclar los dos hace que
+  # SeaBIOS ignore uno de ellos y arranque de donde no toca.
+  if [ "$DESDE_USB" = "1" ]; then
+    ARG+=(-boot menu=on)
+  else
+    ARG+=(-boot order=cd,menu=on)
+  fi
   ARG+=(-vga virtio -display gtk,show-cursor=on)
   ARG+=(-netdev user,id=n0 -device virtio-net-pci,netdev=n0)
 
@@ -284,6 +327,13 @@ ver_resultados(){
 }
 
 # ── Principal ────────────────────────────────────────────────────────
+# Se mira antes del resto para que «--desde-usb antigua» funcione igual que
+# «antigua», sin duplicar todo el manejo de opciones.
+if [ "${1:-}" = "--desde-usb" ]; then
+  DESDE_USB=1; shift
+  [ $# -gt 0 ] || set -- --todas
+fi
+
 case "${1:---lista}" in
   --lista|-l)   listar; exit 0 ;;
   --resultados) ver_resultados; exit 0 ;;

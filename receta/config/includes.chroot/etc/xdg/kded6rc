@@ -1,0 +1,16 @@
+# Qué servicios de fondo NO arranca KDE en RedHornoma.
+#
+# «plasma-welcome» es el «Centro de bienvenida»: una ventana de seis páginas
+# que se abre sola encima del escritorio la primera vez, hablando de la
+# comunidad KDE y de Debian.
+#
+# Se vio el 09/08/2026, arrancando la ISO desde pendrive y fotografiando el
+# escritorio: lo PRIMERO que ve una persona al encender RedHornoma no era
+# RedHornoma. Era un asistente sobre otra cosa, tapando los iconos —«Pasar a
+# Windows», «ANTES-DE-INSTALAR.txt», «Instalar RedHornoma»— que son justo lo
+# que esa persona necesita.
+#
+# En un centro de salud, quien enciende la computadora no viene a conocer una
+# comunidad de software: viene a atender pacientes.
+[Module-plasma-welcome]
+autoload=false

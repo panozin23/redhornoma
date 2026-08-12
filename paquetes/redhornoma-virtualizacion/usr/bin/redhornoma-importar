@@ -436,11 +436,11 @@ if ! virsh -c qemu:///system net-info default >/dev/null 2>&1; then
   virsh -c qemu:///system net-define /usr/share/libvirt/networks/default.xml >/dev/null 2>&1 \
     && ok "red «default» definida" || avi "no pude definir la red «default»"
 fi
-if [ "$(virsh -c qemu:///system net-info default 2>/dev/null | awk '/^Active/{print $2}')" != "yes" ]; then
+if [ "$(LC_ALL=C virsh -c qemu:///system net-info default 2>/dev/null | awk '/^Active/{print $2}')" != "yes" ]; then
   virsh -c qemu:///system net-start default >/dev/null 2>&1 \
     && ok "red «default» encendida" || avi "no pude encender la red «default»"
 fi
-if [ "$(virsh -c qemu:///system net-info default 2>/dev/null | awk '/^Autostart/{print $2}')" != "yes" ]; then
+if [ "$(LC_ALL=C virsh -c qemu:///system net-info default 2>/dev/null | awk '/^Autostart/{print $2}')" != "yes" ]; then
   virsh -c qemu:///system net-autostart default >/dev/null 2>&1 \
     && ok "red «default» arrancará sola en cada encendido" \
     || avi "la red «default» no arrancará sola: sudo virsh net-autostart default"

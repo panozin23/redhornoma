@@ -17,38 +17,80 @@
 #   redhornoma-entrar --kiosco            para el modo directo, sin escritorio
 #   redhornoma-entrar --maquina salud-servidor     cuando hay varias
 #   redhornoma-entrar --cual              solo dice cuál abriría, no abre
+#   redhornoma-entrar --en 192.168.1.101  la de OTRA computadora, por red
+#   redhornoma-entrar --en hornoma@192.168.1.101 --maquina salud-servidor
 #
 # No necesita sudo si el usuario está en el grupo «libvirt». Si no lo
 # está, se dice cómo arreglarlo en vez de fallar sin explicación.
+#
+# ── Abrir la de otra computadora, con «--en» ──────────────────────────
+#
+# Era el hueco más viejo del proyecto: la regla de trabajo es hacerlo todo
+# desde el portátil sin ir y venir entre máquinas, y justo esto —ver la
+# pantalla del Windows de un centro— obligaba a levantarse.
+#
+# No hace falta ningún túnel a mano: libvirt sabe hablar por SSH él solo
+# con «qemu+ssh://», y virt-viewer se trae la pantalla por esa misma
+# conexión. Lo único que necesita la otra computadora es «nc», que va en
+# la receta desde el principio.
+#
+# La pantalla del Windows escucha SOLO en su propia máquina (127.0.0.1) y
+# así se queda: no se abre ningún puerto a la red. Todo viaja cifrado por
+# la conexión de SSH que ya usábamos.
 set -u
 
 # yad en Wayland avisa de un identificador X11 que ahí no existe. Por
 # XWayland la llamada es válida y no ensucia la terminal.
 export GDK_BACKEND=x11
 
-VIRSH="virsh -c qemu:///system"
 CONF=/etc/redhornoma
 RECUERDO="$CONF/maquina"          # cuál es LA máquina de los programas
+REMOTO=""                         # vacío = esta computadora
+CONEXION="qemu:///system"
 # Ventana normal y sin reconexión: son los dos ajustes que se probaron y
 # hubo que cambiar. Ver el porqué de cada uno donde se usan, más abajo.
 VM=""; PANTALLA_COMPLETA=0; RECONECTAR=0; SOLO_DECIR=0
 
-V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
-ok(){  printf "   ${VE}●${V} %s\n" "$1"; }
-mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
-avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+ok(){   printf "   ${VE}●${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "   ${GR}%s${V}\n" "$1"; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --maquina)            VM="${2:-}"; shift 2 ;;
+    --en)                 REMOTO="${2:-}"
+                          [ -n "$REMOTO" ] || { echo "falta la computadora detrás de --en"; exit 1; }
+                          # Sin usuario delante se usa el mismo de aquí, que
+                          # es lo que pasa casi siempre entre máquinas del
+                          # proyecto.
+                          case "$REMOTO" in *@*) ;; *) REMOTO="$(id -un)@$REMOTO" ;; esac
+                          CONEXION="qemu+ssh://$REMOTO/system"
+                          shift 2 ;;
     --ventana)            PANTALLA_COMPLETA=0; shift ;;
     --pantalla-completa)  PANTALLA_COMPLETA=1; shift ;;
     --kiosco)             PANTALLA_COMPLETA=1; RECONECTAR=1; shift ;;
     --cual)               SOLO_DECIR=1; shift ;;
     -h|--help)            sed -n '2,23p' "$0" | sed 's/^# \?//'; exit 0 ;;
-    *)                    mal "no entiendo «$1»"; exit 1 ;;
+    # Decir «no entiendo» y callarse deja al usuario igual de perdido que
+    # antes. Casi siempre lo que ha pasado es que escribió el nombre de la
+    # máquina a pelo, así que se le enseña la forma buena y qué máquinas hay.
+    *)                    mal "no entiendo «$1»"
+                          nota "el nombre de la máquina va detrás de --maquina:"
+                          nota "    redhornoma-entrar --maquina $1"
+                          MAQS=$($VIRSH list --all --name 2>/dev/null | grep -v '^$')
+                          if [ -n "$MAQS" ]; then
+                            nota "máquinas en esta computadora:"
+                            printf '%s\n' "$MAQS" | sed 's/^/        /'
+                          fi
+                          exit 1 ;;
   esac
 done
+
+# El «virsh» se arma aquí y no arriba: hasta haber leído las opciones no se
+# sabe si hablamos con esta computadora o con otra.
+VIRSH="virsh -c $CONEXION"
 
 # ── Avisar por donde se pueda ─────────────────────────────────────────
 # Esto se lanza desde un icono tanto como desde la terminal. Si hay
@@ -76,6 +118,15 @@ command -v virsh >/dev/null 2>&1 || {
     "dialog-error"; exit 1; }
 
 if ! $VIRSH list --all --name >/dev/null 2>&1; then
+  # Yendo a otra computadora, el motivo casi nunca es el permiso: es que no
+  # se llega, o que ahí no hay virtualización. Decir «te falta el grupo
+  # libvirt» mandaría a arreglar lo que no está roto.
+  if [ -n "$REMOTO" ]; then
+    aviso "No se puede llegar a esa computadora" \
+      "No consigo hablar con las máquinas de <b>$REMOTO</b>.\n\nComprueba:\n· que esté encendida y en la red\n· que se pueda entrar con <b>ssh $REMOTO</b>\n· que ahí esté instalada la virtualización" \
+      "network-error"
+    exit 1
+  fi
   aviso "Sin permiso para las máquinas virtuales" \
     "Tu usuario <b>$(id -un)</b> no puede manejar las máquinas de este equipo.\n\nSe arregla una sola vez:\n<b>sudo usermod -aG libvirt $(id -un)</b>\n\nDespués hay que <b>cerrar sesión y volver a entrar</b>, o el permiso nuevo no cuenta." \
     "dialog-password"
@@ -100,7 +151,14 @@ if [ -n "$VM" ]; then
   existe "$VM" || { mal "no hay ninguna máquina llamada «$VM»"
                     echo "$TODAS" | sed 's/^/         /'; exit 1; }
 else
-  RECORDADA=$(cat "$RECUERDO" 2>/dev/null)
+  # La máquina recordada se lee de la computadora a la que estamos yendo.
+  # Guardar en el /etc de aquí cuál es la máquina de allá sería mentira, y
+  # la próxima vez abriría la que no es.
+  if [ -n "$REMOTO" ]; then
+    RECORDADA=$(timeout 10 ssh -o BatchMode=yes "$REMOTO" "cat $RECUERDO" 2>/dev/null)
+  else
+    RECORDADA=$(cat "$RECUERDO" 2>/dev/null)
+  fi
   if [ -n "$RECORDADA" ] && existe "$RECORDADA"; then
     VM="$RECORDADA"
   elif [ "$(echo "$TODAS" | grep -c .)" = "1" ]; then
@@ -131,7 +189,7 @@ fi
 
 # Recordar la elección, para que la próxima vez sea directa. Si no hay
 # permiso de escritura en /etc no pasa nada: solo se preguntará otra vez.
-if [ "$(cat "$RECUERDO" 2>/dev/null)" != "$VM" ]; then
+if [ -z "$REMOTO" ] && [ "$(cat "$RECUERDO" 2>/dev/null)" != "$VM" ]; then
   mkdir -p "$CONF" 2>/dev/null && printf '%s\n' "$VM" > "$RECUERDO" 2>/dev/null
 fi
 
@@ -169,9 +227,36 @@ command -v virt-viewer >/dev/null 2>&1 || {
     "No está instalado <b>virt-viewer</b>, que es lo que enseña la pantalla de Windows.\n\n<b>sudo apt install virt-viewer</b>" \
     "dialog-error"; exit 1; }
 
-ARGS=(--connect qemu:///system --wait)
+# ── Una sola ventana por máquina ──────────────────────────────────────
+# SPICE solo admite un visor a la vez. Si ya hay uno, el segundo se cierra
+# con código 1 y sin decir una palabra: parece que el clic no hizo nada.
+# Probado el 07/08 — costó un rato entender que no era un fallo del visor.
+# Se busca la conexión Y el nombre: la misma máquina puede llamarse igual
+# aquí y en el centro, y cerrar la ventana equivocada confunde a cualquiera.
+if pgrep -f "virt-viewer.*$CONEXION.*[ ]$VM\$" >/dev/null 2>&1; then
+  aviso "Esa pantalla ya está abierta" \
+    "Ya hay una ventana de <b>$VM</b> en esta computadora.\n\nBúscala entre las ventanas abiertas: solo puede haber una a la vez." \
+    "dialog-information"
+  exit 0
+fi
+
+# ── Abrir la pantalla ─────────────────────────────────────────────────
+# --auto-resize=never es el ajuste importante, y se aprendió probando SNIS
+# el 07/08. Por defecto el visor le CAMBIA la resolución al Windows cada
+# vez que alguien mueve el borde de la ventana. Los programas del
+# Ministerio son de Visual Basic 6 y no sobreviven a eso: el formulario
+# 301a se vacía, deja el mes bloqueado y obliga a salir y volver a entrar.
+# Quien estaba escribiendo pierde lo que llevaba sin guardar.
+#
+# Con esta opción la resolución del Windows se queda quieta y la ventana
+# se encoge por fuera: el formulario aguanta el manoseo sin inmutarse.
+#
+# Los Gtk-WARNING de «natural size must be >= min size» son ruido conocido
+# de la biblioteca gráfica, no un fallo. Se esconden para que nadie los lea
+# y crea que algo va mal; los errores de verdad siguen saliendo.
+ARGS=(--connect "$CONEXION" --wait --auto-resize=never)
 [ "$RECONECTAR" = "1" ]        && ARGS+=(--reconnect)
 [ "$PANTALLA_COMPLETA" = "1" ] && ARGS+=(--full-screen)
 
 ok "abriendo la pantalla de «$VM»"
-exec virt-viewer "${ARGS[@]}" "$VM"
+exec virt-viewer "${ARGS[@]}" "$VM" 2> >(grep -v "Gtk-WARNING.*natural size" >&2)

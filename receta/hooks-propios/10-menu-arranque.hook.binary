@@ -40,9 +40,27 @@ for f in $MENUS; do
   # isolinux usa «append», grub usa «linux» + TABULADOR (no espacio).
   sed -i "/^[^#]*append .*boot=live/{ /username=redhornoma/!s|\$| $AJUSTES| }" "$f"
   sed -i "/^[^#]*linux[[:space:]].*boot=live/{ /username=redhornoma/!s|\$| $AJUSTES| }" "$f"
+
+  # El guion, según quién vaya a dibujarlo.
+  #
+  # isolinux —el menú de las máquinas ANTIGUAS, las que arrancan por BIOS—
+  # pinta con la tabla de caracteres del PC de 1981 y no tiene el guion
+  # largo. El 09/08/2026, arrancando la ISO como pendrive por primera vez,
+  # la primera pantalla que se veía era:
+  #
+  #     RedHornoma ГÖ probar sin instalar
+  #
+  # GRUB, que es el de UEFI, lo dibuja perfectamente. Así que cada uno
+  # lleva el suyo: guion normal en isolinux, guion largo en GRUB. Y nada
+  # de acentos ni comillas raras en las etiquetas de isolinux.
+  case "$f" in
+    *isolinux*) GUION="-" ;;
+    *)          GUION="—" ;;
+  esac
+
   # Etiquetas en español: quien las lee está delante de la máquina.
-  sed -i 's|\^Live system (amd64)|^RedHornoma — probar sin instalar|; s|"Live system (amd64)"|"RedHornoma — probar sin instalar"|' "$f"
-  sed -i 's|Live system (amd64 fail-safe mode)|RedHornoma — modo seguro (si lo de arriba falla)|' "$f"
+  sed -i "s|\^Live system (amd64)|^RedHornoma $GUION probar sin instalar|; s|\"Live system (amd64)\"|\"RedHornoma $GUION probar sin instalar\"|" "$f"
+  sed -i "s|Live system (amd64 fail-safe mode)|RedHornoma $GUION modo seguro (si lo de arriba falla)|" "$f"
 done
 
 # ── Comprobar de verdad ──────────────────────────────────────────────

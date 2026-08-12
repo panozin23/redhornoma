@@ -1,0 +1,114 @@
+#!/bin/bash
+# arreglos — Lo único de RedHornoma que corre como administrador para
+# reparar el centro. NO se ejecuta a mano: lo llama «redhornoma-arreglar».
+#
+# Por qué existe este archivo en vez de que el programa haga las cosas
+# directamente:
+#
+# El programa que habla con la persona construye textos, y un texto que
+# acaba dentro de un «sudo bash -c» es una puerta abierta. Aquí no entra
+# ningún texto: entran PALABRAS de una lista cerrada, escritas más abajo,
+# y cualquier otra cosa se rechaza. Lo que puede hacer el administrador
+# está escrito en un solo sitio y se lee de un vistazo.
+#
+# La otra razón es más práctica: una sola llamada arregla varias cosas, y
+# la contraseña se pide UNA vez. Pedirla cinco veces seguidas hace que la
+# gente deje de leer lo que autoriza.
+#
+# Ninguna de estas acciones puede perder información. Encienden servicios,
+# hacen copias o comprueban copias. Lo que sí puede perder algo —recuperar
+# un respaldo encima de la base viva, borrar, cambiar el papel del equipo—
+# NO está aquí y sigue pidiendo contraseña cada vez, a propósito.
+#
+# Uso:  arreglos PALABRA [PALABRA...]
+set -u
+
+[ "$(id -u)" = "0" ] || { echo "arreglos: esto lo lanza redhornoma-arreglar" >&2; exit 1; }
+
+vsh(){ LC_ALL=C virsh -c qemu:///system "$@"; }
+CONF=/etc/redhornoma
+
+# El usuario de verdad, el que está delante de la pantalla. Se lee de aquí
+# y NUNCA de los argumentos: si viniera de fuera, cualquiera podría pedir
+# permisos para otra cuenta.
+HUMANO="${PKEXEC_UID:-}"
+if [ -n "$HUMANO" ]; then
+  HUMANO=$(getent passwd "$HUMANO" | cut -d: -f1)
+else
+  HUMANO="${SUDO_USER:-}"
+fi
+
+hecho(){ echo "OK $1"; }
+fallo(){ echo "MAL $1: $2"; }
+
+[ $# -gt 0 ] || { echo "arreglos: no me dijeron qué arreglar" >&2; exit 1; }
+
+for PALABRA in "$@"; do
+  case "$PALABRA" in
+
+    encender-windows)
+      # El Windows del servidor es donde viven SALMI, SOAPS y SNIS. Si está
+      # apagado, el centro entero está parado aunque todo lo demás funcione.
+      VM=$(cat "$CONF/maquina" 2>/dev/null)
+      [ -n "$VM" ] || VM=$(vsh list --all --name 2>/dev/null | grep -v '^$' | head -1)
+      if [ -z "$VM" ]; then
+        fallo "$PALABRA" "no hay ninguna máquina de Windows en este equipo"
+      elif vsh start "$VM" >/dev/null 2>&1; then
+        hecho "$PALABRA"
+      else
+        fallo "$PALABRA" "$(vsh start "$VM" 2>&1 | head -1)"
+      fi
+      ;;
+
+    encender-anuncio-red)
+      # Sin esto, los puestos no encuentran solos al servidor y hay que
+      # escribirles la dirección a mano en cada uno.
+      if systemctl enable --now avahi-daemon >/dev/null 2>&1; then hecho "$PALABRA"
+      else fallo "$PALABRA" "$(systemctl enable --now avahi-daemon 2>&1 | head -1)"; fi
+      ;;
+
+    reiniciar-carpetas)
+      # Las carpetas compartidas son por donde los puestos abren los
+      # programas del Ministerio. Reiniciar el servicio no toca ni un
+      # archivo: solo vuelve a levantar quien los sirve.
+      if systemctl restart smbd nmbd >/dev/null 2>&1; then hecho "$PALABRA"
+      else fallo "$PALABRA" "$(systemctl restart smbd nmbd 2>&1 | head -1)"; fi
+      ;;
+
+    respaldar)
+      if redhornoma-respaldo --ahora >/tmp/redhornoma-arreglo-respaldo.log 2>&1; then
+        hecho "$PALABRA"
+      else
+        fallo "$PALABRA" "$(tail -3 /tmp/redhornoma-arreglo-respaldo.log | tr '\n' ' ')"
+      fi
+      ;;
+
+    verificar-respaldo)
+      if redhornoma-respaldo --verificar >/tmp/redhornoma-arreglo-verificar.log 2>&1; then
+        hecho "$PALABRA"
+      else
+        fallo "$PALABRA" "$(tail -3 /tmp/redhornoma-arreglo-verificar.log | tr '\n' ' ')"
+      fi
+      ;;
+
+    permiso-libvirt)
+      # Da permiso para manejar la máquina de Windows. NO surte efecto hasta
+      # que la persona cierra la sesión y vuelve a entrar: los grupos se
+      # leen al iniciar sesión y no antes. Quien llame a esto tiene que
+      # decírselo, y no cantar victoria.
+      if [ -z "$HUMANO" ]; then
+        fallo "$PALABRA" "no sé qué usuario está delante"
+      elif usermod -aG libvirt "$HUMANO" >/dev/null 2>&1; then
+        hecho "$PALABRA"
+      else
+        fallo "$PALABRA" "no pude añadir a «$HUMANO» al grupo libvirt"
+      fi
+      ;;
+
+    *)
+      # Una palabra que no está en la lista no se ejecuta y se dice. Callar
+      # sería lo peor: la persona creería que su problema quedó arreglado.
+      fallo "$PALABRA" "no está en la lista de lo que se puede hacer"
+      ;;
+  esac
+done

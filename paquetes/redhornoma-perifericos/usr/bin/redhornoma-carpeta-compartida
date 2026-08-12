@@ -13,9 +13,15 @@
 # Uso:
 #   redhornoma-carpeta-compartida              mira e informa
 #   sudo redhornoma-carpeta-compartida --crear
+#   sudo redhornoma-carpeta-compartida --documentos
 #
 # La carpeta NO se abre a internet: solo la ven las máquinas virtuales de
 # este equipo y, si se pide, las computadoras del centro.
+#
+# --documentos crea OTRA carpeta distinta, «Documentos del centro», que sí
+# ven todos los consultorios. Es para que los médicos se pasen informes sin
+# caminar con un pendrive. Va aparte porque en la primera vive el respaldo
+# con las bases de datos de todos los pacientes.
 set -u
 
 CARPETA=/var/lib/libvirt/compartido
@@ -23,11 +29,22 @@ USUARIO_SMB=redhornoma
 CONF_SMB=/etc/samba/smb.conf
 RESP=/var/backups/redhornoma
 
-CREAR=0; ABRIR_CENTRO=0; SOLO_VISIBLE=0
+CREAR=0; ABRIR_CENTRO=0; SOLO_VISIBLE=0; DOCUMENTOS=0
+CARPETA_DOC=/var/lib/redhornoma/documentos
 for a in "$@"; do
   case "$a" in
     --crear) CREAR=1 ;;
     --tambien-el-centro) ABRIR_CENTRO=1 ;;
+    # Una carpeta DISTINTA, para que los consultorios se pasen documentos.
+    #
+    # Va aparte de «compartido» a propósito, y no es manía: en el servidor,
+    # «compartido» guarda el respaldo diario con TODAS las bases del centro.
+    # Abrir esa carpeta a la red pondría los datos de todos los pacientes al
+    # alcance de cualquier computadora enchufada. Se vio el 08/08/2026.
+    #
+    # Hasta ahora, para pasarse un informe de un consultorio a otro había que
+    # caminar con un pendrive, copiar, y volver. Diez minutos cada vez.
+    --documentos) DOCUMENTOS=1 ;;
     # Solo la parte que se ve: el enlace del escritorio y el acceso en el
     # gestor de archivos. Corre al iniciar sesión, como la propia persona y
     # SIN sudo.
@@ -37,7 +54,7 @@ for a in "$@"; do
     # no existir todavía —se crea al iniciar sesión—. El enlace no aparecería
     # y nadie sabría por qué.
     --visible) SOLO_VISIBLE=1 ;;
-    --ayuda|-h) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --ayuda|-h) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   esac
 done
 
@@ -203,6 +220,150 @@ d "Carpeta:" "$CARPETA"
 [ -n "$IP_VIRT" ] && d "La verán en:" "\\\\$IP_VIRT\\compartido" \
                   || avi "no hay red virtual (virbr0) — ¿está libvirt encendido?"
 d "Este equipo en el centro:" "${IP_LAN:-sin red}"
+
+# ═════════════════════════════════════════════════════════════════════
+#  DOCUMENTOS DEL CENTRO — una carpeta para los consultorios
+# ═════════════════════════════════════════════════════════════════════
+# Se intentó SIN contraseña —era lo que euflo quería, y con razón: en un
+# centro todo el personal mete información en los tres programas, son de
+# confianza, y sacar algo de la institución tiene su propio camino legal.
+#
+# Pero Windows 10 y 11 traen BLOQUEADO de fábrica el acceso sin contraseña
+# a carpetas de red («inicios de sesión de invitado no seguros»). Se
+# comprobó el 08/08/2026: Samba la servía perfectamente —probado desde otra
+# máquina Linux de la red— y Windows se negaba a entrar, pidiendo
+# credenciales una y otra vez.
+#
+# Así que lleva cuenta, pero se guarda UNA VEZ en cada puesto y nadie
+# vuelve a escribirla. Y se usa el MISMO usuario que ya tienen guardado
+# para SALMI, SNIS y SOAPS: así en todo el centro hay una sola credencial
+# que recordar, no dos.
+#
+# Lo que sigue sin abrirse es «compartido», que solo ve la máquina virtual
+# de cada equipo: ahí vive el respaldo con las bases de todos los pacientes.
+if [ "$DOCUMENTOS" = "1" ]; then
+  titulo "DOCUMENTOS DEL CENTRO"
+  [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; echo "      sudo redhornoma-carpeta-compartida --documentos"; exit 1; }
+  if ! command -v smbd >/dev/null 2>&1 && [ ! -x /usr/sbin/smbd ]; then
+    mal "falta Samba, que es lo que la hace visible desde las otras computadoras"
+    echo "      sudo apt install samba"; exit 1
+  fi
+  [ -n "$RED_LAN" ] || { mal "este equipo no está en la red del centro"
+                         echo "      Sin red no hay a quién compartirle nada."; exit 1; }
+
+  DUENO_DOC="${SUDO_USER:-$(getent passwd 1000 2>/dev/null | cut -d: -f1)}"
+  DUENO_DOC="${DUENO_DOC:-root}"
+
+  # ── La cuenta ───────────────────────────────────────────────────────
+  # Por defecto «salmired», que es la que los puestos ya tienen guardada
+  # para SALMI, SNIS y SOAPS. Una sola credencial en todo el centro.
+  echo
+  printf "   ${AZ}Cuenta para entrar desde los consultorios${V}\n"
+  echo "      Windows no admite carpetas de red sin contraseña."
+  echo "      Usa la MISMA que ya tienen guardada para SALMI y SNIS: así"
+  echo "      nadie tiene que aprenderse una nueva."
+  echo
+  printf "   Usuario [salmired]: "
+  read -r USUARIO_DOC
+  USUARIO_DOC="${USUARIO_DOC:-salmired}"
+  printf "   Contraseña para «%s»: " "$USUARIO_DOC"
+  read -rs CLAVE_DOC; echo
+  printf "   Otra vez, para no equivocarnos: "
+  read -rs CLAVE_DOC2; echo
+  [ "$CLAVE_DOC" = "$CLAVE_DOC2" ] || { mal "las dos no coinciden"; exit 1; }
+  [ ${#CLAVE_DOC} -ge 4 ] || { mal "muy corta — al menos 4 caracteres"; exit 1; }
+
+  # -M: sin carpeta personal. nologin: no puede entrar al sistema. Esta
+  # cuenta existe SOLO para la carpeta compartida.
+  id "$USUARIO_DOC" >/dev/null 2>&1 || useradd -M -s /usr/sbin/nologin "$USUARIO_DOC" 2>/dev/null
+  if printf '%s\n%s\n' "$CLAVE_DOC" "$CLAVE_DOC" | smbpasswd -s -a "$USUARIO_DOC" >/dev/null 2>&1; then
+    smbpasswd -e "$USUARIO_DOC" >/dev/null 2>&1
+    ok "cuenta «$USUARIO_DOC» lista"
+  else
+    mal "no se pudo crear la cuenta"; exit 1
+  fi
+  unset CLAVE_DOC CLAVE_DOC2
+
+  mkdir -p "$CARPETA_DOC"
+  # 2775: el bit «g+s» hace que todo lo que se cree ahí herede el grupo. Sin
+  # eso, un archivo dejado por un consultorio puede quedar sin permiso para
+  # que otro lo modifique, y nadie entiende por qué.
+  chown "$DUENO_DOC":"$DUENO_DOC" "$CARPETA_DOC" 2>/dev/null
+  chmod 2775 "$CARPETA_DOC"
+  ok "carpeta lista: $CARPETA_DOC"
+
+  mkdir -p "$RESP"
+  COPIA_DOC="$RESP/smb.conf.antes-de-documentos-$(date '+%Y%m%d-%H%M%S')"
+  cp -f "$CONF_SMB" "$COPIA_DOC" 2>/dev/null || COPIA_DOC=""
+  sed -i '/^\[documentos\]/,/^$/d' "$CONF_SMB" 2>/dev/null
+
+  cat >> "$CONF_SMB" <<CFG
+
+[documentos]
+   comment = Documentos del centro
+   path = $CARPETA_DOC
+   browseable = yes
+   read only = no
+   valid users = $USUARIO_DOC
+   force user = $DUENO_DOC
+   force group = $DUENO_DOC
+   create mask = 0664
+   directory mask = 2775
+   hosts allow = $RED_LAN. 192.168.122. 127.
+   hosts deny = 0.0.0.0/0
+CFG
+
+  if testparm -s >/dev/null 2>&1; then
+    ok "la configuración de Samba es correcta"
+  else
+    mal "la configuración de Samba tiene un error"
+    if [ -n "$COPIA_DOC" ] && [ -f "$COPIA_DOC" ]; then
+      cp -f "$COPIA_DOC" "$CONF_SMB" && ok "se restauró la anterior — Samba sigue como estaba"
+    fi
+    exit 1
+  fi
+
+  systemctl enable --now smbd >/dev/null 2>&1
+  systemctl restart smbd >/dev/null 2>&1
+  systemctl is-active smbd >/dev/null 2>&1 && ok "Samba en marcha" || { mal "Samba no arrancó"; exit 1; }
+
+  command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "^Estado: activo\|^Status: active" && {
+    ufw allow from "$RED_LAN.0/24" to any port 445 proto tcp >/dev/null 2>&1
+    ok "cortafuegos abierto para la red del centro"; }
+
+  # Comprobar que de verdad se ve, en vez de suponerlo porque no dio error.
+  if smbclient -L "//$IP_LAN" -N 2>/dev/null | grep -qi "documentos"; then
+    ok "comprobado: la carpeta se anuncia en la red"
+  else
+    avi "Samba arrancó pero no vi la carpeta anunciarse — míralo desde un puesto"
+  fi
+
+  titulo "CÓMO SE USA"
+  cat <<FIN
+   Desde el WINDOWS de cualquier consultorio, en la barra del Explorador:
+
+      ${AZ}\\\\$IP_LAN\\documentos${V}
+
+   La PRIMERA vez pedirá usuario y contraseña. Poner:
+
+      usuario:  ${AZ}$USUARIO_DOC${V}
+      y MARCAR la casilla ${AZ}«Recordar mis credenciales»${V}
+
+   Esa casilla es lo importante: si se marca, no vuelve a preguntar nunca
+   más en esa computadora. Si se olvida, preguntará cada día y la gente
+   acabará volviendo al pendrive.
+
+   Desde el LINUX de este equipo está en:
+
+      ${AZ}$CARPETA_DOC${V}
+
+   Lo que se deje ahí lo ven todos los consultorios, y lo pueden modificar.
+   Es para pasarse informes, formularios y plantillas — no para guardar la
+   única copia de nada.
+
+FIN
+  exit 0
+fi
 
 # ── Estado actual ─────────────────────────────────────────────────────
 echo

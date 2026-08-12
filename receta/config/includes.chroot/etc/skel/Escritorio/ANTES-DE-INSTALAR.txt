@@ -34,11 +34,28 @@ El pendrive nunca se toca.
   2 - INSTALAR
 ------------------------------------------------------------------------
 
-Doble clic en el icono de instalar del escritorio.
+Doble clic en el icono "Instalar RedHornoma" del escritorio.
 
 En el paso de particionado elegir "Borrar disco".
 
 Al terminar, sacar el pendrive antes de reiniciar.
+
+
+   SI PARECE QUE SE COLGO, NO LO APAGUES
+
+   En la primera pantalla el instalador dice "Recopilando informacion
+   del sistema" y se queda con un remolino girando, sin barra de
+   progreso y sin decir que esta haciendo.
+
+   En un equipo con poca memoria eso puede tardar VARIOS MINUTOS. Se
+   probo el 08/08/2026 en una maquina de 1,5 GB: tardo catorce minutos
+   en pasar de ahi. No estaba colgado - estaba trabajando.
+
+   Apagar la computadora a lo bruto en mitad de la instalacion deja el
+   disco a medias y hay que empezar de cero. Es mejor esperar.
+
+   Con 4 GB de memoria la instalacion entera son unos minutos. Si el
+   equipo tiene 2 GB o menos, ten paciencia desde el principio.
 
 
 ------------------------------------------------------------------------

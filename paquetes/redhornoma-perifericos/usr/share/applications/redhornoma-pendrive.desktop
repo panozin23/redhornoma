@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Grabar un pendrive con RedHornoma
+GenericName=Preparar un pendrive para instalar en otra computadora
+Comment=Copia RedHornoma a un pendrive y comprueba que quedó bien grabado
+Exec=redhornoma-pendrive
+Icon=/usr/share/pixmaps/redhornoma.png
+Terminal=false
+Categories=System;
+Keywords=pendrive;usb;memoria;grabar;instalar;iso;copiar;
+StartupNotify=true
+StartupWMClass=redhornomapanel

@@ -27,7 +27,18 @@ SELF="$(readlink -f "$0")"
 CONF=/etc/redhornoma
 BASE=/var/lib/redhornoma
 RESPALDOS="$BASE/respaldos"
-VIRSH="virsh -c qemu:///system"
+# A virsh SIEMPRE se le habla en inglés cuando se va a LEER su respuesta.
+#
+# Esta distro está en español y virsh también: «domstate» contesta
+# «ejecutando», no «running». El panel buscaba «running» y por eso le decía
+# al servidor que su Windows estaba apagado mientras llevaba horas
+# encendido — un panel que miente es peor que no tener panel, y este mintió
+# sobre lo más importante que enseña. Descubierto el 09/08/2026.
+#
+# Se envuelve en una función en vez de exportar LC_ALL a todo el programa:
+# si se exportara, «df» y «du» pasarían a escribir 1.5G en vez de 1,5G y la
+# ventana quedaría medio en inglés.
+vsh(){ LC_ALL=C virsh -c qemu:///system "$@"; }
 
 MODO=ventana
 case "${1:-}" in
@@ -110,14 +121,14 @@ detectar_equipo(){
 detectar_programas(){
   command -v virsh >/dev/null 2>&1 || {
     fila ⚪ "Programas de salud" "sin dato — falta la virtualización"; return; }
-  if ! $VIRSH list --all --name >/dev/null 2>&1; then
+  if ! vsh list --all --name >/dev/null 2>&1; then
     fila ⚪ "Programas de salud" "sin dato — sin permiso de libvirt"
     pendiente "Dar permiso a tu usuario:  sudo usermod -aG libvirt $(id -un)  (y volver a entrar)"
     return
   fi
 
   local todas vm
-  todas=$($VIRSH list --all --name 2>/dev/null | grep -v '^$')
+  todas=$(vsh list --all --name 2>/dev/null | grep -v '^$')
   if [ -z "$todas" ]; then
     fila 🟡 "Programas de salud" "no hay ningún Windows en esta computadora"
     [ "${PAPEL:-}" = "servidor" ] && \
@@ -128,7 +139,7 @@ detectar_programas(){
   vm=$(cat "$CONF/maquina" 2>/dev/null)
   echo "$todas" | grep -qx "${vm:-}" || vm=$(echo "$todas" | head -1)
 
-  if $VIRSH domstate "$vm" 2>/dev/null | grep -q '^running'; then
+  if vsh domstate "$vm" 2>/dev/null | grep -q '^running'; then
     fila 🟢 "Programas de salud" "«$vm» en marcha"
   else
     fila 🟡 "Programas de salud" "«$vm» apagado — se enciende al entrar"
@@ -175,6 +186,17 @@ detectar_puestos(){
 detectar_respaldo(){
   local ult seg
   ult=$(find "$RESPALDOS" -maxdepth 1 -type d -name '20*' 2>/dev/null | sort | tail -1)
+
+  # Del respaldo del centro responde el SERVIDOR. A un puesto o al portátil
+  # de administración no se les reclama: no guardan la información de nadie,
+  # y el paquete les crea igual la carpeta vacía. Se dice en gris —que sí
+  # existe y no le toca— en vez de en rojo. Un aviso que no corresponde
+  # enseña a ignorar los que sí. Corregido el 09/08/2026.
+  if [ -z "$ult" ] && [ "${PAPEL:-}" != "servidor" ]; then
+    fila ⚪ "Respaldo del centro" "lo hace el servidor, no esta computadora"
+    return
+  fi
+
   if [ -z "$ult" ]; then
     fila 🔴 "Último respaldo" "NUNCA se ha hecho ninguno"
     pendiente "Hacer el primer respaldo hoy:  sudo redhornoma-respaldo --ahora"
@@ -189,8 +211,12 @@ detectar_respaldo(){
     else fila 🔴 "Último respaldo" "$(hace $seg) — demasiado tiempo"
          pendiente "URGENTE, respaldar hoy mismo:  sudo redhornoma-respaldo --ahora"; fi
   else
-    fila 🟡 "Último respaldo" "$(hace $seg) — sin verificar"
-    pendiente "Comprobar que la copia sirve:  sudo redhornoma-respaldo --verificar"
+    # La marca CORRECTO no falta por pereza: redhornoma-respaldo verifica
+    # SIEMPRE al terminar. Si no está, es que la comprobó y la RECHAZÓ, y
+    # decir «sin verificar» invita a verificarla otra vez para nada.
+    # Corregido el 09/08/2026, con una copia rechazada delante.
+    fila 🔴 "Último respaldo" "$(hace $seg) — NO pasó la comprobación"
+    pendiente "Esa copia no es de fiar; la buena es una anterior. Mira qué pasó con el botón «Revisar y arreglar»"
   fi
 }
 
@@ -199,6 +225,17 @@ detectar_respaldo(){
 # incendio. Esta fila responde a «si esta computadora desaparece hoy,
 # ¿se pierde la información?».
 detectar_copia_fuera(){
+  # Esta pregunta —«si esta computadora desaparece hoy, ¿se pierde algo?»—
+  # solo tiene sentido donde hay respaldos que sacar. Se comprueba ANTES de
+  # nada: el primer intento lo puso dentro del «si nunca salió ninguna», y
+  # entonces al portátil le seguía reclamando sacar copias de unos respaldos
+  # que ya no tenía, porque su registro guardaba una salida de hace días.
+  # Dos líneas más arriba el mismo panel decía «lo hace el servidor».
+  if [ "${PAPEL:-}" != "servidor" ] \
+     && [ -z "$(find "$RESPALDOS" -maxdepth 1 -type d -name '20*' 2>/dev/null | head -1)" ]; then
+    return
+  fi
+
   local ultimo=0 t
   # El respaldo anota en su registro cuántas copias salieron
   if [ -f "$BASE/respaldo.log" ]; then
@@ -407,6 +444,11 @@ AVISO=""
 if [ "${#PENDIENTES[@]}" -gt 0 ]; then
   AVISO="\n<b>Lo que habría que hacer</b>\n"
   for p in "${PENDIENTES[@]}"; do AVISO="$AVISO   ·  $(esc "$p")\n"; done
+  # Los renglones de arriba llevan comandos, y un comando es un deber, no
+  # una solución: en un centro no lo escribe nadie. Desde 1.0.5 hay un botón
+  # que hace la mayoría, así que se dice — y solo si el botón existe.
+  command -v redhornoma-arreglar >/dev/null 2>&1 && \
+    AVISO="$AVISO\n<i>La mayoría se arreglan solas con el botón «Revisar y arreglar».</i>\n"
 fi
 
 # Los botones se ponen solo si su herramienta está instalada: un botón
@@ -419,6 +461,13 @@ CAMPOS=()
 if command -v redhornoma-entrar >/dev/null 2>&1; then
   CAMPOS+=(--field="Entrar a los programas de salud!distributor-logo-windows:fbtn"
            "bash -c 'redhornoma-entrar &'")
+fi
+# El botón que cierra el círculo. Hasta ahora el panel decía qué iba mal y
+# dejaba a la persona con un comando que copiar; esto lo arregla de verdad,
+# y comprueba después que quedó arreglado.
+if command -v redhornoma-arreglar >/dev/null 2>&1; then
+  CAMPOS+=(--field="Revisar y arreglar esta computadora!tools-wizard:fbtn"
+           "bash -c 'redhornoma-arreglar &'")
 fi
 if command -v redhornoma-respaldo >/dev/null 2>&1; then
   CAMPOS+=(--field="Respaldar ahora!document-save:fbtn"

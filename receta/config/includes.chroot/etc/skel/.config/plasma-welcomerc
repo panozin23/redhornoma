@@ -1,0 +1,10 @@
+# El segundo cerrojo del «Centro de bienvenida». Ver /etc/xdg/kded6rc.
+#
+# Se ponen los dos a propósito. Desactivar el módulo de kded es la forma
+# limpia y documentada; esto otro le dice además a la propia ventana que ya
+# se vio una versión más nueva que cualquiera que llegue.
+#
+# Comprobar cuál de los dos hace el trabajo costaría reconstruir la ISO —doce
+# minutos— por cada intento. Poner los dos cuesta cuatro renglones.
+[General]
+LastSeenVersion=99.99.99

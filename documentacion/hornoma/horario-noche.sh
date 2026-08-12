@@ -1,0 +1,270 @@
+#!/bin/bash
+# horario-noche.sh — Que el servidor se encienda y se apague solo de noche.
+#
+# Para un centro donde nadie va los fines de semana. La máquina se enciende de
+# madrugada, hace su respaldo, se lo manda al otro centro, y se apaga. Tres
+# horas al día en vez de veinticuatro.
+#
+# Por qué de madrugada y no a cualquier hora: en Hornoma el internet va bien a
+# las 2 de la mañana y fatal de 3 de la tarde a 10 de la noche. La copia al
+# otro centro cruza por un servidor de reenvío en Brasil, así que la hora
+# importa mucho más de lo que parece.
+#
+# ── Lo que hay que saber antes de usarlo ──────────────────────────────
+#
+# 🔴 PROBAR PRIMERO QUE LA MÁQUINA DESPIERTA. Muchas placas traen esa opción
+#    apagada de fábrica: se programa la alarma, se apaga, y no vuelve. Si eso
+#    pasa sin nadie delante, el centro se queda sin servidor hasta que alguien
+#    viaje. Se prueba con «probar-despertador.sh».
+#
+# 🔴 Y PONER EN EL BIOS «Restore on AC Power Loss → Power On». La alarma vive
+#    en la placa y necesita que el equipo siga enchufado. Si se va la luz
+#    estando apagado y la placa está puesta en «quedarse apagada», no vuelve
+#    aunque vuelva la luz. Eso ya dejó a Hornoma 7 días sin respaldo.
+#
+# Uso:
+#   sudo bash horario-noche.sh --instalar
+#   sudo bash horario-noche.sh --instalar --encender 01:00 --apagar 04:00
+#   sudo bash horario-noche.sh --dias Wed,Thu,Fri,Sat,Sun
+#   sudo bash horario-noche.sh --quitar
+#   sudo bash horario-noche.sh --ver
+set -u
+
+ENCENDER="01:00"; APAGAR="04:00"; DIAS="Wed,Thu,Fri,Sat,Sun"; ACCION=""
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "   ${GR}%s${V}\n" "$1"; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --instalar) ACCION=instalar; shift ;;
+    --quitar)   ACCION=quitar; shift ;;
+    --ver)      ACCION=ver; shift ;;
+    --encender) ENCENDER="${2:-}"; shift 2 ;;
+    --apagar)   APAGAR="${2:-}"; shift 2 ;;
+    --dias)     DIAS="${2:-}"; ACCION=${ACCION:-instalar}; shift 2 ;;
+    -h|--help)  sed -n '2,30p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) echo "No entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+[ "$(id -u)" = "0" ] || { echo "Hace falta administrador:  sudo bash $0 --instalar"; exit 1; }
+
+GUION=/usr/local/sbin/redhornoma-apagar-noche
+UNIDAD=/etc/systemd/system/redhornoma-apagar-noche.service
+RELOJ=/etc/systemd/system/redhornoma-apagar-noche.timer
+FRENO=/etc/redhornoma/no-apagar
+
+# ══ VER ═══════════════════════════════════════════════════════════════
+if [ "$ACCION" = "ver" ]; then
+  titulo "HORARIO DE NOCHE"
+  if [ -f "$RELOJ" ]; then
+    grep -oP '^OnCalendar=\K.*' "$RELOJ" | sed 's/^/   se apaga: /'
+    grep -oP '^Environment=ENCENDER=\K.*' "$UNIDAD" 2>/dev/null | sed 's/^/   despierta a las: /'
+    systemctl is-enabled redhornoma-apagar-noche.timer 2>/dev/null | sed 's/^/   estado: /'
+    systemctl list-timers redhornoma-apagar-noche.timer --no-pager 2>/dev/null | sed -n 2p | sed 's/^/   /'
+  else
+    nota "no hay horario puesto: la máquina se queda encendida siempre"
+  fi
+  systemctl list-timers redhornoma-respaldo.timer --no-pager 2>/dev/null | sed -n 2p | sed 's/^/   respaldo: /'
+  A=$(cat /sys/class/rtc/rtc0/wakealarm 2>/dev/null)
+  [ -n "$A" ] && [ "$A" != "0" ] \
+    && ok "despertador armado para $(date -d "@$A" '+%A %d a las %H:%M')" \
+    || nota "ahora mismo no hay despertador armado (normal si la máquina está en su horario de trabajo)"
+  [ -f "$FRENO" ] && avi "el freno está puesto: NO se apagará (quita $FRENO)"
+  echo
+  exit 0
+fi
+
+# ══ QUITAR ════════════════════════════════════════════════════════════
+if [ "$ACCION" = "quitar" ]; then
+  titulo "QUITANDO EL HORARIO DE NOCHE"
+  systemctl disable --now redhornoma-apagar-noche.timer >/dev/null 2>&1
+  rm -f "$RELOJ" "$UNIDAD" "$GUION"
+  rm -f /etc/systemd/system/redhornoma-respaldo.timer.d/horario-noche.conf
+  rmdir /etc/systemd/system/redhornoma-respaldo.timer.d 2>/dev/null
+  systemctl daemon-reload
+  systemctl restart redhornoma-respaldo.timer >/dev/null 2>&1
+  nota "el respaldo vuelve a su hora de siempre"
+  echo 0 > /sys/class/rtc/rtc0/wakealarm 2>/dev/null
+  ok "quitado — la máquina se queda encendida"
+  echo
+  exit 0
+fi
+
+[ "$ACCION" = "instalar" ] || { mal "dime qué hacer: --instalar, --quitar o --ver"; exit 1; }
+
+titulo "HORARIO DE NOCHE"
+
+# ── Comprobar que esta máquina sabe despertarse ───────────────────────
+# Sin esto, instalar el apagado es dejar al centro sin servidor.
+ALARMA=/sys/class/rtc/rtc0/wakealarm
+[ -e "$ALARMA" ] || { mal "esta máquina no tiene reloj-despertador — NO se instala"; exit 1; }
+PRUEBA=$(( $(date +%s) + 600 ))
+echo 0 > "$ALARMA"; echo "$PRUEBA" > "$ALARMA" 2>/dev/null
+if [ "$(cat "$ALARMA")" != "$PRUEBA" ]; then
+  mal "la placa rechaza el despertador — NO se instala"
+  nota "habría que activarlo en el BIOS («Wake on RTC» o «RTC Alarm»)"
+  exit 1
+fi
+echo 0 > "$ALARMA"
+ok "la placa acepta el despertador"
+
+# ── El guion que se ejecuta cada noche ────────────────────────────────
+cat > "$GUION" <<'GUIONFIN'
+#!/bin/bash
+# Lo ejecuta el reloj de systemd a la hora de apagar. Arma el despertador
+# para la madrugada siguiente y apaga — salvo que haya motivo para no hacerlo.
+set -u
+ENCENDER="${ENCENDER:-01:00}"
+FRENO=/etc/redhornoma/no-apagar
+ALARMA=/sys/class/rtc/rtc0/wakealarm
+REG=/var/lib/redhornoma/horario.log
+anota(){ mkdir -p "$(dirname "$REG")" 2>/dev/null; printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" >> "$REG"; }
+
+# 1 · El freno a mano. Un archivo, para que quien esté en el centro pueda
+#     decir «hoy no te apagues» sin saber nada de systemd.
+if [ -f "$FRENO" ]; then anota "NO se apaga: está puesto el freno $FRENO"; exit 0; fi
+
+# 2 · Si hay alguien conectado por SSH trabajando, no se apaga. Las sesiones
+#     de la pantalla no cuentan: se quedan abiertas días y bloquearían el
+#     apagado para siempre.
+#
+#     Se mira por DOS caminos, y basta con que uno diga que sí:
+#
+#       · «who» ve las sesiones con terminal — una persona escribiendo
+#       · «ss» ve TODAS las conexiones al puerto 22, incluidas las que no
+#         abren terminal. Esto último es lo que importa de verdad: abrir la
+#         pantalla del Windows desde el portátil (qemu+ssh) es una conexión
+#         SIN terminal, y con solo «who» podía no verse. Sería apagarle la
+#         máquina a alguien que está instalando un programa dentro.
+if who 2>/dev/null | grep -q "sshd\|pts/"; then
+  anota "NO se apaga: hay alguien trabajando por red (sesión abierta)"; exit 0
+fi
+if [ "$(ss -tnH state established '( sport = :22 )' 2>/dev/null | grep -c .)" -gt 0 ]; then
+  anota "NO se apaga: hay alguien trabajando por red (conexión activa)"; exit 0
+fi
+
+# 3 · Si un respaldo está corriendo, se le deja terminar. Cortar una copia a
+#     medias es peor que no apagarse.
+if pgrep -x rsync >/dev/null 2>&1 || pgrep -f redhornoma-respaldo >/dev/null 2>&1; then
+  anota "NO se apaga: hay un respaldo en marcha"; exit 0
+fi
+
+# 4 · Armar el despertador ANTES de apagar, y comprobar que quedó puesto.
+#     Apagar sin alarma sería quedarse sin servidor hasta que alguien viaje.
+CUANDO=$(date -d "tomorrow $ENCENDER" +%s)
+echo 0 > "$ALARMA"; echo "$CUANDO" > "$ALARMA" 2>/dev/null
+if [ "$(cat "$ALARMA")" != "$CUANDO" ]; then
+  anota "NO se apaga: el despertador no quedó puesto"; exit 0
+fi
+
+# 5 · El Windows de dentro, con orden. De golpe se rompen las bases.
+if command -v virsh >/dev/null 2>&1; then
+  for vm in $(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
+    LC_ALL=C virsh -c qemu:///system shutdown "$vm" >/dev/null 2>&1
+  done
+  for _ in $(seq 1 24); do
+    [ -z "$(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$')" ] && break
+    sleep 5
+  done
+fi
+
+anota "apagando — volverá el $(date -d "@$CUANDO" '+%d/%m a las %H:%M')"
+sleep 2
+/sbin/poweroff
+GUIONFIN
+chmod 755 "$GUION"
+ok "guion de apagado puesto en $GUION"
+
+# ── La unidad y su reloj ──────────────────────────────────────────────
+cat > "$UNIDAD" <<UNIDADFIN
+[Unit]
+Description=Apagar el servidor por la noche y dejarlo despertando
+
+[Service]
+Type=oneshot
+Environment=ENCENDER=$ENCENDER
+ExecStart=$GUION
+UNIDADFIN
+
+cat > "$RELOJ" <<RELOJFIN
+[Unit]
+Description=Hora de apagar el servidor
+
+[Timer]
+# No se mira UNA sola vez. Se mira a la hora de apagar y luego cada media
+# hora durante cuatro horas.
+#
+# Sin esto, si a las 4:00 hay alguien trabajando el apagado se salta y NO se
+# vuelve a intentar hasta el día siguiente: quien termine a las 5 dejaría la
+# máquina encendida 23 horas. Lo encontró euflo el 11/08/2026 preguntando
+# «¿y si sigo trabajando a las 4?».
+#
+# Ahora, en cuanto deja de haber nadie, se apaga en menos de media hora.
+OnCalendar=$DIAS *-*-* ${APAGAR%%:*}..$(( ${APAGAR%%:*} + 4 )):00/30:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+RELOJFIN
+
+# ── Y mover el respaldo DENTRO de la ventana ──────────────────────────
+# Un horario de noche sin mover el respaldo es media faena: el respaldo venía
+# a las 13:30 y con la máquina apagada a esa hora no se haría nunca.
+#
+# Se hace con un «drop-in» y no editando el archivo del paquete: así una
+# actualización de redhornoma-respaldo no se lleva por delante este ajuste.
+#
+# Media hora después de encender, para darle tiempo a levantar el Windows de
+# dentro, y con margen de sobra antes de la hora de apagar.
+RESP_H=$(date -d "$ENCENDER +30 minutes" '+%H:%M' 2>/dev/null || echo "01:30")
+mkdir -p /etc/systemd/system/redhornoma-respaldo.timer.d
+cat > /etc/systemd/system/redhornoma-respaldo.timer.d/horario-noche.conf <<RESPFIN
+# Puesto por horario-noche.sh — el respaldo va dentro de la ventana de trabajo
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* $RESP_H:00
+RESPFIN
+ok "el respaldo se mueve a las $RESP_H"
+
+systemctl daemon-reload
+systemctl enable --now redhornoma-apagar-noche.timer >/dev/null 2>&1
+systemctl restart redhornoma-respaldo.timer >/dev/null 2>&1
+
+printf "   %-32s " "el reloj queda en marcha"
+systemctl is-enabled redhornoma-apagar-noche.timer >/dev/null 2>&1 \
+  && printf "${VE}sí${V}\n" || { printf "${RO}no${V}\n"; exit 1; }
+
+titulo "ASÍ QUEDA"
+cat <<FIN
+
+   días        : $DIAS
+   se apaga    : a partir de las $APAGAR, y lo reintenta cada media hora
+                 hasta las $(( ${APAGAR%%:*} + 4 )):30 si hay alguien trabajando
+   despierta   : $ENCENDER del día siguiente
+
+   NO se apagará si:
+      · hay alguien trabajando por red
+      · hay un respaldo en marcha
+      · existe el archivo $FRENO
+      · o el despertador no quedó puesto
+
+   En cuanto deje de haber alguien, se apagará en menos de media hora
+   sin que tengas que hacer nada.
+
+   Y si quieres apagarla YA, desde donde estés:
+      sudo /usr/local/sbin/redhornoma-apagar-noche
+
+FIN
+systemctl list-timers redhornoma-apagar-noche.timer --no-pager 2>/dev/null | sed -n 2p | sed 's/^/   próxima vez: /'
+echo
+avi "FALTA UNA COSA QUE SOLO SE PUEDE HACER DELANTE DE LA MÁQUINA"
+nota "En el BIOS: «Restore on AC Power Loss» → «Power On»."
+nota "Sin eso, un corte de luz con la máquina apagada la deja apagada"
+nota "aunque vuelva la luz. Eso ya dejó a este centro 7 días sin respaldo."
+echo

@@ -43,3 +43,11 @@ paquetes/deb/
 # rastreara también desde main, los .deb acabarían duplicados dentro del
 # código fuente y las dos ramas pelearían por los mismos archivos.
 repositorio/
+
+# ── Restos de las pruebas en máquina virtual ─────────────────────────
+# Registros de QEMU, memorias UEFI y fotos del arranque. Se vuelven a
+# generar cada vez que se corre una prueba, y lo que importa de ellas
+# —si arrancó o no— queda escrito en pruebas/resultados.md.
+pruebas/**/qemu.log
+pruebas/**/vars.fd
+pruebas/fotos-arranque/

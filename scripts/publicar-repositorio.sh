@@ -72,8 +72,10 @@ GITHUB_REPO="${GITHUB_REPO:-redhornoma}"
 # primera que haya» sería un error aquí: en este equipo hay dos llaves y la
 # otra es de un proyecto distinto.
 if [ -z "${CLAVE_GPG:-}" ]; then
+  # -B2, no -B1: entre la línea «sec» y la del nombre va la de la huella,
+  # así que con una sola de contexto nunca se alcanza el identificador.
   CLAVE_GPG=$(gpg --list-secret-keys --keyid-format=long 2>/dev/null \
-              | grep -B1 -i 'RedHornoma' | awk '/^sec/{print $2; exit}' | cut -d/ -f2)
+              | grep -B2 -i 'RedHornoma' | awk '/^sec/{print $2; exit}' | cut -d/ -f2)
 fi
 if [ -z "$CLAVE_GPG" ]; then
   mal "no encuentro ninguna llave de RedHornoma para firmar"

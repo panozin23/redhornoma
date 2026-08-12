@@ -59,4 +59,10 @@ systemd-timesyncd
 
 # Permisos y servicios
 polkitd
+# pkexec es el que pide la contraseña en una VENTANA. Sin él, «Algo no
+# funciona» no puede reparar nada en un centro: la única forma de dar
+# permiso sería abrir una terminal, que es justo lo que no queremos.
+# Va en Depends de redhornoma-panel desde 1.0.5, y el 09/08/2026 se
+# construyó sin declararlo aquí — lo cazó comprobar-receta.sh.
+pkexec
 sudo

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Algo no funciona
+GenericName=Revisar y arreglar esta computadora
+Comment=Mira qué le pasa al equipo, lo arregla y comprueba que quedó arreglado
+Exec=redhornoma-arreglar
+Icon=/usr/share/pixmaps/redhornoma.png
+Terminal=false
+Categories=System;Monitor;
+Keywords=arreglar;reparar;problema;falla;error;no funciona;no entra;ayuda;salmi;snis;soaps;
+StartupNotify=true
+StartupWMClass=redhornomapanel

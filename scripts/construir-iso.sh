@@ -18,7 +18,7 @@ VERSION=$(cat "$BASE/VERSION" 2>/dev/null || echo "0.1")
 FECHA=$(date '+%Y%m%d')
 NOMBRE="redhornoma-${VERSION}-${FECHA}-amd64.iso"
 
-V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+GR=$'\033[0;90m'; V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
 
 titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
           printf "${AZ} %s${V}\n" "$1"
@@ -50,10 +50,21 @@ printf "\n   Comprobando los nombres de los paquetes…\n"
 if bash "$BASE/scripts/comprobar-receta.sh" >/tmp/redhornoma-receta.txt 2>&1; then
   ok "la receta está limpia — $(grep -c '●' /tmp/redhornoma-receta.txt) paquetes"
 else
-  mal "hay paquetes con nombres que no existen"
+  # Se enseñan las LÍNEAS DEL PROBLEMA, no el final del informe.
+  #
+  # Antes decía «hay paquetes con nombres que no existen» y pegaba las
+  # últimas 20 líneas. El 09/08/2026 el fallo era otro —una herramienta
+  # pedía «pkexec» y nadie lo había declarado en la receta— y esas 20
+  # líneas eran justo el resumen, que decía «155 declarados, 155
+  # encontrados» y una lista de faltantes VACÍA. El mensaje contradecía a
+  # los números y la causa quedaba fuera de la pantalla.
+  #
+  # Un fallo que no enseña su motivo hace perder más tiempo que el fallo.
+  mal "la receta tiene algo pendiente — esto es lo que falta:"
   echo
-  tail -20 /tmp/redhornoma-receta.txt
+  grep -E '✖' /tmp/redhornoma-receta.txt | sed 's/^/   /'
   echo
+  echo "      El informe completo:  /tmp/redhornoma-receta.txt"
   echo "      Corrige las listas y vuelve a intentarlo."
   exit 1
 fi
@@ -273,10 +284,47 @@ chown "${SUDO_USER:-root}:${SUDO_USER:-root}" "$ISOS/$NOMBRE.sha256" 2>/dev/null
 
 # Comprobarlo aquí mismo. Una huella que no verifica su propio archivo es
 # peor que ninguna: da por buena una grabación que nadie ha comprobado.
+HUELLA_OK=0
 if ( cd "$ISOS" && sha256sum -c --quiet "$NOMBRE.sha256" >/dev/null 2>&1 ); then
   ok "huella comprobada contra la ISO"
+  HUELLA_OK=1
 else
   mal "la huella NO verifica la ISO — no te fíes de este archivo"
+fi
+
+# ── Las ISOs viejas se van solas ──────────────────────────────────────
+# Cada construcción deja 2,7 GB y nada las borraba nunca: el 09/08/2026
+# había cinco, 14 GB, y cuatro de ellas ya no las iba a instalar nadie.
+# Los respaldos se podan solos desde el primer día; esto hacía lo contrario.
+#
+# Se quedan DOS: la recién hecha y la anterior. La anterior no está por
+# nostalgia — es a lo que se vuelve si esta sale mal en una máquina de
+# verdad, y eso ya ha pasado en este proyecto.
+#
+# Tres cosas que no se saltan, porque son las que hacen que esto sea seguro
+# y no una manera elegante de perder trabajo:
+#
+#   · Solo se poda si la ISO nueva PASÓ su huella. Si no verifica, no hay
+#     ISO buena que sustituya a las viejas y no se borra ninguna.
+#   · Se dice en voz alta cuál desaparece. Una limpieza silenciosa se lee
+#     como «aquí no había nada», y no es lo mismo.
+#   · El histórico completo no vive aquí: vive fechado en el disco externo,
+#     en ISO-COPY-X-FECHAS. Esta carpeta es para trabajar, no para guardar.
+CONSERVAR=2
+SOBRAN=$(ls -1t "$ISOS"/*.iso 2>/dev/null | tail -n +$((CONSERVAR + 1)))
+if [ -n "$SOBRAN" ] && [ "$HUELLA_OK" = "1" ]; then
+  printf "\n   ${AZ}Sitio recuperado${V}\n"
+  LIBERADO=0
+  while IFS= read -r v; do
+    [ -f "$v" ] || continue
+    LIBERADO=$(( LIBERADO + $(stat -c%s "$v") ))
+    printf "      quitada  %s\n" "$(basename "$v")"
+    rm -f "$v" "$v.sha256"
+  done <<< "$SOBRAN"
+  printf "   ${GR}se conservan las %s más recientes · %s libres${V}\n" \
+         "$CONSERVAR" "$(numfmt --to=iec "$LIBERADO")"
+elif [ -n "$SOBRAN" ]; then
+  avi "hay ISOs viejas, pero NO se borra ninguna: la nueva no pasó su huella"
 fi
 
 ok "ISO generada en ${MINUTOS} minutos"

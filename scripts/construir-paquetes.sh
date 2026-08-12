@@ -92,6 +92,20 @@ for nombre in "${ORDEN[@]}"; do
   find "$ARBOL" -type f -exec chmod 644 {} +
   [ -d "$ARBOL/usr/bin"  ] && chmod 755 "$ARBOL"/usr/bin/*
   [ -d "$ARBOL/usr/sbin" ] && chmod 755 "$ARBOL"/usr/sbin/*
+
+  # Y cualquier otro programa, esté donde esté. Se reconoce por su primera
+  # línea: si empieza por «#!», es algo que se ejecuta.
+  #
+  # Antes solo se devolvía el permiso a usr/bin y usr/sbin, y el ayudante
+  # que repara el centro vive en usr/lib/redhornoma. Salió del paquete sin
+  # permiso de ejecución, y pkexec no puede lanzar lo que no es ejecutable:
+  # el botón «Arreglar» habría fallado en cada centro, en silencio.
+  # Descubierto mirando el .deb por dentro antes de publicarlo, 09/08/2026.
+  while IFS= read -r f; do
+    [ "$(head -c2 "$f" 2>/dev/null)" = '#!' ] && chmod 755 "$f"
+  done < <(find "$ARBOL" -type f ! -path "$ARBOL/DEBIAN/*" \
+                ! -path "$ARBOL/usr/bin/*" ! -path "$ARBOL/usr/sbin/*")
+
   chmod 755 "$ARBOL/DEBIAN"
   for g in preinst postinst prerm postrm; do
     [ -f "$ARBOL/DEBIAN/$g" ] && chmod 755 "$ARBOL/DEBIAN/$g"

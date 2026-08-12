@@ -104,6 +104,29 @@ buscar_servidores(){
         }' | sort -u
 }
 
+# ── Y la dirección del LINUX del servidor ─────────────────────────────
+# La de arriba devuelve el Windows, que es donde viven SALMI, SOAPS y SNIS.
+# Pero «Documentos del centro» vive en el LINUX del servidor, que es otra
+# máquina y otra dirección. Confundirlas es el error que más tiempo ha
+# costado en este proyecto.
+#
+# No hace falta preguntársela a nadie: el mismo anuncio de avahi que trae
+# el «windows=» trae también la dirección del propio Linux, en el campo 8.
+# Si el servidor no se anuncia, no se sugiere nada y el icono no se pone —
+# mejor sin icono que un icono que lleva a ninguna parte.
+buscar_servidor_linux(){
+  command -v avahi-browse >/dev/null 2>&1 || return 0
+  local YO
+  YO=$(cat /proc/sys/kernel/hostname 2>/dev/null)
+  timeout 6 avahi-browse -prt _redhornoma._tcp 2>/dev/null \
+    | awk -F';' -v yo="$YO" '
+        $1=="=" && $3=="IPv4" && $0 ~ /papel=servidor/ {
+          n = $7; sub(/\.local$/, "", n)
+          if (n == yo) next
+          if ($8 ~ /^[0-9.]+$/) print $8
+        }' | sort -u | head -1
+}
+
 if ! hay_pantalla; then
   titulo "CONECTAR ESTA COMPUTADORA AL CENTRO"
   echo "   Esto necesita el escritorio para pedir la contraseña sin que se vea."
@@ -132,6 +155,7 @@ DATOS=$(yad --class=redhornoma --center --borders=16 --width=520 \
   --field="Contraseña":H "" \
   --field="Conectar SALMI:CHK" TRUE \
   --field="Conectar SOAPS:CHK" FALSE \
+  --field="Poner el icono de «Documentos del centro»:CHK" TRUE \
   --separator="|" \
   --button="Cancelar:1" --button="Conectar:0" 2>/dev/null) || exit 0
 
@@ -140,13 +164,20 @@ USUARIO=$(echo "$DATOS"  | cut -d'|' -f2)
 CLAVE=$(echo "$DATOS"    | cut -d'|' -f3)
 Q_SALMI=$(echo "$DATOS"  | cut -d'|' -f4)
 Q_SOAPS=$(echo "$DATOS"  | cut -d'|' -f5)
+Q_DOCS=$(echo "$DATOS"   | cut -d'|' -f6)
+
+# La dirección del Linux del servidor, para los documentos. Se busca sola.
+SRV_LINUX=$(buscar_servidor_linux)
 
 falta(){ yad --class=redhornoma --center --borders=14 --width=400 --image=dialog-warning \
              --title="Falta un dato" --text="$1" --button="Entendido:0" >/dev/null 2>&1; exit 1; }
 [ -n "$SERVIDOR" ] || falta "Hace falta el <b>nombre o la dirección</b> del servidor."
 [ -n "$USUARIO" ]  || falta "Hace falta la <b>cuenta</b> con la que se entra a la carpeta compartida."
 [ -n "$CLAVE" ]    || falta "Hace falta la <b>contraseña</b> de esa cuenta."
-[ "$Q_SALMI" = TRUE ] || [ "$Q_SOAPS" = TRUE ] || falta "Elige al menos <b>un programa</b> que conectar."
+# La carpeta de documentos cuenta: alguien puede querer solo eso, sin
+# conectar ningún programa. Antes esta línea se lo impedía.
+[ "$Q_SALMI" = TRUE ] || [ "$Q_SOAPS" = TRUE ] || [ "$Q_DOCS" = TRUE ] \
+  || falta "Elige al menos <b>una cosa</b> que conectar."
 
 # ── Armar el trabajo para Windows ────────────────────────────────────
 #
@@ -160,6 +191,7 @@ trap 'rm -f "$GUION"' EXIT
 printf '$srv = "%s"\n' "$SERVIDOR"
 printf '$usr = "%s"\n' "$USUARIO"
 printf '$pwd = @%s\n%s\n%s@\n' "'" "$CLAVE" "'"
+printf '$srvLinux = "%s"\n' "${SRV_LINUX:-}"
 cat <<'CABECERA'
 $script:huboFallo = $false
 $ws = New-Object -ComObject WScript.Shell
@@ -253,6 +285,54 @@ function Conectar($recurso, $programa, $titulo, $iconoLocal) {
     }
   }
 }
+
+# ── Documentos del centro ───────────────────────────────────────────
+# No es un programa: es una carpeta donde los consultorios se dejan cosas.
+# Nace de un problema diario — para pasarse un informe de un consultorio a
+# otro, los medicos iban CAMINANDO con un pendrive.
+#
+# Vive en el LINUX del servidor, no en su Windows. Son dos maquinas y dos
+# direcciones distintas, y confundirlas es el error que mas tiempo ha
+# costado en este proyecto.
+#
+# El acceso directo apunta a la CARPETA entera, no a un programa: al
+# hacerle doble clic se abre el Explorador dentro. Y se le pueden arrastrar
+# archivos encima, que es de lo que se trata.
+function ConectarDocumentos($ipLinux) {
+  Write-Output ""
+  Write-Output "-- Documentos del centro"
+  if (-not $ipLinux) {
+    Write-Output "   [aviso] no se encontro el servidor en la red, no pongo el icono"
+    Write-Output "           Mejor sin icono que un icono que no lleva a ningun sitio."
+    return
+  }
+
+  $ruta = "\\" + $ipLinux + "\documentos"
+
+  # La MISMA cuenta que los programas, pero guardada para la otra maquina:
+  # el almacen de Windows va por direccion, y esta es otra.
+  $usrLinux = if ($usr -match "\\") { $usr } else { $ipLinux + "\" + $usr }
+  cmdkey /delete:$ipLinux 2>&1 | Out-Null
+  cmdkey /add:$ipLinux /user:$usrLinux /pass:$pwd 2>&1 | Out-Null
+
+  if (-not (Test-Path $ruta)) {
+    Write-Output ("   [FALLO] no se llega a " + $ruta)
+    Write-Output "          Dos cosas que mirar:"
+    Write-Output "          1. Que en el SERVIDOR se haya creado la carpeta, una vez:"
+    Write-Output "                sudo redhornoma-carpeta-compartida --documentos"
+    Write-Output "          2. Que la cuenta y la contrasena sean las mismas que ahi se pusieron."
+    $script:huboFallo = $true
+    return
+  }
+  Write-Output ("   [ok] se llega a " + $ruta)
+
+  $publico = Join-Path $env:PUBLIC "Desktop"
+  $acceso = $ws.CreateShortcut((Join-Path $publico "Documentos del centro.lnk"))
+  $acceso.TargetPath = $ruta
+  $acceso.Description = "Carpeta para pasarse documentos entre consultorios"
+  $acceso.Save()
+  Write-Output "   [ok] icono para todos: Documentos del centro"
+}
 CABECERA
 
 [ "$Q_SALMI" = TRUE ] && printf 'Conectar "%s" "%s" "%s" "%s"\n' \
@@ -261,6 +341,7 @@ CABECERA
 [ "$Q_SOAPS" = TRUE ] && printf 'Conectar "%s" "%s" "%s" "%s"\n' \
   "$(campo "${PROGRAMAS[1]}" 2)" "$(campo "${PROGRAMAS[1]}" 3)" \
   "$(campo "${PROGRAMAS[1]}" 4)" "$(campo "${PROGRAMAS[1]}" 5)"
+[ "$Q_DOCS" = TRUE ] && printf 'ConectarDocumentos "$srvLinux"\n'
 
 cat <<'PIE'
 

@@ -1,0 +1,120 @@
+#!/bin/bash
+# grabar-pendrive — Escribir la ISO en un pendrive. Corre como administrador.
+#
+# NO se ejecuta a mano: lo llama «redhornoma-pendrive».
+#
+# Esto es lo más peligroso que hace RedHornoma. Escribir en el disco
+# equivocado borra lo que haya, no avisa, y no se puede deshacer. El
+# 09/08/2026 se grabó un pendrive en el servidor de Cochabamba, que tenía
+# enchufados AL MISMO TIEMPO su disco de sistema y el disco personal de euflo
+# con 557 GB — los dos por USB, como el pendrive. Una letra de más y se
+# perdía uno de los dos.
+#
+# Por eso este archivo NO SE FÍA de quien lo llama. La ventana ya comprueba
+# que el disco elegido sea extraíble, pero esa comprobación no vale de nada
+# aquí: si algún día alguien invoca esto con otro disco —por error, por un
+# guion mal escrito, por lo que sea—, las comprobaciones que valen son las
+# que están AQUÍ DENTRO, después de pedir la contraseña.
+#
+# Se rechaza el disco si:
+#   · no es un disco de verdad
+#   · el sistema no lo declara EXTRAÍBLE
+#   · alguna de sus partes está montada en el sistema
+#   · es el disco del que arrancó esta computadora
+#   · mide más de 256 GB (eso no es un pendrive)
+#
+# Uso:  grabar-pendrive RUTA.iso /dev/sdX
+set -u
+
+[ "$(id -u)" = "0" ] || { echo "MAL: esto lo lanza redhornoma-pendrive" >&2; exit 1; }
+
+ISO="${1:-}"; DISCO="${2:-}"
+[ -n "$ISO" ] && [ -n "$DISCO" ] || { echo "MAL: faltan datos" >&2; exit 1; }
+
+no(){ echo "MAL: $1" >&2; exit 1; }
+
+# ── La ISO ────────────────────────────────────────────────────────────
+[ -f "$ISO" ] || no "no existe «$ISO»"
+[ -r "$ISO" ] || no "no puedo leer «$ISO»"
+TAM_ISO=$(stat -c%s "$ISO")
+[ "$TAM_ISO" -gt 104857600 ] || no "«$ISO» es demasiado pequeño para ser una ISO"
+
+# ── El disco ──────────────────────────────────────────────────────────
+[ -b "$DISCO" ] || no "«$DISCO» no es un disco"
+
+NOMBRE=$(basename "$DISCO")
+case "$NOMBRE" in
+  *[0-9]) # sdc1, nvme0n1p1… se escribe en el DISCO entero, nunca en una parte
+    [ -d "/sys/block/$NOMBRE" ] || no "«$DISCO» es una partición, no un disco entero" ;;
+esac
+[ -d "/sys/block/$NOMBRE" ] || no "no encuentro «$NOMBRE» entre los discos del sistema"
+
+EXTRAIBLE=$(cat "/sys/block/$NOMBRE/removable" 2>/dev/null || echo 0)
+[ "$EXTRAIBLE" = "1" ] || no "«$DISCO» NO es extraíble — me niego a escribir ahí"
+
+# 256 GB. Los pendrives que se ven en un centro son de 8, 16 o 32; un disco
+# externo de platos también puede decir «extraíble» en algunos armarios USB,
+# y ese sí lleva información de alguien.
+TAM_DISCO=$(( $(cat "/sys/block/$NOMBRE/size" 2>/dev/null || echo 0) * 512 ))
+[ "$TAM_DISCO" -gt 0 ] || no "no puedo saber el tamaño de «$DISCO»"
+[ "$TAM_DISCO" -le 274877906944 ] || no "«$DISCO» mide $((TAM_DISCO/1073741824)) GB — eso no es un pendrive"
+[ "$TAM_DISCO" -ge "$TAM_ISO" ] || no "«$DISCO» es más pequeño que la ISO"
+
+# ── ¿Está en uso? ─────────────────────────────────────────────────────
+# Se mira el disco entero y todas sus partes. Un disco con algo montado es
+# un disco que alguien está usando.
+MONTADO=$(lsblk -nro MOUNTPOINT "$DISCO" 2>/dev/null | grep . | head -3)
+if [ -n "$MONTADO" ]; then
+  case "$MONTADO" in
+    */|/boot*|/home*|/var*|/usr*)
+      no "«$DISCO» tiene partes del sistema montadas — jamás se escribe ahí" ;;
+  esac
+fi
+
+# El disco del que arrancó esta computadora, dicho por el propio sistema.
+RAIZ=$(findmnt -no SOURCE / 2>/dev/null)
+if [ -n "$RAIZ" ]; then
+  DISCO_RAIZ=$(lsblk -nro PKNAME "$RAIZ" 2>/dev/null | head -1)
+  [ "$DISCO_RAIZ" = "$NOMBRE" ] && no "«$DISCO» es el disco de esta computadora"
+fi
+
+# ── A partir de aquí sí se escribe ────────────────────────────────────
+MODELO_LEIDO=$(cat "/sys/block/$NOMBRE/device/model" 2>/dev/null | tr -s ' ')
+echo "PASO: desmontando lo que hubiera montado"
+for p in $(lsblk -nro NAME "$DISCO" 2>/dev/null | tail -n +2); do
+  umount "/dev/$p" 2>/dev/null
+done
+
+echo "PASO: grabando $(basename "$ISO") en $DISCO"
+if ! dd if="$ISO" of="$DISCO" bs=4M status=progress conv=fsync; then
+  no "la grabación falló a medias — ese pendrive no sirve"
+fi
+sync
+
+# ── Y comprobar leyendo del pendrive ──────────────────────────────────
+# Que «dd» termine sin quejarse no significa que lo escrito sea lo que se
+# quería. La única prueba es volver a leer los bytes del propio pendrive.
+echo "PASO: comprobando lo grabado"
+HUELLA_ISO=$(sha256sum "$ISO" | cut -d' ' -f1)
+HUELLA_PEN=$(head -c "$TAM_ISO" "$DISCO" | sha256sum | cut -d' ' -f1)
+
+# Queda escrito. La herramienta comprobaba la grabación y se olvidaba: si
+# días después alguien pregunta «¿este pendrive está bien?», la única
+# respuesta era volver a leerlo entero. Y quien lo grabó puede no estar.
+#
+# Se descubrió el 09/08/2026, el mismo día que se estrenó: intentando
+# comprobar desde fuera un pendrive recién grabado, no había dónde mirar.
+REGISTRO=/var/lib/redhornoma/pendrive.log
+mkdir -p "$(dirname "$REGISTRO")" 2>/dev/null
+anotar(){ printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" >> "$REGISTRO" 2>/dev/null; }
+
+if [ "$HUELLA_ISO" = "$HUELLA_PEN" ]; then
+  anotar "OK: $(basename "$ISO") → $DISCO ($(echo "$MODELO_LEIDO" | head -1)) · $HUELLA_PEN"
+  echo "OK: $HUELLA_PEN"
+else
+  anotar "FALLÓ: $(basename "$ISO") → $DISCO · lo grabado NO coincide"
+  echo "MAL: lo grabado NO coincide con la ISO" >&2
+  echo "MAL: en la ISO      $HUELLA_ISO" >&2
+  echo "MAL: en el pendrive $HUELLA_PEN" >&2
+  exit 1
+fi

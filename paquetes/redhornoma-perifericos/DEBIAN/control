@@ -1,10 +1,11 @@
 Package: redhornoma-perifericos
-Version: 1.0.6
+Version: 1.0.10
 Section: admin
 Priority: optional
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
-Depends: redhornoma-base (>= 1.0.1), samba, samba-common-bin
+Depends: redhornoma-base (>= 1.0.1), samba, samba-common-bin, pkexec,
+ util-linux, coreutils
 Recommends: cups, sane-utils
 Description: Una carpeta que ven Linux y Windows a la vez
  Pasar un archivo al Windows virtual no debería obligar a grabar un CD ni
@@ -13,3 +14,8 @@ Description: Una carpeta que ven Linux y Windows a la vez
  .
  Sirve para sacar los respaldos de SALMI hacia el disco externo, meter los
  catálogos que manda el Ministerio y llevar informes a imprimir.
+ .
+ Y «Grabar un pendrive con RedHornoma»: copia la ISO a un pendrive sin que
+ nadie tenga que escribir la letra del disco. Solo enseña los discos
+ extraíbles —el de la computadora no puede aparecer ni por error— y al
+ terminar comprueba lo grabado leyendo del propio pendrive.
