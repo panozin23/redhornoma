@@ -4,7 +4,7 @@
 > Claude que empieza de cero. Léelo entero antes de tocar nada: está para que
 > no se repitan errores que ya costaron horas.
 >
-> **Última actualización:** 2026-08-11 (noche)
+> **Última actualización:** 2026-08-12 (madrugada)
 > **Se actualiza al cerrar cada jornada.** Un traspaso viejo engaña más que
 > ninguno.
 
@@ -70,25 +70,36 @@ Windows del servidor está detrás de un NAT y ningún puesto puede llegar a él
 
 **Un objetivo solo está conseguido cuando se cumple en TODOS los centros.**
 
-| # | Objetivo | Cochabamba | **Hornoma (10/08)** |
-|---|---|---|---|
-| 1 | Compatibilidad | 🟢 95% | 🟢 100% |
-| 4 | Virtualización | 🟢 95% | 🟢 95% |
-| 7 | Distro en español | 🟢 95% | 🟢 95% |
-| 5 | Canal Windows ↔ Linux | 🟢 98% | 🟡 70% |
-| 3 | Servidor con los programas | 🟢 100% | 🟡 35% |
-| 8 | Que la información no se pierda | 🟢 90% | 🔴 30% |
-| 2 | Meter información desde la red | 🟢 100% | 🔴 **0%** |
-| 9 | Que un centro se arregle solo | 🟡 55% | 🔴 10% |
+⚠️ **Y desde el 12/08 el `.101` de Hornoma es el servidor PRINCIPAL** — ahí
+vive la documentación oficial. **Cochabamba pasa a ser su copia.** Decisión de
+euflo, e invierte lo que este traspaso decía hasta ayer.
 
-**El orden para replicar Cochabamba en Hornoma**, y el primero desbloquea a los
-demás:
+| # | Objetivo | Cochabamba | **Hornoma (12/08)** | |
+|---|---|---|---|---|
+| 1 | Compatibilidad | 🟢 95% | 🟢 100% | = |
+| 4 | Virtualización | 🟢 95% | 🟢 95% | = |
+| 7 | Distro en español | 🟢 95% | 🟢 95% | = |
+| 5 | Canal Windows ↔ Linux | 🟢 98% | 🟢 **100%** | ↑ 70 |
+| 3 | Servidor con los programas | 🟢 100% | 🟢 **90%** | ↑ 35 |
+| 8 | Que la información no se pierda | 🟢 90% | 🟡 **75%** | ↑ 30 |
+| 2 | Meter información desde la red | 🟢 100% | 🟡 **60%** | ↑ **0** |
+| 9 | Que un centro se arregle solo | 🟡 55% | 🔴 10% | = |
+| 11 | Varios centros desde un sitio | 🟡 50% | 🟡 **70%** | |
+
+**Hornoma es hoy la ÚNICA máquina del proyecto que se puede atender sin que
+haya nadie allí**: se enciende sola a la 1:00. Por eso su objetivo 11 supera al
+de Cochabamba, que tiene las mismas piezas pero **no tiene despertador**: si se
+apaga, no la alcanza nadie.
+
+**Lo que queda en Hornoma, por orden:**
 
 ```
-1 · Sacar el Windows del NAT a la red del centro     ← bloquea al 2 y al 3
-2 · Excel (bloquea el cierre de mes), SALMI, SNIS
-3 · El respaldo: actualizar el .101, reapuntar, PROBAR RESTAURAR
-4 · Los puestos: el .103 de cliente, dos escribiendo a la vez
+1 · Montar el PRIMER PUESTO     cierra el 2 (se puede llegar; falta que alguien
+                                escriba) y el 3
+2 · Traer AGOSTO del .103       y con él deshacer otra vez los 7 registros del
+                                2064, que volvieron con el .wak de julio
+3 · PROBAR UNA RESTAURACIÓN     es el 25% que le falta al objetivo 8
+4 · Que algo AVISE              el objetivo 9 sigue en 10%
 ```
 
 **Publicado y funcionando:**
@@ -236,6 +247,69 @@ solo existe en una máquina.**
 ---
 
 ## 4 · Qué ha cambiado (5 al 10 de agosto)
+
+**El 12 de agosto, de madrugada, con euflo en el centro antes de viajar:**
+
+- 🥇 **EL WINDOWS DEL SERVIDOR SALIÓ DEL NAT.** Estaba en `192.168.122.226`,
+  encerrado: ningún puesto podía llegar. Ahora es **`192.168.1.50`**, se
+  anuncia como `SERVER-HORNOMA` y responde desde cualquier máquina del centro.
+  **El objetivo 2 deja el cero por primera vez en Hornoma.**
+
+  **Se le añadió una SEGUNDA tarjeta, no se sustituyó la que tenía**, y esa
+  decisión importa: `redhornoma-papel --papel servidor` sustituye, y con
+  `macvtap` **la máquina virtual no puede hablar con el Linux que la aloja**
+  —que es por donde ve los discos externos y la carpeta de intercambio—.
+  Guion: `documentacion/hornoma/windows-a-la-red.sh`.
+
+- 🔴 **El centro llevaba 9 días sin respaldo, y los 113.456 registros de SOAPS
+  no tenían NI UNA copia.** El servidor pasó a ser el `.101` el 4 de agosto y
+  **la configuración del respaldo nunca se reapuntó**: seguía buscando SALMI en
+  el `.103`. Peor: mientras `windows_red` tuviera algo escrito, el respaldo
+  creía que ese Windows era una máquina física de la red y
+  `--preparar-programas` **se negaba a hacer nada**. La orden correcta se
+  rechazaba por una línea de configuración vieja.
+  Guion: `documentacion/hornoma/reapuntar-respaldo.sh`.
+
+- 🥇 **SALMI, SOAPS 7 y SNIS 2026 abiertos al centro.** Cuenta `salmired`
+  dentro de Windows —la MISMA que ya tienen los puestos—, las tres carpetas
+  compartidas, y el `SUIS.reg` listo para llevar al puesto.
+  **El cortafuegos va POR PROGRAMA, no por puerto:** SQL Server Express cambia
+  de puerto en cada arranque —el 12/08 era el **49825**—, así que una regla con
+  el número escrito funciona hoy y falla el martes.
+  Guion: `documentacion/hornoma/programas-en-red.sh`.
+
+- 🥇 **Objetivo 5 al 100%.** Unidad `Z:` en Windows puesta al iniciar sesión,
+  «Documentos del centro», y **las carpetas del Windows montadas en
+  `/mnt/windows`**: desde Cochabamba se puede copiar dentro de SALMI sin abrir
+  la pantalla del Windows. Probado **cruzando en los dos sentidos**.
+  `redhornoma-panel 1.0.10` lo dice en el tablero.
+
+- 🌙 **El horario pasa a 01:00 → 08:00**, porque el `.101` es ahora el servidor
+  principal y esa es la ventana para sacar información desde la ciudad.
+
+- 💾 Los discos externos, montados y visibles dentro de Windows con su icono.
+
+**🔴 Y siete comprobaciones que mentían, todas en cuatro horas.** Es el fallo
+que más se repite en este proyecto y por eso van juntas:
+
+| Lo que se preguntaba | Por qué mentía |
+|---|---|
+| `systemctl is-enabled` un temporizador | dice que sí **con el archivo vacío** |
+| `mount … \|\| ls carpeta` | `ls` sobre una carpeta **vacía sale bien** |
+| `findmnt` = `"cifs"` | con automontaje devuelve **dos** líneas: `autofs` Y `cifs` |
+| `sed '/marca/,+3d'` | **contar líneas**: dejó dos entradas huérfanas y duplicadas |
+| «desmontada» = avería | el automontaje **suelta a propósito** a los 5 minutos |
+| `journalctl -k` sin root | sale **vacío por permisos**, y se lee como «no dijo nada» |
+| `wget` a una URL de memoria | vacío, leído como «no se publicó» |
+
+**El más grave:** `horario-noche.sh` reventaba con `--apagar 08:00` porque
+**bash lee «08» como octal y no existe**. Con `04` funcionaba de casualidad.
+Dejaba el temporizador **vacío** y **la máquina sin despertador** —un servidor
+a 100 km que no volvería— y decía que todo estaba bien.
+
+> **La regla: preguntar lo que importa, no lo que es fácil de preguntar.**
+> Y un vacío no es un «no»: puede ser falta de permiso, tiempo agotado o una
+> ruta equivocada.
 
 **El 11 de agosto, por la noche:**
 
