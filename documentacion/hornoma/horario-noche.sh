@@ -54,6 +54,34 @@ done
 
 [ "$(id -u)" = "0" ] || { echo "Hace falta administrador:  sudo bash $0 --instalar"; exit 1; }
 
+# ── Las horas, comprobadas y en base 10 ───────────────────────────────
+# 🔴 Aquí hubo un fallo el 12/08/2026, y de los que no dan la cara.
+#
+# La hora de apagar se usa para calcular hasta cuándo se reintenta:
+# «apagar + 4 horas». Se escribía  $(( ${APAGAR%%:*} + 4 )).
+#
+# Pero bash lee los números que empiezan por cero como OCTALES. «04» es un
+# octal válido —vale 4— y por eso el horario de 04:00 funcionó desde el
+# primer día. «08» y «09» NO EXISTEN en octal: la cuenta revienta, el guion
+# se para a mitad de escribir el temporizador, y deja el archivo VACÍO.
+#
+# El resultado no era un error visible: era una máquina que ya no se apaga
+# y, sobre todo, que YA NO ARMA EL DESPERTADOR. Un servidor a 100 km que se
+# quedaría apagado hasta que alguien viaje.
+#
+# Falla con dos horas de las veinticuatro. Con las otras 22 el guion parece
+# correcto. Por eso va comprobado y en base 10 explícita.
+hora_valida(){ case "$1" in [0-2][0-9]:[0-5][0-9]) return 0 ;; *) return 1 ;; esac; }
+for par in "encender:$ENCENDER" "apagar:$APAGAR"; do
+  N="${par%%:*}"; H="${par#*:}"
+  hora_valida "$H" || { echo "La hora de $N («$H») no vale. Va en formato HH:MM, por ejemplo 08:00"; exit 1; }
+  [ "$(( 10#${H%%:*} ))" -le 23 ] || { echo "La hora de $N («$H») no existe"; exit 1; }
+done
+
+H_APAGAR=$(( 10#${APAGAR%%:*} ))     # el 10# es lo que impide leerlo como octal
+FIN=$(( H_APAGAR + 4 ))              # hasta cuándo se reintenta
+[ "$FIN" -gt 23 ] && FIN=23          # y sin salirse del día, que systemd lo rechaza
+
 GUION=/usr/local/sbin/redhornoma-apagar-noche
 UNIDAD=/etc/systemd/system/redhornoma-apagar-noche.service
 RELOJ=/etc/systemd/system/redhornoma-apagar-noche.timer
@@ -125,56 +153,97 @@ FRENO=/etc/redhornoma/no-apagar
 ALARMA=/sys/class/rtc/rtc0/wakealarm
 REG=/var/lib/redhornoma/horario.log
 anota(){ mkdir -p "$(dirname "$REG")" 2>/dev/null; printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" >> "$REG"; }
+diga(){ printf '   %s\n' "$1"; }
 
-# 1 · El freno a mano. Un archivo, para que quien esté en el centro pueda
-#     decir «hoy no te apagues» sin saber nada de systemd.
-if [ -f "$FRENO" ]; then anota "NO se apaga: está puesto el freno $FRENO"; exit 0; fi
+# ── ¿Lo pide el reloj, o lo pide una persona? ─────────────────────────────
+# No es lo mismo, y confundirlo dejaba el guion inservible a mano.
+#
+# Los frenos 1 y 2 existen para que el reloj no apague la máquina encima de
+# alguien que está trabajando. Pero cuando es la propia persona quien escribe
+# el comando —siempre por SSH, porque el servidor está a 100 km— esos frenos
+# la ven a ELLA y se niegan. El apagado a mano no funcionaba nunca.
+#
+# Con «--ahora», quien manda es la persona: se saltan los frenos 1 y 2.
+# Los otros dos NO se saltan jamás, ni a mano ni nunca:
+#   · un respaldo a medias se corrompe igual lo pida quien lo pida
+#   · y apagar sin despertador comprobado es quedarse sin servidor
+A_MANO=no
+case "${1:-}" in
+  --ahora) A_MANO=si ;;
+  "") ;;
+  *) echo "Uso: $0 [--ahora]"; exit 1 ;;
+esac
 
-# 2 · Si hay alguien conectado por SSH trabajando, no se apaga. Las sesiones
-#     de la pantalla no cuentan: se quedan abiertas días y bloquearían el
-#     apagado para siempre.
-#
-#     Se mira por DOS caminos, y basta con que uno diga que sí:
-#
-#       · «who» ve las sesiones con terminal — una persona escribiendo
-#       · «ss» ve TODAS las conexiones al puerto 22, incluidas las que no
-#         abren terminal. Esto último es lo que importa de verdad: abrir la
-#         pantalla del Windows desde el portátil (qemu+ssh) es una conexión
-#         SIN terminal, y con solo «who» podía no verse. Sería apagarle la
-#         máquina a alguien que está instalando un programa dentro.
-if who 2>/dev/null | grep -q "sshd\|pts/"; then
-  anota "NO se apaga: hay alguien trabajando por red (sesión abierta)"; exit 0
-fi
-if [ "$(ss -tnH state established '( sport = :22 )' 2>/dev/null | grep -c .)" -gt 0 ]; then
-  anota "NO se apaga: hay alguien trabajando por red (conexión activa)"; exit 0
+if [ "$A_MANO" = "si" ]; then
+  diga "Apagado pedido a mano — no miro si hay alguien conectado."
+else
+  # 1 · El freno a mano. Un archivo, para que quien esté en el centro pueda
+  #     decir «hoy no te apagues» sin saber nada de systemd.
+  if [ -f "$FRENO" ]; then anota "NO se apaga: está puesto el freno $FRENO"; exit 0; fi
+
+  # 2 · Si hay alguien conectado por SSH trabajando, no se apaga. Las sesiones
+  #     de la pantalla no cuentan: se quedan abiertas días y bloquearían el
+  #     apagado para siempre.
+  #
+  #     Se mira por DOS caminos, y basta con que uno diga que sí:
+  #
+  #       · «who» ve las sesiones con terminal — una persona escribiendo
+  #       · «ss» ve TODAS las conexiones al puerto 22, incluidas las que no
+  #         abren terminal. Esto último es lo que importa de verdad: abrir la
+  #         pantalla del Windows desde el portátil (qemu+ssh) es una conexión
+  #         SIN terminal, y con solo «who» podía no verse. Sería apagarle la
+  #         máquina a alguien que está instalando un programa dentro.
+  if who 2>/dev/null | grep -q "sshd\|pts/"; then
+    anota "NO se apaga: hay alguien trabajando por red (sesión abierta)"; exit 0
+  fi
+  if [ "$(ss -tnH state established '( sport = :22 )' 2>/dev/null | grep -c .)" -gt 0 ]; then
+    anota "NO se apaga: hay alguien trabajando por red (conexión activa)"; exit 0
+  fi
 fi
 
 # 3 · Si un respaldo está corriendo, se le deja terminar. Cortar una copia a
 #     medias es peor que no apagarse.
 if pgrep -x rsync >/dev/null 2>&1 || pgrep -f redhornoma-respaldo >/dev/null 2>&1; then
-  anota "NO se apaga: hay un respaldo en marcha"; exit 0
+  anota "NO se apaga: hay un respaldo en marcha"
+  diga "NO se apaga: hay un respaldo copiando. Prueba dentro de un rato."
+  exit 0
 fi
 
 # 4 · Armar el despertador ANTES de apagar, y comprobar que quedó puesto.
 #     Apagar sin alarma sería quedarse sin servidor hasta que alguien viaje.
+#
+#     Si son más de las 12 de la noche, «mañana a la 1» sería dentro de casi
+#     24 horas: lo que se quiere es la 1 de HOY, que está a un rato. Sin esto,
+#     apagar a las 00:30 dejaba la máquina fuera un día entero.
 CUANDO=$(date -d "tomorrow $ENCENDER" +%s)
+HOY=$(date -d "today $ENCENDER" +%s)
+[ "$HOY" -gt "$(date +%s)" ] && CUANDO="$HOY"
+
 echo 0 > "$ALARMA"; echo "$CUANDO" > "$ALARMA" 2>/dev/null
 if [ "$(cat "$ALARMA")" != "$CUANDO" ]; then
-  anota "NO se apaga: el despertador no quedó puesto"; exit 0
+  anota "NO se apaga: el despertador no quedó puesto"
+  diga "NO se apaga: la placa no aceptó el despertador."
+  diga "Apagarla ahora sería quedarse sin servidor hasta ir en persona."
+  exit 0
 fi
+diga "Despertador puesto: volverá el $(date -d "@$CUANDO" '+%d/%m a las %H:%M')"
 
 # 5 · El Windows de dentro, con orden. De golpe se rompen las bases.
 if command -v virsh >/dev/null 2>&1; then
   for vm in $(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
+    diga "Cerrando el Windows «$vm» con orden…"
     LC_ALL=C virsh -c qemu:///system shutdown "$vm" >/dev/null 2>&1
   done
   for _ in $(seq 1 24); do
     [ -z "$(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$')" ] && break
     sleep 5
   done
+  QUEDAN=$(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$')
+  [ -n "$QUEDAN" ] && { anota "aviso: $QUEDAN no cerró a tiempo"; diga "Aviso: $QUEDAN tardó demasiado en cerrar."; }
 fi
 
 anota "apagando — volverá el $(date -d "@$CUANDO" '+%d/%m a las %H:%M')"
+diga "Apagando ahora. Hasta el $(date -d "@$CUANDO" '+%d/%m a las %H:%M')."
 sleep 2
 /sbin/poweroff
 GUIONFIN
@@ -206,7 +275,7 @@ Description=Hora de apagar el servidor
 # «¿y si sigo trabajando a las 4?».
 #
 # Ahora, en cuanto deja de haber nadie, se apaga en menos de media hora.
-OnCalendar=$DIAS *-*-* ${APAGAR%%:*}..$(( ${APAGAR%%:*} + 4 )):00/30:00
+OnCalendar=$DIAS *-*-* $H_APAGAR..$FIN:00/30:00
 Persistent=false
 
 [Install]
@@ -236,6 +305,33 @@ systemctl daemon-reload
 systemctl enable --now redhornoma-apagar-noche.timer >/dev/null 2>&1
 systemctl restart redhornoma-respaldo.timer >/dev/null 2>&1
 
+# ── Comprobar que el reloj tiene HORA, no solo que está «activado» ────
+# 🔴 Lo de antes preguntaba «systemctl is-enabled», y eso contesta que sí
+# aunque el archivo esté VACÍO. El 12/08/2026 pasó exactamente eso: el
+# temporizador quedó a 0 bytes, «activado», y sin ninguna hora dentro. La
+# máquina se quedó sin apagarse y SIN DESPERTADOR, y el guion dijo que
+# todo estaba bien.
+#
+# Lo único que prueba que esto funciona es que systemd sepa decir CUÁNDO
+# es la próxima vez. Si no lo sabe, no hay horario.
+printf "   %-32s " "el reloj tiene hora puesta"
+[ -s "$RELOJ" ] || { printf "${RO}no — el archivo salió vacío${V}\n"
+  mal "no se pudo escribir el temporizador"; exit 1; }
+systemctl daemon-reload
+PROXIMA=$(systemctl list-timers redhornoma-apagar-noche.timer --no-pager 2>/dev/null \
+          | sed -n 2p | grep -oE '^[A-Za-z]{3} [0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}')
+if [ -n "$PROXIMA" ]; then
+  printf "${VE}sí${V}\n"
+  ok "próximo intento de apagado: $PROXIMA"
+else
+  printf "${RO}NO${V}\n"
+  mal "el temporizador quedó sin ninguna hora — el horario NO está puesto"
+  echo "      Lo que systemd entendió:"
+  grep -n 'OnCalendar' "$RELOJ" 2>/dev/null | sed 's/^/         /'
+  systemd-analyze verify "$RELOJ" 2>&1 | head -5 | sed 's/^/         /'
+  exit 1
+fi
+
 printf "   %-32s " "el reloj queda en marcha"
 systemctl is-enabled redhornoma-apagar-noche.timer >/dev/null 2>&1 \
   && printf "${VE}sí${V}\n" || { printf "${RO}no${V}\n"; exit 1; }
@@ -245,7 +341,7 @@ cat <<FIN
 
    días        : $DIAS
    se apaga    : a partir de las $APAGAR, y lo reintenta cada media hora
-                 hasta las $(( ${APAGAR%%:*} + 4 )):30 si hay alguien trabajando
+                 hasta las $FIN:30 si hay alguien trabajando
    despierta   : $ENCENDER del día siguiente
 
    NO se apagará si:
@@ -258,7 +354,12 @@ cat <<FIN
    sin que tengas que hacer nada.
 
    Y si quieres apagarla YA, desde donde estés:
-      sudo /usr/local/sbin/redhornoma-apagar-noche
+      sudo /usr/local/sbin/redhornoma-apagar-noche --ahora
+
+   El «--ahora» es lo que dice «lo pido yo». Sin él, el guion mira si hay
+   alguien conectado — y como tú entras por SSH, se vería a ti mismo y
+   nunca se apagaría. Con «--ahora» mandas tú, pero sigue sin apagarse
+   si hay un respaldo copiando o si el despertador no queda puesto.
 
 FIN
 systemctl list-timers redhornoma-apagar-noche.timer --no-pager 2>/dev/null | sed -n 2p | sed 's/^/   próxima vez: /'

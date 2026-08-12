@@ -340,10 +340,81 @@ detectar_impresora(){
   fi
 }
 
+# ── 9 · El canal entre Windows y Linux ────────────────────────────────
+# Es por donde pasa todo lo que se lleva y se trae del Windows: los
+# instaladores que entran, los respaldos de SOAPS y SNIS que salen, y los
+# informes que alguien deja para imprimir. Si se cae, nada da error: los
+# archivos simplemente dejan de aparecer, y eso se nota tarde.
+#
+# Hasta el 12/08/2026 el panel no sabía decir nada de esto. Se preguntaba
+# abriendo la carpeta a mano y viendo si había algo dentro.
+#
+# Solo se mira lo LOCAL —el servicio y los montajes de este equipo—, nada
+# por red: un panel que tarda no lo abre nadie.
+detectar_canal(){
+  # Solo tiene sentido donde vive un Windows.
+  local vm_hay=no
+  command -v virsh >/dev/null 2>&1 && \
+    [ -n "$(vsh list --all --name 2>/dev/null | grep -v '^$')" ] && vm_hay=si
+  [ "$vm_hay" = "si" ] || return
+
+  local ida=no total=0 en_uso=0 listas=0 rotas=0 c nom
+  # ── La ida: la carpeta que Windows ve como unidad Z: ──
+  if systemctl is-active smbd >/dev/null 2>&1 && [ -d /var/lib/libvirt/compartido ]; then
+    ida=si
+  fi
+
+  # ── La vuelta: las carpetas del Windows, vistas desde aquí ──
+  #
+  # 🔴 «Desmontada» NO es avería, y confundirlo daba una alarma falsa.
+  #
+  # Estas carpetas van con automontaje: si nadie las usa durante cinco
+  # minutos se sueltan solas, y se vuelven a montar en el instante en que
+  # alguien las abre. Eso es lo que se quiere —no tener una conexión
+  # abierta contra el Windows toda la noche—, pero la primera versión de
+  # este detector lo contaba como problema y pedía arreglarlo. Nada que
+  # arreglar: era el funcionamiento normal.
+  #
+  # Un aviso que no corresponde enseña a ignorar los que sí. Lo que se
+  # mira es si el portero está en pie y si el último intento FALLÓ.
+  #
+  # Y el tipo se busca por línea, no se compara: con automontaje hay dos
+  # montajes apilados —autofs y encima cifs— y findmnt devuelve los dos.
+  for c in /mnt/windows/*; do
+    [ -d "$c" ] || continue
+    total=$((total+1))
+    nom=$(systemd-escape -p "$c" 2>/dev/null)
+    if findmnt -nro FSTYPE "$c" 2>/dev/null | grep -qx cifs; then
+      en_uso=$((en_uso+1))
+    elif systemctl is-failed "${nom}.mount" >/dev/null 2>&1; then
+      rotas=$((rotas+1))
+    elif systemctl is-active "${nom}.automount" >/dev/null 2>&1; then
+      listas=$((listas+1))
+    else
+      rotas=$((rotas+1))
+    fi
+  done
+
+  if [ "$ida" = "no" ]; then
+    fila 🔴 "Canal con Windows" "las carpetas compartidas están caídas"
+    pendiente "Levantar las carpetas compartidas — ábrelo desde el menú: «Algo no funciona»"
+  elif [ "$total" = "0" ]; then
+    fila 🟢 "Canal con Windows" "la carpeta de intercambio, en marcha"
+  elif [ "$rotas" -gt 0 ]; then
+    fila 🟡 "Canal con Windows" "$rotas de $total carpeta(s) del Windows no responden"
+    pendiente "Alguna carpeta del Windows no responde — lo más normal es que su Windows esté apagado"
+  elif [ "$en_uso" -gt 0 ]; then
+    fila 🟢 "Canal con Windows" "intercambio y $total del Windows ($en_uso en uso)"
+  else
+    fila 🟢 "Canal con Windows" "intercambio y $total del Windows, listas"
+  fi
+}
+
 recoger_todo(){
   FILAS=(); PENDIENTES=()
   detectar_equipo
   detectar_programas
+  detectar_canal
   detectar_puestos
   detectar_respaldo
   detectar_copia_fuera
