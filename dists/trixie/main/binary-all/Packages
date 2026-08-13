@@ -6,9 +6,9 @@ Depends: iproute2, usbutils, pciutils, procps, util-linux, systemd, rclone
 Recommends: yad, libvirt-clients
 Filename: pool/main/redhornoma-base_1.1.2_all.deb
 Size: 17444
-MD5sum: 042f83105ea2f262ed484c49d58c8c21
-SHA1: 4f0dac22e4788b1daf2b09ac420c0f00671de630
-SHA256: 9a757fb34e8ec6842ae15d15139e23f5caadf75aa5359862feffb5842f787b3c
+MD5sum: 35195aca698eea92f5c7fc85cffdd11d
+SHA1: 64c5f6d60e43113c8de1fe69533ff68f68003e8b
+SHA256: d173d0f596f812206beb9d582f18280bdd382c6c1a3592d2634bb1c4856be01b
 Section: admin
 Priority: optional
 Description: Radiografía de un equipo de RedHornoma
@@ -28,9 +28,9 @@ Depends: redhornoma-base (>= 1.0.1), redhornoma-virtualizacion (>= 1.0.11),
  redhornoma-perifericos (>= 1.0.6), redhornoma-panel (>= 1.0.4)
 Filename: pool/main/redhornoma-completo_1.0.32_all.deb
 Size: 964
-MD5sum: 2ec1f0ec425c6132e5fecc0992eae16e
-SHA1: 68de205aeabb03c3998ad0167793854b5c816390
-SHA256: d9ddd6eb1b1bc8a1403fd0addd206c1b75fc352159be69d6ef8782cb45a15ba9
+MD5sum: 3fe2a1428dd022d504eb5822fdd71134
+SHA1: 0138163c03e2168ad914fdbe249ab0fe77458496
+SHA256: d7b1a2eceff65021aa29bd4cbdee01f8b4ace2475f6a17e6b19c101e6113cfff
 Section: admin
 Priority: optional
 Description: RedHornoma entero, en un solo paquete
@@ -50,9 +50,9 @@ Recommends: redhornoma-virtualizacion, redhornoma-respaldo, redhornoma-red,
  avahi-utils, cups-client, xdg-utils
 Filename: pool/main/redhornoma-panel_1.0.10_all.deb
 Size: 17932
-MD5sum: 0c8bbdb4cef5705147c3042a6641eff3
-SHA1: 465c2f2ccdc3ed2bf5b243b1b038734f0e9af8ba
-SHA256: 006f6753dc8b9ff5bb5b1e18697ec0a50253631fc09aa895e0c8bca2a5dd065f
+MD5sum: d648472dfc2bc5d9c2213180942d5fac
+SHA1: 87ba37f18b4e252694a03cca0badad100ff45490
+SHA256: b4611591c68d38ebf35010252f6effa687e87162d679d24f5d6ea84ec7351fdd
 Section: admin
 Priority: optional
 Description: La pantalla única de control de RedHornoma
@@ -83,9 +83,9 @@ Depends: redhornoma-base (>= 1.0.1), samba, samba-common-bin, pkexec,
 Recommends: cups, sane-utils
 Filename: pool/main/redhornoma-perifericos_1.0.10_all.deb
 Size: 15968
-MD5sum: fbfc3da45cf8624f4e36dd968f9ed777
-SHA1: 66e05fe1bc1f906844e9fe14bedd6a89ed0907be
-SHA256: 26e3f4486434838cf56c2367e3ab3ebde2c9b4689993c0b929c3118d1c6f2721
+MD5sum: 83c1de7f17b42283d2f4485436d8cb7a
+SHA1: aa351f02b234f00ab9f609cf67c234b2f941f10d
+SHA256: d0ab431d311a048470f2f8a0b0123b53227d2689ba6455f9fea7444fc71d6399
 Section: admin
 Priority: optional
 Description: Una carpeta que ven Linux y Windows a la vez
@@ -102,18 +102,18 @@ Description: Una carpeta que ven Linux y Windows a la vez
  terminar comprueba lo grabado leyendo del propio pendrive.
 
 Package: redhornoma-red
-Version: 1.0.6
+Version: 1.1.0
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
 Depends: redhornoma-base (>= 1.0.1), avahi-daemon, avahi-utils,
  openssh-client, openssh-server, libvirt-clients, iproute2
 Recommends: yad, virt-viewer, samba-common-bin,
  redhornoma-virtualizacion (>= 1.0.11)
-Filename: pool/main/redhornoma-red_1.0.6_all.deb
-Size: 21900
-MD5sum: 8b2f3896a7bcd0d5b59e141171fee087
-SHA1: d901e6300c66a7aa6fa1f56db6d29b779d047dc6
-SHA256: 7b33dfe1d4d3eb74e9d142ed38c22218b448e6b81dc3e59aa6b8b6e5036ad714
+Filename: pool/main/redhornoma-red_1.1.0_all.deb
+Size: 24400
+MD5sum: 9353c50b06da3e29b6c1e79094ee5581
+SHA1: 4494835e17b4d5bc63c429b749336b06d7dea2e7
+SHA256: 50caca3de5317ad4e1e45a8d0b2cbc02d60b7a68227c839bb2f67f1c079c40b1
 Section: admin
 Priority: optional
 Description: La red interna de un centro de salud
@@ -139,9 +139,9 @@ Depends: redhornoma-base (>= 1.0.1), libvirt-clients, python3,
 Recommends: rclone, smbclient, cifs-utils, yad, pkexec
 Filename: pool/main/redhornoma-respaldo_1.0.18_all.deb
 Size: 32528
-MD5sum: 39df83d4b5518a6c163c4675b74c0a74
-SHA1: d50e93de88ef28afb126d997a6b01d601bfa42fa
-SHA256: 870507018d0c10803fda63733d712d2d2f5caa182a15e8caca2d49b93cf82e27
+MD5sum: d5340616395f3353dbcaa1c3e12cbf3f
+SHA1: 4c3e4e59ee52a4a7a9e5a640ce65061375504fad
+SHA256: e78b9d93203295c23a9208b8557a5fe0f4230863c8922e62336ea180ce61c3f5
 Section: admin
 Priority: optional
 Description: Guarda la información del centro, sola, cada día
@@ -167,9 +167,9 @@ Recommends: virt-manager, gir1.2-spiceclientgtk-3.0, gir1.2-spiceclientglib-2.0,
  xorriso, libarchive-tools, libbde-utils
 Filename: pool/main/redhornoma-virtualizacion_1.0.16_all.deb
 Size: 36804
-MD5sum: 9ea0101435dd70b1ced95064ef315ee8
-SHA1: 3089ff29c57906f4024ad2a624b68acd85560519
-SHA256: 9d0393929e8b43c4388dc1041b658dec7757410cbe8d3d8669d4c717fc9052e5
+MD5sum: 817d5299cd77e49e26559e86cad427e3
+SHA1: 5f9fb93d74654b38caf688397de9679ec3fe0699
+SHA256: b5511428e17557b063fd11857ca0ebb13e77a9815cd29d35e05e4947c3e2bc50
 Section: admin
 Priority: optional
 Description: Windows dentro de RedHornoma, adaptado a cada máquina
