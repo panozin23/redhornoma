@@ -139,7 +139,22 @@ fi
 # siempre: una máquina puede haberse borrado o renombrado.
 definidas(){ $VIRSH list --all --name 2>/dev/null | grep -v '^$'; }
 existe(){    definidas | grep -qx "$1"; }
-encendida(){ $VIRSH domstate "$1" 2>/dev/null | grep -q '^running'; }
+# 🔴 El «LC_ALL=C» no es un adorno, y su falta rompía esta herramienta.
+#
+# Esta distro está en español y virsh también: «domstate» contesta
+# «ejecutando», no «running». Sin hablarle en inglés, esta función decía
+# APAGADA de una máquina encendida, y entonces el guion intentaba
+# arrancarla: virsh contestaba «El dominio ya se encuentra activo» y la
+# herramienta se cerraba con «No se pudo encender Windows».
+#
+# O sea: entrar fallaba SIEMPRE que el Windows ya estaba encendido — que
+# es justo lo que pasa en un servidor, donde arranca solo con la máquina.
+# Y es la herramienta con la que se trabaja en un centro desde lejos.
+#
+# El mismo fallo se corrigió en el panel el 09/08 y aquí se pasó por alto.
+# Encontrado el 13/08 comparando dos herramientas que decían lo contrario
+# sobre la misma máquina.
+encendida(){ LC_ALL=C $VIRSH domstate "$1" 2>/dev/null | grep -q '^running'; }
 
 TODAS=$(definidas)
 [ -z "$TODAS" ] && {
