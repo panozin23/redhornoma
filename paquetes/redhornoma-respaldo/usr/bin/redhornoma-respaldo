@@ -1470,9 +1470,20 @@ if [ -f "$PRINCIPAL" ] && command -v mdb-tables >/dev/null 2>&1; then
     fi
 
     comparar_con_anterior "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES" || BIEN=0
-    { [ -f "$HISTORIAL" ] || printf '#fecha\tarchivo\ttablas\tregistros\tpacientes\tprestaciones\n' > "$HISTORIAL"
-      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d_%H%M')" "$FECHA" \
-             "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES"; } >> "$HISTORIAL"
+    # El encabezado se escribe FUERA del bloque que añade. Antes iban
+    # juntos: el bloque abría el historial para AÑADIR y por dentro había
+    # un «>» que lo VACÍA. Hoy funciona porque el vaciado solo ocurre la
+    # primera vez, con el archivo aún vacío — pero es leer y escribir el
+    # mismo archivo a la vez, y basta un cambio pequeño para que se lleve
+    # por delante el historial entero.
+    #
+    # Y ese archivo importa: guarda con cuántos pacientes venía cada
+    # respaldo. Es lo que permite decir «esta copia trae menos que la
+    # anterior». Sin él, la comprobación se queda ciega.
+    [ -f "$HISTORIAL" ] \
+      || printf '#fecha\tarchivo\ttablas\tregistros\tpacientes\tprestaciones\n' > "$HISTORIAL"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d_%H%M')" "$FECHA" \
+           "$N_TABLAS" "$N_REG" "$N_PAC" "$N_PRES" >> "$HISTORIAL"
   else
     mal "el archivo no se pudo abrir como base de datos"
     BIEN=0
