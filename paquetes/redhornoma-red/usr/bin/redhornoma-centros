@@ -77,8 +77,27 @@ mirar(){
   local destino="$1" ip="${1#*@}"
   local t0 t1 ms
   t0=$(date +%s%N)
-  if ! timeout 6 ping -c1 -W4 "$ip" >/dev/null 2>&1; then
-    echo "dormido|—|—"; return
+
+  # 🔴 UN SOLO PING NO BASTA, y el 13/08 dio un «dormido» falso sobre una
+  # máquina que llevaba 53 minutos encendida.
+  #
+  # El enlace entre centros no está levantado hasta que alguien lo usa:
+  # el primer paquete se pierde mientras las dos puntas se encuentran, y
+  # más aún si tienen que pasar por el relé. Declarar «apagado» con ese
+  # primer fallo es exactamente el verde falso al revés.
+  #
+  # Se insiste, y por el camino del propio enlace, que es quien sabe
+  # despertarlo.
+  vivo(){
+    timeout 5 ping -c1 -W3 "$ip" >/dev/null 2>&1 && return 0
+    case "$ip" in
+      100.*) command -v tailscale >/dev/null 2>&1 \
+             && timeout 12 tailscale ping --timeout 4s -c 2 "$ip" >/dev/null 2>&1 && return 0 ;;
+    esac
+    timeout 6 ping -c2 -W3 "$ip" >/dev/null 2>&1
+  }
+  if ! vivo; then
+    echo "no contesta|—|—"; return
   fi
   t1=$(date +%s%N); ms=$(( (t1 - t0) / 1000000 ))
 
@@ -109,9 +128,10 @@ if [ "$MODO" = "entrar" ]; then
   # queda esperando sin decir nada y parece que la orden no hizo efecto.
   E=$(mirar "$D"); EST="${E%%|*}"
   if [ "$EST" != "despierto" ]; then
-    printf "   ${RO}✗${V} %s está %s — no se puede entrar.\n" "$CUAL" "$EST"
-    printf "      Una máquina apagada no tiene red: no hay forma de encenderla\n"
-    printf "      desde aquí. Volverá sola a su hora, o hay que encenderla allá.\n\n"
+    printf "   ${RO}✗${V} %s NO CONTESTA — no se puede entrar.\n" "$CUAL"
+    printf "      Puede estar apagada, o encendida pero sin internet: desde\n"
+    printf "      aquí las dos cosas se ven igual. Lo que sí es seguro es que\n"
+    printf "      no se puede encender desde fuera.\n\n"
     exit 1
   fi
   entrar "$D" "$CUAL"; exit $?
@@ -136,7 +156,7 @@ if [ "$MODO" = "texto" ] || ! command -v yad >/dev/null 2>&1 || [ -z "${DISPLAY:
   printf '%s' "$FILAS" | while IFS='|' read -r N D E W T; do
     case "$E" in
       despierto) C="${VE}●${V}" ;;
-      dormido)   C="${GR}○${V}" ;;
+      "no contesta") C="${GR}○${V}" ;;
       *)         C="${AM}?${V}" ;;
     esac
     printf "   %b %-14s %-12s %-18s %s\n" "$C" "$N" "$E" "$W" "$T"
@@ -152,7 +172,7 @@ while IFS='|' read -r N D E W T; do
   [ -n "$N" ] || continue
   case "$E" in
     despierto) ICO="🟢"; DET="listo para entrar" ;;
-    dormido)   ICO="⚪"; DET="apagado — no se puede entrar" ;;
+    "no contesta") ICO="⚪"; DET="no contesta — apagada o sin internet" ;;
     *)         ICO="🟡"; DET="responde, pero no deja entrar" ;;
   esac
   [ "$W" = "ninguno" ] && [ "$E" = "despierto" ] && DET="encendido, pero su Windows está apagado"
@@ -174,7 +194,7 @@ case "$CODIGO" in
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      if [ "$EST" != "despierto" ]; then
        yad --error --center --width=420 --title="No se puede entrar" \
-         --text="<b>$NOM está apagado.</b>\n\nUna máquina apagada no tiene red: no hay forma de encenderla desde aquí.\n\nVolverá sola a su hora, o hay que encenderla allá." \
+         --text="<b>$NOM no contesta.</b>\n\nPuede estar apagada, o encendida pero sin internet: desde aquí las dos cosas se ven igual.\n\nLo que sí es seguro: no se puede encender desde fuera." \
          --button="Entendido:0" 2>/dev/null
        exit 1
      fi
