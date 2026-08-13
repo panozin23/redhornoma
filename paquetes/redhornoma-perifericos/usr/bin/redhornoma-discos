@@ -42,6 +42,7 @@
 #   sudo redhornoma-discos --abrir --forzar   además, limpiar la marca de
 #                                             «en uso» que dejó Windows
 #   sudo redhornoma-discos --soltar      soltarlos para desenchufar
+#   sudo redhornoma-discos --siempre     que se abran SOLOS de aquí en adelante
 set -u
 
 CONF_SMB=/etc/samba/smb.conf
@@ -63,6 +64,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --abrir)  ACCION=abrir; shift ;;
     --soltar) ACCION=soltar; shift ;;
+    --siempre) ACCION=siempre; shift ;;
     --forzar) FORZAR=si; shift ;;
     -h|--ayuda) sed -n '2,45p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "No entiendo «$1»"; exit 1 ;;
@@ -91,6 +93,78 @@ discos_externos(){
 # El guion enseñaba el disco y ninguna partición, como si estuviera vacío.
 # «-r» ya da la lista plana; «-l» sobra.
 particiones(){ lsblk -nro NAME,FSTYPE "/dev/$1" 2>/dev/null | awk '$2!=""&&$2!="swap"{print $1"|"$2}'; }
+
+# ══ QUE SE ABRAN SOLOS, PARA SIEMPRE ══════════════════════════════════
+#
+# Sin esto hay que ejecutar «--abrir» a mano cada vez: al reiniciar el
+# servidor, y cada vez que se enchufa un disco. Un centro de salud no
+# puede depender de que alguien se acuerde de escribir un comando.
+#
+# Se resuelve con dos piezas:
+#   · una regla que avisa cuando aparece un disco por USB
+#   · un servicio que entonces ejecuta «--abrir»
+#
+# Vale para las dos situaciones —arrancar con el disco puesto, y
+# enchufarlo después— sin tocar el /etc/fstab, que solo se lee al
+# arrancar y por eso no cubre la segunda.
+if [ "$ACCION" = "siempre" ]; then
+  [ "$(id -u)" = "0" ] || { echo; mal "hace falta sudo"; exit 1; }
+  titulo "QUE LOS DISCOS SE ABRAN SOLOS"
+
+  cat > /etc/systemd/system/redhornoma-discos.service <<'FIN'
+[Unit]
+Description=Abrir los discos externos y dárselos al Windows
+# Después de Samba y de la virtualización: hacen falta las dos para
+# publicar el disco y poner el icono dentro de Windows.
+After=smbd.service libvirtd.service
+Wants=smbd.service
+
+[Service]
+Type=oneshot
+# Un respiro: al enchufar un disco, el sistema tarda un momento en
+# reconocer sus particiones. Sin esta espera se intenta abrir lo que
+# todavía no está.
+ExecStartPre=/bin/sleep 6
+ExecStart=/usr/bin/redhornoma-discos --abrir
+# Que no estorbe nunca: si no hay ningún disco, termina y ya está.
+SuccessExitStatus=0 1
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+FIN
+
+  cat > /etc/udev/rules.d/99-redhornoma-discos.rules <<'FIN'
+# Cuando aparece una partición en un disco por USB, abrirla y dársela al
+# Windows. Puesto por «redhornoma-discos --siempre».
+#
+# El disco del sistema no entra aquí: va por SATA o NVMe, no por USB. Y
+# aunque entrara, la propia herramienta descarta el que tenga «/» montado.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{DEVTYPE}=="partition", \
+  TAG+="systemd", ENV{SYSTEMD_WANTS}="redhornoma-discos.service"
+FIN
+
+  systemctl daemon-reload
+  udevadm control --reload-rules 2>/dev/null
+
+  printf "\n   ${AZ}Comprobando que quedó puesto${V}\n"
+  if systemctl enable redhornoma-discos.service >/dev/null 2>&1; then
+    ok "al arrancar el equipo, se abrirán solos"
+  else mal "no se pudo programar para el arranque"; fi
+  if [ -f /etc/udev/rules.d/99-redhornoma-discos.rules ]; then
+    ok "al enchufar un disco, se abrirá solo"
+  else mal "no quedó la regla de los discos"; fi
+  # Que systemd entienda el servicio, no solo que el archivo exista.
+  if systemd-analyze verify /etc/systemd/system/redhornoma-discos.service >/dev/null 2>&1; then
+    ok "el servicio es correcto"
+  else avi "systemd puso alguna pega al servicio:"
+       systemd-analyze verify /etc/systemd/system/redhornoma-discos.service 2>&1 | head -3 | sed 's/^/      /'; fi
+
+  printf "\n   ${GR}Los discos que ya estén enchufados se abren ahora:${V}\n\n"
+  # La ruta entera: si se lanza como «bash redhornoma-discos», «$0» no está
+  # en el camino de búsqueda y el exec falla justo al final.
+  exec "$(readlink -f "$0")" --abrir
+fi
 
 titulo "LOS DISCOS EXTERNOS"
 
@@ -172,10 +246,31 @@ for d in $DISCOS; do
       *)     ERR=$(mount -o rw "/dev/$N" "$PUNTO" 2>&1) ;;
     esac
 
+    # 🔴 Si no se deja ESCRIBIR, se intenta LEER antes de rendirse.
+    #
+    # El 13/08/2026 esta herramienta se rindió con un disco que no montaba
+    # para escritura, y no probó a leerlo. La diferencia entre «no puedo
+    # usarlo» y «puedo salvar lo que hay dentro» es exactamente esa, y con
+    # un disco tocado es la diferencia que importa.
+    if ! findmnt -nro TARGET "$PUNTO" >/dev/null 2>&1; then
+      case "$F" in
+        ntfs*) mount -t ntfs3 -o "ro,uid=$U,gid=$G" "/dev/$N" "$PUNTO" 2>/dev/null \
+               || mount -t ntfs-3g -o "ro,uid=$U,gid=$G" "/dev/$N" "$PUNTO" 2>/dev/null ;;
+        *)     mount -o ro "/dev/$N" "$PUNTO" 2>/dev/null ;;
+      esac
+      if findmnt -nro TARGET "$PUNTO" >/dev/null 2>&1; then
+        avi "$ETQ se abrió SOLO PARA LEER en $PUNTO"
+        nota "no deja escribir, pero lo que hay dentro se puede copiar"
+        nota "para dejarlo escribible: pásale «chkdsk /f» en Windows"
+        ABIERTAS="$ABIERTAS$SEG|$PUNTO"$'\n'
+        continue
+      fi
+    fi
+
     if findmnt -nro TARGET "$PUNTO" >/dev/null 2>&1; then
       ok "$ETQ abierta en $PUNTO"; ABIERTAS="$ABIERTAS$SEG|$PUNTO"$'\n'
     else
-      mal "$ETQ no se dejó abrir"
+      mal "$ETQ no se dejó abrir ni siquiera para leer"
       [ -n "$ERR" ] && printf '%s\n' "$ERR" | head -2 | sed 's/^/         /'
       case "$ERR" in
         *[Dd]irty*|*unclean*|*hibernat*|*"was not shut down"*|*"Metadata kept"*)
@@ -239,7 +334,14 @@ awk -v a="$MARCA_INI" -v b="$MARCA_FIN" '
   printf '%s\n' "$MARCA_FIN"
 } >> /tmp/smb.nuevo
 
-if testparm -s /tmp/smb.nuevo >/dev/null 2>&1; then
+# Si no ha cambiado nada, NO se toca Samba. Esto corre en cada arranque y
+# cada vez que se enchufa un disco: reiniciar el servicio de carpetas
+# compartidas sin motivo cortaría a quien esté copiando algo en ese momento.
+if cmp -s /tmp/smb.nuevo "$CONF_SMB"; then
+  rm -f /tmp/smb.nuevo
+  ok "las carpetas ya estaban publicadas — no se toca Samba"
+  SIN_CAMBIOS=si
+elif testparm -s /tmp/smb.nuevo >/dev/null 2>&1; then
   cp -f /tmp/smb.nuevo "$CONF_SMB"; rm -f /tmp/smb.nuevo
   ok "configuración de Samba correcta"
 else
@@ -248,8 +350,10 @@ else
   rm -f /tmp/smb.nuevo; exit 1
 fi
 
-systemctl restart smbd 2>/dev/null; sleep 2
-systemctl is-active smbd >/dev/null 2>&1 || { mal "smbd no arrancó"; exit 1; }
+if [ "${SIN_CAMBIOS:-no}" != "si" ]; then
+  systemctl restart smbd 2>/dev/null; sleep 2
+fi
+systemctl is-active smbd >/dev/null 2>&1 || { mal "smbd no está en marcha"; exit 1; }
 ok "carpetas compartidas en marcha"
 
 # ── El icono dentro de Windows ────────────────────────────────────────
