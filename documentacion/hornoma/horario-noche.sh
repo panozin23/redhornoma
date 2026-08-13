@@ -44,6 +44,7 @@ while [ $# -gt 0 ]; do
     --instalar) ACCION=instalar; shift ;;
     --quitar)   ACCION=quitar; shift ;;
     --ver)      ACCION=ver; shift ;;
+    --solo-avisos) ACCION=avisos; shift ;;
     --encender) ENCENDER="${2:-}"; shift 2 ;;
     --apagar)   APAGAR="${2:-}"; shift 2 ;;
     --dias)     DIAS="${2:-}"; ACCION=${ACCION:-instalar}; shift 2 ;;
@@ -52,7 +53,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ "$(id -u)" = "0" ] || { echo "Hace falta administrador:  sudo bash $0 --instalar"; exit 1; }
+# Mirar no necesita permisos; cambiar sí. Pedir administrador para ver el
+# horario es un estorbo tonto: obliga a escribir la contraseña para leer.
+case "$ACCION" in
+  instalar|quitar|avisos)
+    # El nombre que se enseña tiene que ser el que la persona puede copiar:
+    # la acción interna se llama «avisos» pero la opción es «--solo-avisos».
+    OPCION="--$ACCION"; [ "$ACCION" = "avisos" ] && OPCION="--solo-avisos"
+    [ "$(id -u)" = "0" ] || { echo "Hace falta administrador:  sudo bash $0 $OPCION"; exit 1; } ;;
+esac
 
 # ── Las horas, comprobadas y en base 10 ───────────────────────────────
 # 🔴 Aquí hubo un fallo el 12/08/2026, y de los que no dan la cara.
@@ -124,7 +133,59 @@ if [ "$ACCION" = "quitar" ]; then
   exit 0
 fi
 
+# ── Los avisos a la nube, como función ────────────────────────────────
+# Se usan al instalar el horario, y también solos con «--solo-avisos»:
+# un equipo puede querer avisar sin apagarse nunca.
+poner_avisos(){
+  AVISO=/usr/local/sbin/redhornoma-aviso
+  if [ -f "$(dirname "$0")/redhornoma-aviso" ]; then
+    install -m 755 "$(dirname "$0")/redhornoma-aviso" "$AVISO" && ok "aviso a la nube instalado"
+  elif [ -x "$AVISO" ]; then
+    ok "el aviso a la nube ya estaba puesto"
+  else
+    avi "no encuentro «redhornoma-aviso» junto a este guion"
+    nota "sin él, la máquina se apagará sin dejar dicho si volverá"
+  fi
+
+  if [ -x "$AVISO" ]; then
+    cat > /etc/systemd/system/redhornoma-desperte.service <<'DESPFIN'
+[Unit]
+Description=Avisar a la nube de que este servidor ya despertó
+# Después de la red: sin ella no hay a quién avisar.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Un poco de margen: al arrancar, la red tarda en estar de verdad lista, y
+# el enlace entre centros tarda todavía un poco más en levantarse.
+ExecStartPre=/bin/sleep 45
+ExecStart=/usr/local/sbin/redhornoma-aviso --desperte
+# Que no estorbe nunca: si no hay internet, se calla y el equipo sigue.
+TimeoutStartSec=180
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+DESPFIN
+    systemctl enable redhornoma-desperte.service >/dev/null 2>&1 \
+      && ok "al encenderse avisará a la nube" \
+      || avi "no se pudo programar el aviso de encendido"
+  fi
+}
+
+# ══ SOLO LOS AVISOS ═══════════════════════════════════════════════════
+if [ "$ACCION" = "avisos" ]; then
+  titulo "AVISOS A LA NUBE"
+  nota "Sin tocar el horario: este equipo seguirá encendido como esté."
+  poner_avisos
+  systemctl daemon-reload
+  echo
+  exit 0
+fi
+
 [ "$ACCION" = "instalar" ] || { mal "dime qué hacer: --instalar, --quitar o --ver"; exit 1; }
+
 
 titulo "HORARIO DE NOCHE"
 
@@ -242,12 +303,44 @@ if command -v virsh >/dev/null 2>&1; then
   [ -n "$QUEDAN" ] && { anota "aviso: $QUEDAN no cerró a tiempo"; diga "Aviso: $QUEDAN tardó demasiado en cerrar."; }
 fi
 
+# 6 · Dejar dicho FUERA lo que va a pasar, antes de quedarse sin red.
+#
+# 🔴 El 13/08/2026 este servidor no despertó, y desde Cochabamba no se pudo
+# saber por qué: se apagó sin dejar rastro, y todo lo que sabíamos de él
+# pasaba por él mismo. Cuando calla, callan también sus síntomas.
+#
+# Con esto, aunque no vuelva, queda escrito en la nube qué prometió. Un
+# silencio deja de ser un misterio.
+#
+# Nunca puede impedir el apagado: si no hay internet, avisa y sigue.
+if command -v redhornoma-aviso >/dev/null 2>&1; then
+  diga "Dejando dicho en la nube que me apago…"
+  redhornoma-aviso --apagando \
+    --vuelve "$(date -d "@$CUANDO" '+%d/%m a las %H:%M')" \
+    --despertador si 2>/dev/null || true
+fi
+
 anota "apagando — volverá el $(date -d "@$CUANDO" '+%d/%m a las %H:%M')"
 diga "Apagando ahora. Hasta el $(date -d "@$CUANDO" '+%d/%m a las %H:%M')."
 sleep 2
 /sbin/poweroff
 GUIONFIN
 chmod 755 "$GUION"
+
+# ── El aviso a la nube, y el «ya desperté» ────────────────────────────
+#
+# 🔴 Nace del 13/08/2026: el servidor no volvió y desde el otro centro no
+# se pudo saber si el problema fue el despertador, la placa o el internet.
+# Todo lo que sabíamos de esa máquina pasaba por ella misma.
+#
+# Son dos mensajes, y juntos convierten un silencio en un diagnóstico:
+#
+#     al apagarse   «me voy, vuelvo a la 1:00, despertador comprobado»
+#     al encenderse «ya estoy aquí»
+#
+# Si aparece el primero y no el segundo, el problema es la placa o la
+# corriente. Si no aparece ninguno, se apagó por otro camino.
+poner_avisos
 ok "guion de apagado puesto en $GUION"
 
 # ── La unidad y su reloj ──────────────────────────────────────────────

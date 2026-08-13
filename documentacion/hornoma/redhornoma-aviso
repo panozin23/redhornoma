@@ -1,0 +1,141 @@
+#!/bin/bash
+# redhornoma-aviso — Que un centro diga desde lejos qué le está pasando,
+#                    aunque después se quede sin red.
+#
+# EL PORQUÉ — la mañana del 13/08/2026
+#
+# El servidor de Hornoma no despertó a la 1:00 como debía. Desde Cochabamba
+# se comprobó por cuatro caminos distintos que estaba apagado, y aun así
+# NO SE PUDO SABER POR QUÉ. Las tres causas posibles se ven exactamente
+# iguales desde fuera:
+#
+#     · se apagó sin armar el despertador
+#     · lo armó y la placa lo ignoró
+#     · despertó y no consiguió salir a internet
+#
+# Y la razón de fondo: **todo lo que sabíamos de ese centro pasaba por esa
+# misma máquina**. Cuando ella calla, callan también sus síntomas.
+#
+# Esto lo arregla dejando la última palabra ESCRITA FUERA, en la nube,
+# antes de apagarse. Así, aunque no vuelva, queda dicho qué prometió:
+#
+#     me apago el 12/08 a las 05:20
+#     despertador puesto para el 13/08 a la 01:00 — comprobado en la placa
+#
+# Con eso, un silencio deja de ser un misterio: si prometió volver y no
+# volvió, el problema es la placa o la corriente. Si ni siquiera prometió,
+# es que se apagó por otro camino.
+#
+# Es el objetivo 9 —que un centro se sepa explicar solo— reducido a su
+# mínima expresión: dos líneas escritas a tiempo.
+#
+# Uso:
+#   redhornoma-aviso --apagando --vuelve "13/08 a las 01:00" --despertador si
+#   redhornoma-aviso --desperte
+#   redhornoma-aviso --ver              qué dice la última señal de este equipo
+#
+# NUNCA falla de forma que estorbe: si no hay internet, lo anota y calla.
+# Un aviso que impidiera apagar sería peor que no tener aviso.
+set -u
+
+CONF_CENTRO=/etc/redhornoma/centro.conf
+CONF_RESP=/var/lib/redhornoma/respaldo.conf
+REG=/var/lib/redhornoma/avisos.log
+
+QUE=""; VUELVE=""; DESPERTADOR=""; VER=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --apagando)    QUE=apagando; shift ;;
+    --desperte)    QUE=desperte; shift ;;
+    --vuelve)      VUELVE="${2:-}"; shift 2 ;;
+    --despertador) DESPERTADOR="${2:-}"; shift 2 ;;
+    --ver)         VER=1; shift ;;
+    *) echo "No entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+leer(){ [ -f "$2" ] && grep -oP "^$1=\K.*" "$2" 2>/dev/null | head -1; }
+
+CENTRO=$(leer centro "$CONF_CENTRO"); CENTRO="${CENTRO:-sin-centro}"
+NOMBRE=$(leer nombre "$CONF_CENTRO"); NOMBRE="${NOMBRE:-$(cat /proc/sys/kernel/hostname)}"
+NUBE=$(leer nube "$CONF_RESP")
+
+# El permiso de la nube lo guarda rclone en la carpeta de quien lo
+# configuró. Esto corre como administrador, que no tiene esa carpeta:
+# hay que decirle dónde mirar. Mismo criterio que redhornoma-respaldo.
+if [ -z "${RCLONE_CONFIG:-}" ]; then
+  RC=$(leer nube_permiso "$CONF_RESP")
+  [ -z "$RC" ] && for p in /etc/redhornoma/rclone.conf \
+                           "/home/${SUDO_USER:-nadie}/.config/rclone/rclone.conf" \
+                           "$HOME/.config/rclone/rclone.conf" \
+                           /root/.config/rclone/rclone.conf; do
+    [ -r "$p" ] && RC="$p" && break
+  done
+  [ -n "$RC" ] && export RCLONE_CONFIG="$RC"
+fi
+
+REMOTO="${NUBE%%:*}"; REMOTO="${REMOTO:-drive}"
+SENALERO="$REMOTO:SENALES-REDHORNOMA"
+ARCHIVO="${CENTRO}--${NOMBRE}--estado.txt"
+
+# El registro es un extra: si no se puede escribir —porque esto lo lanzó
+# alguien sin permiso— no se dice nada y se sigue. Lo que importa es que el
+# aviso salga, no que quede apuntado aquí.
+anota(){ mkdir -p "$(dirname "$REG")" 2>/dev/null
+         # El «2>/dev/null» va ANTES del «>>» a propósito: las redirecciones
+         # se aplican de izquierda a derecha, y si se pone después, el error
+         # de no poder abrir el archivo ya se ha impreso.
+         printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" 2>/dev/null >> "$REG" || true; }
+
+# ── Ver la última señal ───────────────────────────────────────────────
+if [ "$VER" = "1" ]; then
+  command -v rclone >/dev/null 2>&1 || { echo "falta rclone"; exit 1; }
+  timeout 60 rclone cat "$SENALERO/$ARCHIVO" 2>&1
+  exit $?
+fi
+
+[ -n "$QUE" ] || { echo "Di qué pasa: --apagando o --desperte"; exit 1; }
+
+# ── Escribir el aviso ─────────────────────────────────────────────────
+TMP=$(mktemp)
+{
+  printf 'centro=%s\n'   "$CENTRO"
+  printf 'maquina=%s\n'  "$NOMBRE"
+  printf 'que=%s\n'      "$QUE"
+  printf 'fecha=%s\n'    "$(date '+%Y-%m-%d %H:%M:%S %z')"
+  printf 'segundos=%s\n' "$(date +%s)"
+  case "$QUE" in
+    apagando)
+      printf 'vuelve=%s\n'      "${VUELVE:-no dijo}"
+      printf 'despertador=%s\n' "${DESPERTADOR:-sin comprobar}"
+      # El texto de abajo es para una PERSONA que abra el archivo desde el
+      # teléfono. Nadie debería tener que descifrar campos para saber si su
+      # servidor va a volver.
+      if [ "$DESPERTADOR" = "si" ]; then
+        printf '\nSe apagó con orden, y dejó el despertador puesto y COMPROBADO.\n'
+        printf 'Si no vuelve a la hora dicha, el problema es de la placa o de\n'
+        printf 'la corriente, no del programa.\n'
+      else
+        printf '\n⚠️  Se apagó SIN despertador comprobado. NO va a volver sola.\n'
+        printf 'Hará falta encenderla a mano, o con el enchufe inteligente.\n'
+      fi ;;
+    desperte)
+      printf '\nDespertó sola y está en marcha. Se puede entrar.\n' ;;
+  esac
+} > "$TMP"
+
+if ! command -v rclone >/dev/null 2>&1; then
+  anota "no se pudo avisar ($QUE): falta rclone"; rm -f "$TMP"; exit 0
+fi
+
+# Poco tiempo de espera y a otra cosa: esto corre justo antes de apagar,
+# y un internet rural que no contesta no puede dejar la máquina colgada.
+if timeout 90 rclone copyto "$TMP" "$SENALERO/$ARCHIVO" --retries 2 >/dev/null 2>&1; then
+  anota "aviso dejado en la nube: $QUE${VUELVE:+ (vuelve $VUELVE)}"
+  printf '   ✅ aviso dejado en la nube: %s\n' "$SENALERO/$ARCHIVO"
+else
+  anota "NO se pudo dejar el aviso ($QUE) — sin internet o sin permiso"
+  printf '   ⚠️  no se pudo dejar el aviso en la nube (sin internet o sin permiso)\n'
+fi
+rm -f "$TMP"
+exit 0
