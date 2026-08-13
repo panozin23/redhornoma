@@ -213,6 +213,31 @@ if [ "$ACCION" = "probar" ]; then
   printf "   Escribe APAGAR para empezar la prueba: "
   read -r R
   [ "$R" = "APAGAR" ] || { echo 0 > "$ALARMA"; nota "cancelado — despertador desarmado"; exit 0; }
+
+  # 🔴 El Windows de dentro se cierra CON ORDEN, igual que en el apagado de
+  # cada noche. La primera versión de esta prueba llamaba a poweroff
+  # directamente: eso es un apagón para la máquina virtual, y las bases de
+  # SALMI y SOAPS se corrompen así. Una prueba no puede costar los datos
+  # de un centro.
+  if command -v virsh >/dev/null 2>&1; then
+    for vm in $(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
+      printf "   Cerrando el Windows «%s» con orden…\n" "$vm"
+      LC_ALL=C virsh -c qemu:///system shutdown "$vm" >/dev/null 2>&1
+    done
+    for _ in $(seq 1 24); do
+      [ -z "$(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$')" ] && break
+      sleep 5
+    done
+    QUEDAN=$(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$')
+    if [ -n "$QUEDAN" ]; then
+      echo 0 > "$ALARMA"
+      mal "«$QUEDAN» no se cerró en dos minutos — NO se apaga"
+      nota "ciérralo desde dentro y vuelve a intentarlo. El despertador queda desarmado."
+      exit 1
+    fi
+    ok "el Windows quedó cerrado con orden"
+  fi
+
   sleep 2
   /sbin/poweroff
   exit 0
