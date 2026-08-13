@@ -54,8 +54,30 @@ SENALERO="${NUBE_POR_DEFECTO%%:*}:SENALES-REDHORNOMA"
 
 # ── Traerlas ─────────────────────────────────────────────────────────
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-if ! rclone copy "$SENALERO" "$TMP" --retries 2 >/dev/null 2>&1; then
+
+# 🔴 Antes esto decía siempre «no se pudo leer la nube — comprueba la
+# conexión», y el 13/08 mandó a buscar una avería de internet cuando el
+# internet estaba perfecto: lo que faltaba era el PERMISO de Drive, que
+# guarda el administrador. Son dos cosas muy distintas y hay que
+# separarlas antes de hablar.
+if [ -z "${RCLONE_CONFIG:-}" ]; then
+  for _p in /etc/redhornoma/rclone.conf \
+            "/home/${SUDO_USER:-nadie}/.config/rclone/rclone.conf" \
+            "$HOME/.config/rclone/rclone.conf" \
+            /root/.config/rclone/rclone.conf; do
+    [ -r "$_p" ] && { export RCLONE_CONFIG="$_p"; break; }
+  done
+fi
+if [ -z "${RCLONE_CONFIG:-}" ]; then
+  mal "esta cuenta no tiene permiso para leer la nube"
+  nota "El permiso lo guarda el administrador. Prueba con sudo, o desde tu portátil."
+  exit 1
+fi
+
+SALIDA=$(rclone copy "$SENALERO" "$TMP" --retries 2 2>&1)
+if [ $? -ne 0 ]; then
   mal "no se pudo leer la nube"
+  printf '%s\n' "$SALIDA" | grep -v NOTICE | head -2 | sed 's/^/      /'
   nota "Comprueba la conexión, o prueba:  rclone lsd ${NUBE_POR_DEFECTO%%:*}:"
   exit 1
 fi
