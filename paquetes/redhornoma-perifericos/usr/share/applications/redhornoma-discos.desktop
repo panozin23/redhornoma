@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Abrir los discos externos
+GenericName=Discos externos en Linux y en Windows
+Comment=Abrir un disco externo y que lo vea también el Windows del servidor
+Exec=pkexec redhornoma-discos --abrir
+Icon=drive-removable-media
+Terminal=true
+Categories=System;
+Keywords=disco;externo;usb;pendrive;toshiba;samsung;respaldo;windows;abrir;montar;
+StartupNotify=true

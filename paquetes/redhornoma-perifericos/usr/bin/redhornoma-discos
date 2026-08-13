@@ -1,0 +1,304 @@
+#!/bin/bash
+# redhornoma-discos — Los discos externos, abiertos en Linux Y dentro de
+#                     su Windows.
+#
+# EL PORQUÉ
+#
+# Un centro mueve información con discos externos: los respaldos que se
+# guardan, los instaladores que llegan, lo que se lleva al SEDES. Y el
+# Windows de dentro no ve un disco que se enchufa al Linux de fuera: son
+# dos mundos distintos.
+#
+# Hasta el 13/08/2026 esto se hacía con guiones escritos para UN disco
+# concreto de UN centro. Aquí no hay ningún modelo escrito dentro: se
+# busca lo que haya.
+#
+# LAS TRAMPAS QUE YA COSTARON UNA NOCHE, Y CÓMO SE EVITAN
+#
+#   · Buscar el disco por su letra. «sdb» hoy puede ser «sdc» mañana según
+#     el orden en que se enchufen las cosas. Se busca por lo que ES:
+#     extraíble o por USB.
+#
+#   · El /etc/fstab solo se lee AL ARRANCAR. Un disco enchufado después no
+#     lo monta nadie, y parece que el disco está roto. Aquí se monta en el
+#     momento.
+#
+#   · «nofail» en el fstab no es un adorno: sin él, arrancar con el disco
+#     desenchufado deja la máquina parada pidiendo auxilio, en un centro
+#     donde no hay quien la atienda.
+#
+#   · Windows deja el disco marcado como EN USO cuando lo apagan con el
+#     «inicio rápido». Linux se niega a escribir en él, y hace bien:
+#     forzarlo es la forma más típica de perder archivos. Se detecta y se
+#     dice, y limpiarlo va en un comando aparte.
+#
+#   · Windows 10 y 11 BLOQUEAN de fábrica entrar a carpetas de red sin
+#     contraseña. Samba las sirve bien y Windows se niega sin explicar
+#     nada. Se abre solo para su propia máquina virtual.
+#
+# Uso:
+#   redhornoma-discos              qué discos hay y cómo están
+#   sudo redhornoma-discos --abrir       montarlos y dárselos a Windows
+#   sudo redhornoma-discos --abrir --forzar   además, limpiar la marca de
+#                                             «en uso» que dejó Windows
+#   sudo redhornoma-discos --soltar      soltarlos para desenchufar
+set -u
+
+CONF_SMB=/etc/samba/smb.conf
+MARCA_INI='# >>> RedHornoma discos externos'
+MARCA_FIN='# <<< RedHornoma discos externos'
+MARCA="$(date '+%Y%m%d-%H%M')"
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "   ${GR}%s${V}\n" "$1"; }
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+          printf "${AZ} %s${V}\n" "$1"
+          printf "${AZ}══════════════════════════════════════════════════════${V}\n"; }
+
+ACCION=mirar; FORZAR=no
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --abrir)  ACCION=abrir; shift ;;
+    --soltar) ACCION=soltar; shift ;;
+    --forzar) FORZAR=si; shift ;;
+    -h|--ayuda) sed -n '2,45p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) echo "No entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+USUARIO="${SUDO_USER:-$(getent passwd 1000 2>/dev/null | cut -d: -f1)}"
+USUARIO="${USUARIO:-$(id -un)}"
+BASE="/media/$USUARIO"
+
+# ── Qué discos hay ────────────────────────────────────────────────────
+# Se busca por lo que el disco ES, no por su letra: extraíble, o conectado
+# por USB y sin el sistema dentro. El disco del sistema NUNCA aparece.
+discos_externos(){
+  lsblk -dnro NAME,TRAN,RM,TYPE 2>/dev/null | while read -r n tran rm tipo; do
+    [ "$tipo" = "disk" ] || continue
+    [ "$rm" = "1" ] || [ "$tran" = "usb" ] || continue
+    # Y el que tenga montado «/» queda fuera, pase lo que pase.
+    lsblk -nro MOUNTPOINT "/dev/$n" 2>/dev/null | grep -qx '/' && continue
+    echo "$n"
+  done
+}
+
+# 🔴 Aquí ponía «lsblk -lnro», y «-l» y «-r» NO se pueden usar juntos:
+# lsblk contesta «argumentos mutuamente excluyentes» y no devuelve NADA.
+# El guion enseñaba el disco y ninguna partición, como si estuviera vacío.
+# «-r» ya da la lista plana; «-l» sobra.
+particiones(){ lsblk -nro NAME,FSTYPE "/dev/$1" 2>/dev/null | awk '$2!=""&&$2!="swap"{print $1"|"$2}'; }
+
+titulo "LOS DISCOS EXTERNOS"
+
+DISCOS=$(discos_externos)
+if [ -z "$DISCOS" ]; then
+  nota "no hay ningún disco externo enchufado"
+  echo
+  nota "Enchufa uno y vuelve a ejecutarlo. El del sistema no se toca nunca."
+  echo
+  exit 0
+fi
+
+for d in $DISCOS; do
+  MOD=$(lsblk -dno MODEL "/dev/$d" 2>/dev/null | sed 's/  */ /g;s/ *$//')
+  TAM=$(lsblk -dno SIZE "/dev/$d" 2>/dev/null)
+  printf "\n   ${AZ}%s${V}  %s  ${GR}%s${V}\n" "/dev/$d" "$TAM" "${MOD:-sin modelo}"
+  for p in $(particiones "$d"); do
+    N="${p%%|*}"; F="${p##*|}"
+    ETQ=$(lsblk -dno LABEL "/dev/$N" 2>/dev/null); ETQ="${ETQ:-$N}"
+    PUNTO=$(findmnt -nro TARGET "/dev/$N" 2>/dev/null | head -1)
+    if [ -n "$PUNTO" ]; then
+      printf "      %-14s %-8s ${VE}abierta${V} en %s\n" "$ETQ" "$F" "$PUNTO"
+    else
+      printf "      %-14s %-8s ${GR}cerrada${V}\n" "$ETQ" "$F"
+    fi
+  done
+done
+
+# ── Soltar ────────────────────────────────────────────────────────────
+if [ "$ACCION" = "soltar" ]; then
+  [ "$(id -u)" = "0" ] || { echo; mal "hace falta sudo"; exit 1; }
+  printf "\n   ${AZ}Soltando${V}\n"
+  for d in $DISCOS; do
+    for p in $(particiones "$d"); do
+      N="${p%%|*}"
+      PUNTO=$(findmnt -nro TARGET "/dev/$N" 2>/dev/null | head -1)
+      [ -n "$PUNTO" ] || continue
+      if umount "/dev/$N" 2>/dev/null; then ok "$N soltada"
+      else mal "$N no se deja soltar — alguien la está usando"
+           fuser -vm "$PUNTO" 2>&1 | head -4 | sed 's/^/      /'; fi
+    done
+  done
+  echo; nota "Ya se pueden desenchufar."
+  echo
+  exit 0
+fi
+
+if [ "$ACCION" = "mirar" ]; then
+  printf "\n   ${GR}Para abrirlos y que los vea también el Windows:${V}\n"
+  printf "   ${AZ}   sudo redhornoma-discos --abrir${V}\n\n"
+  exit 0
+fi
+
+# ══ ABRIR ═════════════════════════════════════════════════════════════
+[ "$(id -u)" = "0" ] || { echo; mal "hace falta sudo"; exit 1; }
+
+printf "\n   ${AZ}Abriéndolos en Linux${V}\n"
+ABIERTAS=""; SUCIOS=0
+for d in $DISCOS; do
+  for p in $(particiones "$d"); do
+    N="${p%%|*}"; F="${p##*|}"
+    ETQ=$(lsblk -dno LABEL "/dev/$N" 2>/dev/null); ETQ="${ETQ:-$N}"
+    # Un nombre con espacios o barras rompe la ruta y el recurso de red.
+    SEG=$(printf '%s' "$ETQ" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-24)
+    PUNTO="$BASE/$SEG"
+
+    YA=$(findmnt -nro TARGET "/dev/$N" 2>/dev/null | head -1)
+    if [ -n "$YA" ]; then
+      ok "$ETQ ya estaba abierta en $YA"; ABIERTAS="$ABIERTAS$SEG|$YA"$'\n'; continue
+    fi
+
+    mkdir -p "$PUNTO"
+    U=$(id -u "$USUARIO"); G=$(id -g "$USUARIO")
+    ERR=""
+    case "$F" in
+      ntfs*) mount -t ntfs3 -o "rw,uid=$U,gid=$G,windows_names" "/dev/$N" "$PUNTO" 2>/dev/null \
+             || ERR=$(mount -t ntfs-3g -o "rw,uid=$U,gid=$G" "/dev/$N" "$PUNTO" 2>&1) ;;
+      exfat|vfat) ERR=$(mount -o "rw,uid=$U,gid=$G" "/dev/$N" "$PUNTO" 2>&1) ;;
+      *)     ERR=$(mount -o rw "/dev/$N" "$PUNTO" 2>&1) ;;
+    esac
+
+    if findmnt -nro TARGET "$PUNTO" >/dev/null 2>&1; then
+      ok "$ETQ abierta en $PUNTO"; ABIERTAS="$ABIERTAS$SEG|$PUNTO"$'\n'
+    else
+      mal "$ETQ no se dejó abrir"
+      [ -n "$ERR" ] && printf '%s\n' "$ERR" | head -2 | sed 's/^/         /'
+      case "$ERR" in
+        *[Dd]irty*|*unclean*|*hibernat*|*"was not shut down"*|*"Metadata kept"*)
+          SUCIOS=1
+          avi "viene marcada como EN USO por Windows" ;;
+      esac
+      # Limpiar la marca solo si se ha pedido: eso ESCRIBE en el disco.
+      if [ "$FORZAR" = "si" ] && command -v ntfsfix >/dev/null 2>&1; then
+        printf "   %-30s " "limpiando la marca"
+        ntfsfix -d "/dev/$N" >/dev/null 2>&1
+        if mount -t ntfs3 -o "rw,uid=$U,gid=$G,windows_names" "/dev/$N" "$PUNTO" 2>/dev/null \
+           || mount -t ntfs-3g -o "rw,uid=$U,gid=$G" "/dev/$N" "$PUNTO" 2>/dev/null; then
+          printf "${VE}abierta${V}\n"; ABIERTAS="$ABIERTAS$SEG|$PUNTO"$'\n'
+        else printf "${RO}sigue sin abrirse${V}\n"; fi
+      fi
+      rmdir "$PUNTO" 2>/dev/null
+    fi
+  done
+done
+
+if [ -z "$ABIERTAS" ]; then
+  echo
+  [ "$SUCIOS" = "1" ] && [ "$FORZAR" = "no" ] && {
+    printf "   ${AM}Windows dejó el disco marcado como EN USO.${V}\n"
+    printf "   No está roto: es el «inicio rápido», que al apagar no cierra del\n"
+    printf "   todo. Linux se niega a escribir para no estropear lo que haya.\n\n"
+    printf "   Se limpia con:  ${AZ}sudo redhornoma-discos --abrir --forzar${V}\n"
+    printf "   ${GR}Eso escribe en el disco: solo quita la marca, no toca archivos.${V}\n\n"; exit 1; }
+  mal "no se pudo abrir ninguna partición"
+  echo; exit 1
+fi
+
+# ── Dárselos a su Windows ─────────────────────────────────────────────
+# Solo a su propia máquina virtual: la red interna de libvirt. Ninguna
+# computadora del centro llega ahí, ni estando en la misma red.
+printf "\n   ${AZ}Dándoselos a su Windows${V}\n"
+IP_PUERTA=$(ip -4 addr show virbr0 2>/dev/null | grep -oP 'inet \K[\d.]+')
+if [ -z "$IP_PUERTA" ]; then
+  avi "este equipo no tiene máquinas virtuales — los discos quedan solo en Linux"
+  echo; exit 0
+fi
+RED_INT="${IP_PUERTA%.*}."
+
+cp -f "$CONF_SMB" "$CONF_SMB.antes-de-discos-$MARCA" 2>/dev/null && ok "copia de smb.conf guardada"
+# Se borra por marcas, no contando líneas: contar es frágil y ya nos costó
+# un fstab con entradas duplicadas.
+awk -v a="$MARCA_INI" -v b="$MARCA_FIN" '
+  $0==a {d=1; next} $0==b {d=0; next} !d {print}' "$CONF_SMB" > /tmp/smb.nuevo
+{
+  printf '%s\n' "$MARCA_INI"
+  printf '# Puesto por redhornoma-discos. NO editar entre las marcas.\n'
+  while IFS='|' read -r nom pto; do
+    [ -n "$nom" ] || continue
+    printf '\n[%s]\n' "$nom"
+    printf '   comment = Disco externo %s\n' "$nom"
+    printf '   path = %s\n' "$pto"
+    printf '   browseable = yes\n   read only = no\n   guest ok = yes\n'
+    printf '   force user = %s\n' "$USUARIO"
+    printf '   hosts allow = %s 127.\n   hosts deny = 0.0.0.0/0\n' "$RED_INT"
+  done <<< "$ABIERTAS"
+  printf '%s\n' "$MARCA_FIN"
+} >> /tmp/smb.nuevo
+
+if testparm -s /tmp/smb.nuevo >/dev/null 2>&1; then
+  cp -f /tmp/smb.nuevo "$CONF_SMB"; rm -f /tmp/smb.nuevo
+  ok "configuración de Samba correcta"
+else
+  mal "la configuración quedaría mal — no se toca nada"
+  testparm -s /tmp/smb.nuevo 2>&1 | head -3 | sed 's/^/      /'
+  rm -f /tmp/smb.nuevo; exit 1
+fi
+
+systemctl restart smbd 2>/dev/null; sleep 2
+systemctl is-active smbd >/dev/null 2>&1 || { mal "smbd no arrancó"; exit 1; }
+ok "carpetas compartidas en marcha"
+
+# ── El icono dentro de Windows ────────────────────────────────────────
+VM=$(LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v '^$' | head -1)
+if [ -z "$VM" ]; then
+  avi "su Windows está apagado — los iconos se pondrán la próxima vez"
+else
+  GUION=$(mktemp /tmp/rh-discos-XXXXXX.ps1); chmod 600 "$GUION"
+  { printf '$puerta = %s\n' "'$IP_PUERTA'"
+    printf '$discos = @(%s)\n' "$(while IFS='|' read -r n _; do [ -n "$n" ] && printf "'%s'," "$n"; done <<< "$ABIERTAS" | sed 's/,$//')"; } > "$GUION"
+  cat >> "$GUION" <<'PS'
+$ErrorActionPreference = 'Continue'
+# Windows 10/11 traen PROHIBIDO de fabrica entrar a carpetas de red sin
+# contrasena, y no lo explican: la carpeta simplemente no aparece.
+$k = 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters'
+New-ItemProperty -Path $k -Name AllowInsecureGuestAuth -Value 1 -PropertyType DWord -Force | Out-Null
+if ((Get-ItemProperty -Path $k -Name AllowInsecureGuestAuth -EA SilentlyContinue).AllowInsecureGuestAuth -eq 1) {
+  "OK  permitido entrar sin contrasena" } else { "MAL no se pudo permitir" }
+try { Restart-Service LanmanWorkstation -Force -EA Stop; Start-Sleep -Seconds 4; "OK  cliente de red reiniciado" }
+catch { "AVISO habra que reiniciar Windows para que lo tome" }
+
+# NO se mapean letras de unidad: el agente corre como SYSTEM y una unidad
+# suya no la ve ningun usuario. Van iconos, con la ruta entera.
+$esc = Join-Path $env:PUBLIC 'Desktop'
+$w = New-Object -ComObject WScript.Shell
+foreach ($d in $discos) {
+  try {
+    $s = $w.CreateShortcut((Join-Path $esc ("Disco " + $d + ".lnk")))
+    $s.TargetPath = '\\' + $puerta + '\' + $d
+    $s.Description = "Disco externo del servidor"
+    $s.Save(); "OK  icono: Disco $d"
+  } catch { "MAL icono de $d" }
+}
+PS
+  redhornoma-en-windows --maquina "$VM" --guion "$GUION" 2>&1 | sed 's/^/      /'
+  rm -f "$GUION"
+fi
+
+# ── La salud del disco, como información ──────────────────────────────
+for d in $DISCOS; do
+  command -v smartctl >/dev/null 2>&1 || break
+  PEND=$(smartctl -A "/dev/$d" 2>/dev/null | awk '/Current_Pending_Sector/{print $10}')
+  [ -n "$PEND" ] && [ "$PEND" != "0" ] && {
+    printf "\n   ${AM}Salud de /dev/%s:${V} %s sectores que no lee bien.\n" "$d" "$PEND"
+    nota "No frena nada. Pero lo que solo esté ahí, no está a salvo."; }
+done
+
+printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+printf "   Dentro de Windows, en el escritorio, hay un icono por disco.\n"
+printf "   Y si prefieres escribir la ruta:\n\n"
+while IFS='|' read -r n _; do [ -n "$n" ] && printf '      \\\\%s\\%s\n' "$IP_PUERTA" "$n"; done <<< "$ABIERTAS"
+printf "\n   Para desenchufarlos:  ${AZ}sudo redhornoma-discos --soltar${V}\n\n"

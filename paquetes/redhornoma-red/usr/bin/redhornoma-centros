@@ -34,6 +34,13 @@
 #   redhornoma-centros --entrar CENTRO
 set -u
 
+# 🔴 Sin esto, en Wayland «yad» no abre y el guion se cerraba MUDO.
+# El escritorio de este proyecto es KDE sobre Wayland; yad es de GTK y ahí
+# necesita hablar por XWayland. Todas las demás herramientas del proyecto
+# lo ponen; a esta se le olvidó, y el 13/08 euflo la ejecutó y no pasó
+# absolutamente nada.
+export GDK_BACKEND=x11
+
 CONF=/etc/redhornoma/centros.conf
 V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
 
@@ -179,13 +186,26 @@ while IFS='|' read -r N D E W T; do
   DATOS="$DATOS$ICO|$N|$DET|$W|$T|$D"$'\n'
 done < <(printf '%s' "$FILAS")
 
+# Si la ventana no llega a abrirse, NO se sale en silencio: se enseña la
+# lista escrita y se dice por qué. Una herramienta muda es lo peor que le
+# puede pasar a quien no sabe si está rota o si se equivocó él.
+ERRYAD=$(mktemp)
 SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
   --width=760 --height=320 --center \
   --text="<b>Elige un centro y pulsa «Entrar a su Windows».</b>\n<small>Ahí puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
   --column=" " --column="Centro" --column="Cómo está" --column="Su Windows" --column="Enlace" --column="destino:HD" \
   --print-column=6 --separator="" \
-  --button="Actualizar:2" --button="Cerrar:1" --button="Entrar a su Windows:0" 2>/dev/null)
+  --button="Actualizar:2" --button="Cerrar:1" --button="Entrar a su Windows:0" 2>"$ERRYAD")
 CODIGO=$?
+
+if [ "$CODIGO" -ge 250 ] && [ -s "$ERRYAD" ]; then
+  printf "\n   ${AM}No se pudo abrir la ventana. Lo que dijo el sistema:${V}\n"
+  head -3 "$ERRYAD" | sed 's/^/      /'
+  printf "\n   ${GR}Te enseño la lista escrita:${V}\n"
+  rm -f "$ERRYAD"
+  exec "$0" --texto
+fi
+rm -f "$ERRYAD"
 
 case "$CODIGO" in
   2) exec "$0" ;;                      # actualizar: mirarlo todo otra vez
