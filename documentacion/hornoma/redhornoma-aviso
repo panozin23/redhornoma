@@ -32,7 +32,8 @@
 # Uso:
 #   redhornoma-aviso --apagando --vuelve "13/08 a las 01:00" --despertador si
 #   redhornoma-aviso --desperte
-#   redhornoma-aviso --ver              qué dice la última señal de este equipo
+#   redhornoma-aviso --ver              qué dijo este equipo la última vez
+#   redhornoma-aviso --todos            el estado de TODOS los centros
 #
 # NUNCA falla de forma que estorbe: si no hay internet, lo anota y calla.
 # Un aviso que impidiera apagar sería peor que no tener aviso.
@@ -42,7 +43,7 @@ CONF_CENTRO=/etc/redhornoma/centro.conf
 CONF_RESP=/var/lib/redhornoma/respaldo.conf
 REG=/var/lib/redhornoma/avisos.log
 
-QUE=""; VUELVE=""; DESPERTADOR=""; VER=0
+QUE=""; VUELVE=""; DESPERTADOR=""; VER=0; TODOS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --apagando)    QUE=apagando; shift ;;
@@ -50,6 +51,7 @@ while [ $# -gt 0 ]; do
     --vuelve)      VUELVE="${2:-}"; shift 2 ;;
     --despertador) DESPERTADOR="${2:-}"; shift 2 ;;
     --ver)         VER=1; shift ;;
+    --todos)       TODOS=1; shift ;;
     *) echo "No entiendo «$1»"; exit 1 ;;
   esac
 done
@@ -75,8 +77,17 @@ if [ -z "${RCLONE_CONFIG:-}" ]; then
 fi
 
 REMOTO="${NUBE%%:*}"; REMOTO="${REMOTO:-drive}"
-SENALERO="$REMOTO:SENALES-REDHORNOMA"
-ARCHIVO="${CENTRO}--${NOMBRE}--estado.txt"
+# 🔴 Carpeta APARTE de SENALES-REDHORNOMA, y no es un capricho.
+#
+# «redhornoma-vigilar» lee TODOS los .txt de SENALES-REDHORNOMA y los
+# interpreta como señales de respaldo. El 13/08/2026 se dejaron aquí los
+# primeros avisos de estado y esa pantalla empezó a decir en rojo «el
+# último respaldo NO era de fiar» sobre un centro que estaba perfecto.
+#
+# Dos cosas distintas no comparten buzón: la de respaldos dice si el
+# centro copió sus datos; esta dice si la máquina está viva.
+SENALERO="$REMOTO:ESTADO-REDHORNOMA"
+ARCHIVO="${CENTRO}--${NOMBRE}.txt"
 
 # El registro es un extra: si no se puede escribir —porque esto lo lanzó
 # alguien sin permiso— no se dice nada y se sigue. Lo que importa es que el
@@ -87,7 +98,54 @@ anota(){ mkdir -p "$(dirname "$REG")" 2>/dev/null
          # de no poder abrir el archivo ya se ha impreso.
          printf '%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" 2>/dev/null >> "$REG" || true; }
 
-# ── Ver la última señal ───────────────────────────────────────────────
+# ── Ver el estado de TODOS los centros ────────────────────────────────
+# Funciona aunque los centros estén apagados: lo que se lee es lo que
+# dejaron dicho, no lo que contestan ahora.
+if [ "$TODOS" = "1" ]; then
+  command -v rclone >/dev/null 2>&1 || { echo "falta rclone"; exit 1; }
+  printf '\n   \033[1;34mESTADO DE LOS CENTROS\033[0m\n'
+  printf '   %s\n' "───────────────────────────────────────────────────────────"
+  TD=$(mktemp -d)
+  # 🔴 Distinguir «la carpeta no existe todavía» de «no hay internet».
+  # La primera vez no existe, y decir «no se pudo leer la nube» manda a
+  # buscar una avería donde solo hay una carpeta vacía.
+  SALIDA=$(timeout 90 rclone lsf "$SENALERO" 2>&1)
+  if [ $? -ne 0 ]; then
+    case "$SALIDA" in
+      *"not found"*|*"no encontrado"*|*"doesn't exist"*)
+        printf '   \033[0;90mtodavía ningún centro ha dejado su estado\033[0m\n'
+        printf '   \033[0;90m(se crea solo la primera vez que uno se apague o encienda)\033[0m\n\n'
+        rm -rf "$TD"; exit 0 ;;
+      *) echo "   no se pudo leer la nube:"; printf '%s\n' "$SALIDA" | head -2 | sed 's/^/      /'
+         rm -rf "$TD"; exit 1 ;;
+    esac
+  fi
+  timeout 90 rclone copy "$SENALERO" "$TD" --include '*.txt' >/dev/null 2>&1
+  N=0
+  for f in "$TD"/*.txt; do
+    [ -f "$f" ] || continue
+    N=$((N+1))
+    C=$(grep -oP '^centro=\K.*'  "$f"); M=$(grep -oP '^maquina=\K.*' "$f")
+    Q=$(grep -oP '^que=\K.*'     "$f"); F=$(grep -oP '^fecha=\K.*'   "$f")
+    SEG=$(grep -oP '^segundos=\K.*' "$f"); V=$(grep -oP '^vuelve=\K.*' "$f")
+    HACE=$(( ( $(date +%s) - ${SEG:-0} ) / 60 ))
+    if   [ "$HACE" -lt 60 ];   then CUANDO="hace $HACE min"
+    elif [ "$HACE" -lt 1440 ]; then CUANDO="hace $((HACE/60)) h"
+    else CUANDO="hace $((HACE/1440)) días"; fi
+    case "$Q" in
+      desperte) printf '   \033[1;32m●\033[0m %-16s %-18s despertó %s\n' "$C" "$M" "$CUANDO" ;;
+      apagando) printf '   \033[1;33m○\033[0m %-16s %-18s se apagó %s · vuelve %s\n' "$C" "$M" "$CUANDO" "${V:-no dijo}" ;;
+      *)        printf '   \033[0;90m?\033[0m %-16s %-18s %s\n' "$C" "$M" "$F" ;;
+    esac
+  done
+  rm -rf "$TD"
+  [ "$N" = "0" ] && printf '   \033[0;90mtodavía ningún centro ha dejado su estado\033[0m\n'
+  printf '\n   \033[0;90mUn centro que dijo «vuelvo» y no ha vuelto: mira la placa o la luz.\033[0m\n'
+  printf '   \033[0;90mUno que no dijo nada: se apagó por otro camino.\033[0m\n\n'
+  exit 0
+fi
+
+# ── Ver la última señal de este equipo ────────────────────────────────
 if [ "$VER" = "1" ]; then
   command -v rclone >/dev/null 2>&1 || { echo "falta rclone"; exit 1; }
   timeout 60 rclone cat "$SENALERO/$ARCHIVO" 2>&1
