@@ -66,3 +66,8 @@ polkitd
 # construyó sin declararlo aquí — lo cazó comprobar-receta.sh.
 pkexec
 sudo
+
+# El sistema de arranque y sus temporizadores. Los usa el horario de noche
+# y el aviso de encendido. Viene siempre con Debian, pero se declara: la
+# regla del proyecto es que nada entre de arrastre.
+systemd

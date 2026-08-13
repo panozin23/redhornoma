@@ -1,5 +1,5 @@
 #!/bin/bash
-# horario-noche.sh — Que el servidor se encienda y se apague solo de noche.
+# redhornoma-horario — Que el servidor se encienda y se apague solo de noche.
 #
 # Para un centro donde nadie va los fines de semana. La máquina se enciende de
 # madrugada, hace su respaldo, se lo manda al otro centro, y se apaga. Tres
@@ -15,7 +15,7 @@
 # 🔴 PROBAR PRIMERO QUE LA MÁQUINA DESPIERTA. Muchas placas traen esa opción
 #    apagada de fábrica: se programa la alarma, se apaga, y no vuelve. Si eso
 #    pasa sin nadie delante, el centro se queda sin servidor hasta que alguien
-#    viaje. Se prueba con «probar-despertador.sh».
+#    viaje. Se prueba con «redhornoma-horario --probar».
 #
 # 🔴 Y PONER EN EL BIOS «Restore on AC Power Loss → Power On». La alarma vive
 #    en la placa y necesita que el equipo siga enchufado. Si se va la luz
@@ -23,14 +23,15 @@
 #    aunque vuelva la luz. Eso ya dejó a Hornoma 7 días sin respaldo.
 #
 # Uso:
-#   sudo bash horario-noche.sh --instalar
-#   sudo bash horario-noche.sh --instalar --encender 01:00 --apagar 04:00
-#   sudo bash horario-noche.sh --dias Wed,Thu,Fri,Sat,Sun
-#   sudo bash horario-noche.sh --quitar
-#   sudo bash horario-noche.sh --ver
+#   sudo redhornoma-horario --instalar
+#   sudo redhornoma-horario --instalar --encender 01:00 --apagar 04:00
+#   sudo redhornoma-horario --dias Wed,Thu,Fri,Sat,Sun
+#   sudo redhornoma-horario --probar [minutos]   ¿despierta sola? (por defecto 4)
+#   sudo redhornoma-horario --quitar
+#   sudo redhornoma-horario --ver
 set -u
 
-ENCENDER="01:00"; APAGAR="04:00"; DIAS="Wed,Thu,Fri,Sat,Sun"; ACCION=""
+ENCENDER="01:00"; APAGAR="04:00"; DIAS="Wed,Thu,Fri,Sat,Sun"; ACCION=""; MINUTOS=4
 
 V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
 titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
@@ -45,6 +46,7 @@ while [ $# -gt 0 ]; do
     --quitar)   ACCION=quitar; shift ;;
     --ver)      ACCION=ver; shift ;;
     --solo-avisos) ACCION=avisos; shift ;;
+    --probar)   ACCION=probar; MINUTOS="${2:-4}"; case "$MINUTOS" in ""|*[!0-9]*) MINUTOS=4 ;; *) shift ;; esac; shift ;;
     --encender) ENCENDER="${2:-}"; shift 2 ;;
     --apagar)   APAGAR="${2:-}"; shift 2 ;;
     --dias)     DIAS="${2:-}"; ACCION=${ACCION:-instalar}; shift 2 ;;
@@ -56,11 +58,12 @@ done
 # Mirar no necesita permisos; cambiar sí. Pedir administrador para ver el
 # horario es un estorbo tonto: obliga a escribir la contraseña para leer.
 case "$ACCION" in
-  instalar|quitar|avisos)
+  instalar|quitar|avisos|probar)
     # El nombre que se enseña tiene que ser el que la persona puede copiar:
     # la acción interna se llama «avisos» pero la opción es «--solo-avisos».
     OPCION="--$ACCION"; [ "$ACCION" = "avisos" ] && OPCION="--solo-avisos"
-    [ "$(id -u)" = "0" ] || { echo "Hace falta administrador:  sudo bash $0 $OPCION"; exit 1; } ;;
+    [ "$ACCION" = "probar" ] && OPCION="--probar"
+    [ "$(id -u)" = "0" ] || { echo "Hace falta administrador:  sudo redhornoma-horario $OPCION"; exit 1; } ;;
 esac
 
 # ── Las horas, comprobadas y en base 10 ───────────────────────────────
@@ -137,15 +140,14 @@ fi
 # Se usan al instalar el horario, y también solos con «--solo-avisos»:
 # un equipo puede querer avisar sin apagarse nunca.
 poner_avisos(){
-  AVISO=/usr/local/sbin/redhornoma-aviso
-  if [ -f "$(dirname "$0")/redhornoma-aviso" ]; then
-    install -m 755 "$(dirname "$0")/redhornoma-aviso" "$AVISO" && ok "aviso a la nube instalado"
-  elif [ -x "$AVISO" ]; then
-    ok "el aviso a la nube ya estaba puesto"
-  else
-    avi "no encuentro «redhornoma-aviso» junto a este guion"
-    nota "sin él, la máquina se apagará sin dejar dicho si volverá"
-  fi
+  # El aviso lo trae el propio paquete: ya no hay que copiarlo a mano.
+AVISO=$(command -v redhornoma-aviso 2>/dev/null)
+if [ -n "$AVISO" ]; then
+  ok "el aviso a la nube está disponible"
+else
+  avi "no encuentro «redhornoma-aviso»"
+  nota "sin él, la máquina se apagará sin dejar dicho si volverá"
+fi
 
   if [ -x "$AVISO" ]; then
     cat > /etc/systemd/system/redhornoma-desperte.service <<'DESPFIN'
@@ -160,7 +162,7 @@ Type=oneshot
 # Un poco de margen: al arrancar, la red tarda en estar de verdad lista, y
 # el enlace entre centros tarda todavía un poco más en levantarse.
 ExecStartPre=/bin/sleep 45
-ExecStart=/usr/local/sbin/redhornoma-aviso --desperte
+ExecStart=/usr/bin/redhornoma-aviso --desperte
 # Que no estorbe nunca: si no hay internet, se calla y el equipo sigue.
 TimeoutStartSec=180
 RemainAfterExit=yes
@@ -184,7 +186,39 @@ if [ "$ACCION" = "avisos" ]; then
   exit 0
 fi
 
-[ "$ACCION" = "instalar" ] || { mal "dime qué hacer: --instalar, --quitar o --ver"; exit 1; }
+# ══ PROBAR EL DESPERTADOR ═════════════════════════════════════════════
+# Antes de confiarle a un servidor que se apague de noche y vuelva solo,
+# hay que VERLO volver. Muchas placas traen esa opción apagada de fábrica:
+# se programa la alarma, la máquina se apaga, y no despierta. Si eso pasa
+# sin nadie delante, el centro se queda sin servidor hasta que alguien
+# viaje 100 km. Esto lo prueba en pequeño, con alguien mirando.
+if [ "$ACCION" = "probar" ]; then
+  titulo "¿SABE ESTA MÁQUINA ENCENDERSE SOLA?"
+  ALARMA=/sys/class/rtc/rtc0/wakealarm
+  [ -e "$ALARMA" ] || { mal "esta máquina no tiene reloj-despertador"; exit 1; }
+  CUANDO=$(( $(date +%s) + MINUTOS*60 ))
+  echo 0 > "$ALARMA"; echo "$CUANDO" > "$ALARMA" 2>/dev/null
+  if [ "$(cat "$ALARMA")" != "$CUANDO" ]; then
+    mal "la placa RECHAZA el despertador"
+    nota "hay que activarlo en el BIOS («Wake on RTC» o «RTC Alarm»)"
+    nota "sin eso, NO le pongas horario de noche a este equipo"
+    exit 1
+  fi
+  ok "despertador puesto para dentro de $MINUTOS minutos"
+  echo
+  printf "   Se va a APAGAR ahora. Si todo va bien, volverá sola a las %s.\n" \
+    "$(date -d "@$CUANDO" '+%H:%M')"
+  printf "   Quédate mirándola: es la única forma de saberlo.\n\n"
+  printf "   Si NO vuelve, enciéndela a mano y revisa el BIOS.\n\n"
+  printf "   Escribe APAGAR para empezar la prueba: "
+  read -r R
+  [ "$R" = "APAGAR" ] || { echo 0 > "$ALARMA"; nota "cancelado — despertador desarmado"; exit 0; }
+  sleep 2
+  /sbin/poweroff
+  exit 0
+fi
+
+[ "$ACCION" = "instalar" ] || { mal "dime qué hacer: --instalar, --quitar, --ver, --probar o --solo-avisos"; exit 1; }
 
 
 titulo "HORARIO DE NOCHE"
@@ -387,7 +421,7 @@ RELOJFIN
 RESP_H=$(date -d "$ENCENDER +30 minutes" '+%H:%M' 2>/dev/null || echo "01:30")
 mkdir -p /etc/systemd/system/redhornoma-respaldo.timer.d
 cat > /etc/systemd/system/redhornoma-respaldo.timer.d/horario-noche.conf <<RESPFIN
-# Puesto por horario-noche.sh — el respaldo va dentro de la ventana de trabajo
+# Puesto por redhornoma-horario — el respaldo va dentro de la ventana de trabajo
 [Timer]
 OnCalendar=
 OnCalendar=*-*-* $RESP_H:00

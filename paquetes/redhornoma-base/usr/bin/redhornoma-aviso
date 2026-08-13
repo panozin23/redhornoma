@@ -105,18 +105,36 @@ if [ "$TODOS" = "1" ]; then
   command -v rclone >/dev/null 2>&1 || { echo "falta rclone"; exit 1; }
   printf '\n   \033[1;34mESTADO DE LOS CENTROS\033[0m\n'
   printf '   %s\n' "───────────────────────────────────────────────────────────"
+  # 🔴 PRIMERO: ¿tiene este usuario permiso para leer la nube?
+  #
+  # El 13/08/2026 esto contestaba «todavía ningún centro ha dejado su
+  # estado» cuando el problema era que la cuenta no tenía el permiso de
+  # Drive. La causa: se buscaba «not found» en la respuesta de rclone para
+  # saber si faltaba la CARPETA, y rclone escribe un aviso que dice
+  #     Config file "…" not found - using defaults
+  # o sea, otro «not found» que habla del archivo de permisos.
+  #
+  # Se comprueba lo primero y por separado, en vez de adivinarlo leyendo
+  # un texto que puede decir dos cosas distintas con las mismas palabras.
+  if [ -z "${RCLONE_CONFIG:-}" ] || [ ! -r "${RCLONE_CONFIG:-/no}" ]; then
+    printf '   \033[1;31m✗\033[0m este equipo no tiene permiso para leer la nube\n'
+    printf '      El permiso lo guarda el administrador. Prueba con sudo,\n'
+    printf '      o desde tu portátil.\n\n'
+    exit 1
+  fi
+
   TD=$(mktemp -d)
-  # 🔴 Distinguir «la carpeta no existe todavía» de «no hay internet».
-  # La primera vez no existe, y decir «no se pudo leer la nube» manda a
-  # buscar una avería donde solo hay una carpeta vacía.
+  # Y ahora sí: distinguir «la carpeta aún no existe» —normal el primer
+  # día— de «no hay internet».
   SALIDA=$(timeout 90 rclone lsf "$SENALERO" 2>&1)
   if [ $? -ne 0 ]; then
     case "$SALIDA" in
-      *"not found"*|*"no encontrado"*|*"doesn't exist"*)
+      *"directory not found"*|*"doesn't exist"*)
         printf '   \033[0;90mtodavía ningún centro ha dejado su estado\033[0m\n'
         printf '   \033[0;90m(se crea solo la primera vez que uno se apague o encienda)\033[0m\n\n'
         rm -rf "$TD"; exit 0 ;;
-      *) echo "   no se pudo leer la nube:"; printf '%s\n' "$SALIDA" | head -2 | sed 's/^/      /'
+      *) echo "   no se pudo leer la nube:"
+         printf '%s\n' "$SALIDA" | grep -v NOTICE | head -2 | sed 's/^/      /'
          rm -rf "$TD"; exit 1 ;;
     esac
   fi
