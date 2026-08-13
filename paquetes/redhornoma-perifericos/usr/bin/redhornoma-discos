@@ -59,13 +59,14 @@ titulo(){ printf "\n${AZ}══════════════════�
           printf "${AZ} %s${V}\n" "$1"
           printf "${AZ}══════════════════════════════════════════════════════${V}\n"; }
 
-ACCION=mirar; FORZAR=no
+ACCION=mirar; FORZAR=no; ESPERAR=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --abrir)  ACCION=abrir; shift ;;
     --soltar) ACCION=soltar; shift ;;
     --siempre) ACCION=siempre; shift ;;
     --forzar) FORZAR=si; shift ;;
+    --esperar) ESPERAR="${2:-60}"; case "$ESPERAR" in ''|*[!0-9]*) ESPERAR=60 ;; *) shift ;; esac; shift ;;
     -h|--ayuda) sed -n '2,45p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "No entiendo «$1»"; exit 1 ;;
   esac
@@ -124,10 +125,11 @@ Type=oneshot
 # Un respiro: al enchufar un disco, el sistema tarda un momento en
 # reconocer sus particiones. Sin esta espera se intenta abrir lo que
 # todavía no está.
-ExecStartPre=/bin/sleep 6
-ExecStart=/usr/bin/redhornoma-discos --abrir
-# Que no estorbe nunca: si no hay ningún disco, termina y ya está.
-SuccessExitStatus=0 1
+# Espera A QUE APAREZCA el disco, no un número fijo de segundos: al
+# arrancar tardan, y al enchufarlos ya están.
+ExecStart=/usr/bin/redhornoma-discos --abrir --esperar 60
+# Sin «SuccessExitStatus=0 1»: eso hacía que systemd diera por bueno un
+# fallo. Si no hay discos, la herramienta ya termina con 0 por su cuenta.
 RemainAfterExit=no
 
 [Install]
@@ -140,7 +142,14 @@ FIN
 #
 # El disco del sistema no entra aquí: va por SATA o NVMe, no por USB. Y
 # aunque entrara, la propia herramienta descarta el que tenga «/» montado.
-ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{DEVTYPE}=="partition", \
+# 🔴 Aquí ponía ENV{ID_BUS}=="usb" y NO ENCAJABA NUNCA: muchos adaptadores
+# USB le pasan al sistema la identidad del disco tal cual, y udev dice
+# «ID_BUS=ata» aunque esté enchufado por USB. Comprobado el 13/08/2026.
+#
+# Así que no se filtra aquí: se avisa por cualquier partición que aparezca,
+# y es la herramienta la que decide cuál es externa. Ella descarta siempre
+# el disco del sistema, así que dispararse de más no hace daño.
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", \
   TAG+="systemd", ENV{SYSTEMD_WANTS}="redhornoma-discos.service"
 FIN
 
@@ -169,6 +178,23 @@ fi
 titulo "LOS DISCOS EXTERNOS"
 
 DISCOS=$(discos_externos)
+
+# 🔴 Al arrancar, un disco por USB tarda en existir para el sistema. El
+# 13/08/2026 este guion corrió 6 segundos después de encender el servidor,
+# dijo «no hay ningún disco enchufado» —y lo había—, y se quedó tan ancho.
+#
+# Una espera fija siempre es o demasiado corta o demasiado larga. Aquí se
+# espera A QUE APAREZCA, mirando cada segundo: si ya está, no se espera
+# nada; si tarda, se le da tiempo; si no hay ninguno, se sale al agotarlo.
+if [ -z "$DISCOS" ] && [ "$ESPERAR" -gt 0 ]; then
+  printf "   ${GR}esperando a que aparezca algún disco (hasta %ss)…${V}\n" "$ESPERAR"
+  for _ in $(seq 1 "$ESPERAR"); do
+    sleep 1
+    DISCOS=$(discos_externos)
+    [ -n "$DISCOS" ] && break
+  done
+fi
+
 if [ -z "$DISCOS" ]; then
   nota "no hay ningún disco externo enchufado"
   echo
