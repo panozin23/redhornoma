@@ -132,6 +132,23 @@ ExecStart=/usr/bin/redhornoma-discos --abrir --esperar 60
 # fallo. Si no hay discos, la herramienta ya termina con 0 por su cuenta.
 RemainAfterExit=no
 
+# 🔴 SIN ESTO, systemd DESMONTA los discos al terminar el servicio.
+#
+# Un disco NTFS no se monta «y ya está»: deja vivo un programa en segundo
+# plano —ntfs-3g— que atiende el disco mientras esté montado. Y systemd,
+# cuando un servicio acaba, mata todo lo que ese servicio hubiera dejado
+# corriendo. Buena idea en general; aquí se lleva por delante justo lo que
+# mantiene el disco abierto.
+#
+# Se vio en el diario del 13/08/2026, y explica por qué a mano funcionaba
+# y por el servicio no:
+#     18:58:25  SANSUNG2 abierta
+#     18:58:57  ntfs-3g: Unmounting /dev/sdb2 (SANSUNG2)
+#     18:58:57  systemd: Deactivated successfully
+#
+# «process» le dice: mata solo el guion, y deja en paz lo que dejó puesto.
+KillMode=process
+
 [Install]
 WantedBy=multi-user.target
 FIN
@@ -175,6 +192,37 @@ FIN
   exec "$(readlink -f "$0")" --abrir
 fi
 
+# ── Quitar de Samba lo que ya no está ─────────────────────────────────
+#
+# 🔴 EL FALLO MÁS PELIGROSO DE TODOS, visto el 13/08/2026.
+#
+# Si el disco no se monta, la carpeta donde iba a montarse existe y está
+# VACÍA. Samba la seguía publicando, y desde Windows se veían dos carpetas
+# vacías donde deberían estar los respaldos.
+#
+# Y lo grave no es el susto: es que si alguien COPIA algo ahí creyendo que
+# va al disco externo, va al disco del servidor. Cuando el disco se monte
+# encima, esos archivos desaparecen de la vista. Habría guardado sus datos
+# en un sitio que no existe, y sin un solo aviso.
+#
+# Por eso, cada vez que se ejecuta, los recursos se rehacen desde CERO con
+# lo que de verdad está montado. Si no hay nada montado, no se publica
+# nada: Windows dará un error honesto en vez de enseñar una carpeta vacía.
+limpiar_samba(){
+  [ -f "$CONF_SMB" ] || return 0
+  grep -q "^$MARCA_INI" "$CONF_SMB" 2>/dev/null || return 0
+  cp -f "$CONF_SMB" "$CONF_SMB.antes-de-discos-$MARCA" 2>/dev/null
+  awk -v a="$MARCA_INI" -v b="$MARCA_FIN" '
+    $0==a {d=1; next} $0==b {d=0; next} !d {print}' "$CONF_SMB" > /tmp/smb.limpio
+  if ! cmp -s /tmp/smb.limpio "$CONF_SMB"; then
+    cp -f /tmp/smb.limpio "$CONF_SMB"
+    systemctl restart smbd 2>/dev/null
+    avi "quitados de Samba los discos que no están montados"
+    nota "mejor un error honesto en Windows que una carpeta vacía"
+  fi
+  rm -f /tmp/smb.limpio
+}
+
 titulo "LOS DISCOS EXTERNOS"
 
 DISCOS=$(discos_externos)
@@ -197,6 +245,7 @@ fi
 
 if [ -z "$DISCOS" ]; then
   nota "no hay ningún disco externo enchufado"
+  [ "$ACCION" = "abrir" ] && limpiar_samba
   echo
   nota "Enchufa uno y vuelve a ejecutarlo. El del sistema no se toca nunca."
   echo
@@ -262,7 +311,11 @@ for d in $DISCOS; do
       ok "$ETQ ya estaba abierta en $YA"; ABIERTAS="$ABIERTAS$SEG|$YA"$'\n'; continue
     fi
 
-    mkdir -p "$PUNTO"
+    # La carpeta vacía queda CERRADA a cal y canto. Así, si el disco no
+    # llega a montarse, nadie —ni Windows ni una persona— puede escribir
+    # dentro creyendo que escribe en el disco. Al montarse encima, mandan
+    # los permisos del disco y este 000 deja de verse.
+    mkdir -p "$PUNTO"; chmod 000 "$PUNTO" 2>/dev/null
     U=$(id -u "$USUARIO"); G=$(id -g "$USUARIO")
     ERR=""
     case "$F" in
@@ -326,6 +379,7 @@ if [ -z "$ABIERTAS" ]; then
     printf "   Se limpia con:  ${AZ}sudo redhornoma-discos --abrir --forzar${V}\n"
     printf "   ${GR}Eso escribe en el disco: solo quita la marca, no toca archivos.${V}\n\n"; exit 1; }
   mal "no se pudo abrir ninguna partición"
+  limpiar_samba
   echo; exit 1
 fi
 
