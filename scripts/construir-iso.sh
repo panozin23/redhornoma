@@ -32,6 +32,27 @@ titulo "CONSTRUIR RedHornoma $VERSION"
 # ── Comprobaciones previas ────────────────────────────────────────────
 [ "$(id -u)" = "0" ] || { mal "hace falta sudo"; echo "      sudo bash $0"; exit 1; }
 
+# Las herramientas que live-build llama por dentro. Sin ellas la
+# construcción falla A MITAD, después de haber descargado 3 GB y de haber
+# tenido la máquina una hora ocupada.
+#
+# 🔴 Se comprueba el ARCHIVO, no con «command -v»: debootstrap vive en
+# /usr/sbin, que no está en el camino de búsqueda de un usuario normal, y
+# «command -v» contestaba que no existía estando instalado. Es la misma
+# trampa de mount.cifs, anotada el 12/08/2026 y repetida aquí el 14/08.
+FALTAN=""
+for h in debootstrap:/usr/sbin/debootstrap mksquashfs:/usr/bin/mksquashfs \
+         xorriso:/usr/bin/xorriso cpio:/usr/bin/cpio; do
+  N="${h%%:*}"; R="${h#*:}"
+  [ -x "$R" ] || command -v "$N" >/dev/null 2>&1 || FALTAN="$FALTAN $N"
+done
+if [ -n "$FALTAN" ]; then
+  mal "faltan herramientas para construir:$FALTAN"
+  echo "      sudo apt install$FALTAN"
+  exit 1
+fi
+ok "las herramientas de construcción están"
+
 command -v lb >/dev/null 2>&1 || {
   mal "live-build no está instalado"
   echo "      Ejecuta antes:  sudo bash scripts/preparar-equipo.sh --aplicar"
