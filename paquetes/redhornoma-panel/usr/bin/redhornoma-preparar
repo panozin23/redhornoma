@@ -221,6 +221,9 @@ CENTRO="${CENTRO:-sin centro definido}"
 # nombre que no es el suyo justo donde la persona mira para saber en qué
 # computadora está. Es la misma fuente que usa el panel.
 NOMBRE=$(cat /proc/sys/kernel/hostname 2>/dev/null || uname -n)
+# Los discos externos se montan en /media/<usuario>, y ese usuario no es
+# «root» aunque la herramienta se lance con sudo.
+USUARIO_ESCRITORIO="${SUDO_USER:-$(id -un)}"
 
 # Lo que se va enseñando. Formato: icono|asunto|cómo está
 FILAS=()
@@ -425,6 +428,13 @@ fi
 # ── Siempre disponibles, aunque todo esté verde ───────────────────────
 hay redhornoma-windows-agil && [ "${MAQUINAS:-0}" -gt 0 ] && \
   accion "Agilizar el Windows" "$(icono preferences-system-performance speedometer)" "TERMINAL:sudo redhornoma-windows-agil --aplicar"
+# Guardar la maquina entera, no solo los datos. Solo donde hay una
+# maquina que guardar, y solo en el servidor: es el unico que tiene
+# dentro los programas del Ministerio instalados y configurados.
+hay redhornoma-copiar-maquina && [ "${MAQUINAS:-0}" -gt 0 ] && [ "$PAPEL" = "servidor" ] && \
+  accion "Guardar la máquina entera en un disco" "$(icono drive-removable-media-usb drive-harddisk)" \
+         "TERMINAL:sudo redhornoma-copiar-maquina --a /media/$USUARIO_ESCRITORIO"
+
 hay redhornoma-informe && \
   accion "Informe técnico de este equipo" "$(icono document-properties dialog-information)" "TEXTO:redhornoma-informe --sin-color"
 

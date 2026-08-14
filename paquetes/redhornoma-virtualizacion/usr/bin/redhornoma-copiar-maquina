@@ -1,0 +1,267 @@
+#!/bin/bash
+# redhornoma-copiar-maquina — Guardar la MÁQUINA, no solo la información.
+#
+# EL PORQUÉ
+#
+# El respaldo de cada día guarda los datos: el .sal de SALMI, los .bak de
+# SQL Server, la carpeta de SNIS. Eso está probado y funciona. Pero el
+# disco donde vive el Windows —con SQL Server instalado, SOAPS 7 puesto en
+# red, SNIS con sus 39 tablas enlazadas y SALMI configurado— NO se guarda
+# en ninguna parte. Son decenas de gigas y no caben en la nube.
+#
+# La cuenta, medida el 14/08/2026 en servidor-ciudad:
+#
+#   recuperar los datos sobre una máquina que funciona ...... horas
+#   rehacer la máquina desde cero ........................... días
+#
+# Y no es una exageración: SOAPS 7 en red costó una escalera de CINCO
+# errores encadenados, y SNIS entraba con datos incompletos SIN AVISAR
+# hasta que se enlazaron las 39 tablas. Nada de eso está escrito en el
+# instalador del Ministerio. Está en este disco y en ningún otro sitio.
+#
+# POR QUÉ SE APAGA EL WINDOWS ANTES DE COPIAR
+#
+# Copiar el disco de una máquina encendida es como tirar del enchufe y
+# quedarse con lo que hubiera: el archivo sale, pero por dentro puede
+# tener una escritura a medias. Windows suele arrancar igual y reparar
+# solo, pero «suele» no es una palabra que valga en un respaldo. Una copia
+# en la que no se confía obliga a probarla el día del desastre, que es el
+# peor día para descubrir que no sirve.
+#
+# Así que se apaga bien, se copia, y se vuelve a encender. Son unos veinte
+# minutos con los programas parados, una vez cada tanto.
+#
+# Uso:
+#   redhornoma-copiar-maquina --a /ruta/al/disco          mira y explica
+#   sudo redhornoma-copiar-maquina --a /ruta --hacerlo    lo hace
+#   ... --maquina NOMBRE     cuando hay más de una
+#   ... --sin-apagar         copiar con el Windows encendido (NO recomendado)
+set -u
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'
+AM=$'\033[1;33m'; GR=$'\033[0;90m'
+ok(){  printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){ printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){ printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "   ${GR}%s${V}\n" "$1"; }
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+          printf "${AZ} %s${V}\n" "$1"
+          printf "${AZ}══════════════════════════════════════════════════════${V}\n"; }
+
+# A virsh se le habla en inglés cuando se va a LEER su respuesta: esta
+# distro está en español y contesta «ejecutando», no «running». Esa
+# confusión ya rompió el panel y el «entrar»; no se repite aquí.
+vsh(){ LC_ALL=C virsh -c qemu:///system "$@" 2>/dev/null; }
+
+DESTINO=""; VM=""; HACERLO=no; SIN_APAGAR=no; ESPERA=300
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --a)          DESTINO="${2:-}"; shift 2 ;;
+    --maquina)    VM="${2:-}"; shift 2 ;;
+    --hacerlo)    HACERLO=si; shift ;;
+    --sin-apagar) SIN_APAGAR=si; shift ;;
+    -h|--ayuda)   sed -n '2,40p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) echo "No entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+titulo "GUARDAR LA MÁQUINA ENTERA"
+
+# ── Qué máquina y qué disco ───────────────────────────────────────────
+if [ -z "$VM" ]; then
+  VM=$(vsh list --all --name | grep -v '^$' | head -1)
+  N=$(vsh list --all --name | grep -vc '^$')
+  [ "${N:-0}" -gt 1 ] && avi "hay $N máquinas; se toma «$VM». Con --maquina se elige otra"
+fi
+[ -n "$VM" ] || { mal "no encuentro ninguna máquina virtual"; exit 1; }
+
+DISCO=$(vsh domblklist "$VM" | awk '/qcow2|\.img|\.raw/{print $2; exit}')
+DESTINO_OBJ=$(vsh domblklist "$VM" | awk '/qcow2|\.img|\.raw/{print $1; exit}')
+[ -n "$DISCO" ] || { mal "no encuentro el disco de «$VM»"; exit 1; }
+
+# El tamaño se le pregunta a virsh, no al sistema de archivos.
+#
+# /var/lib/libvirt/images/ no lo puede leer un usuario normal, así que
+# «stat» devolvía cero y la herramienta decía que el disco ocupaba 0 GB —
+# y peor: daba por bueno que cabía en cualquier sitio. Un número que sale
+# de un permiso denegado es peor que no tener número. virsh sí lo sabe y
+# contesta a cualquiera que pueda hablarle.
+TAM=$(vsh domblkinfo "$VM" "$DESTINO_OBJ" | awk '/^Physical:/{print $2; exit}')
+[ -n "${TAM:-}" ] || TAM=$(vsh domblkinfo "$VM" "$DESTINO_OBJ" | awk '/^Allocation:/{print $2; exit}')
+[ -n "${TAM:-}" ] || TAM=$(stat -c%s "$DISCO" 2>/dev/null)
+case "${TAM:-}" in ''|*[!0-9]*)
+  mal "no consigo saber cuánto ocupa el disco de «$VM»"
+  nota "sin ese dato no se puede comprobar si cabe, y copiar a ciegas no"
+  nota "es copiar: sería llenar el disco de destino a medias."
+  exit 1 ;;
+esac
+TAM_G=$(( TAM / 1024 / 1024 / 1024 ))
+printf "\n   máquina:  %s\n   disco:    %s\n   ocupa:    %s GB\n" "$VM" "$DISCO" "$TAM_G"
+
+ENCENDIDA=no
+vsh domstate "$VM" | grep -q '^running' && ENCENDIDA=si
+printf "   estado:   %s\n" "$([ "$ENCENDIDA" = si ] && echo "encendida" || echo "apagada")"
+
+# ── A dónde ───────────────────────────────────────────────────────────
+[ -n "$DESTINO" ] || { echo; mal "falta decir dónde: --a /ruta/al/disco"; exit 1; }
+[ -d "$DESTINO" ] || { echo; mal "no existe la carpeta $DESTINO"
+                       nota "enchufa el disco, o créala"; exit 1; }
+
+# El sitio libre se mide EN LA CARPETA DE DESTINO, no en la raíz: un disco
+# externo montado dentro de /media tiene su propio espacio, y preguntarle
+# al sistema daría el del disco del servidor.
+LIBRE=$(df -B1 --output=avail "$DESTINO" 2>/dev/null | tail -1)
+LIBRE_G=$(( ${LIBRE:-0} / 1024 / 1024 / 1024 ))
+printf "   destino:  %s  (%s GB libres)\n" "$DESTINO" "$LIBRE_G"
+
+# Un 10%% de margen: qemu-img escribe algo de más mientras trabaja, y
+# quedarse sin sitio a mitad deja una copia inservible que además parece
+# terminada.
+NECESARIO=$(( TAM + TAM / 10 ))
+if [ "${LIBRE:-0}" -lt "$NECESARIO" ]; then
+  echo; mal "no cabe: hacen falta unos $(( NECESARIO / 1024 / 1024 / 1024 )) GB y hay $LIBRE_G"
+  exit 1
+fi
+ok "cabe, con margen"
+
+CARPETA="$DESTINO/MAQUINA-$VM"
+FECHA=$(date +%Y%m%d-%H%M)
+
+# ── ¿Solo mirar, o hacerlo? ───────────────────────────────────────────
+if [ "$HACERLO" != "si" ]; then
+  titulo "LO QUE HARÍA"
+  printf "\n"
+  [ "$ENCENDIDA" = "si" ] && [ "$SIN_APAGAR" = "no" ] && {
+    printf "   1. ${AM}APAGAR el Windows${V} de «%s», bien, esperando a que cierre\n" "$VM"
+    printf "      ${GR}los programas de salud quedan parados mientras dure${V}\n"; }
+  printf "   2. copiar el disco a:\n      %s/\n" "$CARPETA"
+  printf "   3. copiar también cómo está armada la máquina, su firmware\n      y su chip de seguridad\n"
+  printf "   4. comprobar que la copia se abre y no está rota\n"
+  [ "$ENCENDIDA" = "si" ] && [ "$SIN_APAGAR" = "no" ] && \
+    printf "   5. volver a encender el Windows\n"
+  V_MIN=$(( TAM_G * 1024 / 35 / 60 + 1 ))
+  printf "\n   ${GR}Tardará alrededor de %s minutos a la velocidad de este disco.${V}\n" "$V_MIN"
+  printf "\n   Para hacerlo de verdad:\n\n"
+  printf "      ${AZ}sudo %s --a %s --hacerlo${V}\n\n" "$(basename "$0")" "$DESTINO"
+  exit 0
+fi
+
+[ "$(id -u)" = "0" ] || { echo; mal "hace falta sudo"; exit 1; }
+
+# ── Apagar bien ───────────────────────────────────────────────────────
+REENCENDER=no
+if [ "$ENCENDIDA" = "si" ]; then
+  if [ "$SIN_APAGAR" = "si" ]; then
+    avi "copiando con el Windows ENCENDIDO: la copia puede salir con una"
+    avi "escritura a medias. Sirve para salir del paso, no para confiar."
+  else
+    titulo "APAGANDO EL WINDOWS"
+    nota "se le pide que cierre solo, como quien pulsa Apagar"
+    vsh shutdown "$VM" >/dev/null
+    T=0
+    while [ "$T" -lt "$ESPERA" ]; do
+      vsh domstate "$VM" | grep -q '^shut off' && break
+      sleep 5; T=$((T+5))
+      [ $((T % 30)) = 0 ] && printf "   ${GR}esperando… %s s${V}\n" "$T"
+    done
+    if vsh domstate "$VM" | grep -q '^shut off'; then
+      ok "apagado en $T segundos"
+      REENCENDER=si
+    else
+      mal "no terminó de apagarse en $((ESPERA/60)) minutos"
+      nota "puede haber una ventana pidiendo guardar algo. Míralo y repite."
+      nota "NO se fuerza el apagado: eso rompe justo lo que veníamos a proteger."
+      exit 1
+    fi
+  fi
+fi
+
+# Pase lo que pase de aquí en adelante, el Windows se vuelve a encender.
+# Un fallo copiando no puede dejar el centro sin sus programas.
+volver(){ [ "$REENCENDER" = "si" ] && { printf "\n"; nota "volviendo a encender el Windows"
+          vsh start "$VM" >/dev/null 2>&1 && ok "encendido" || mal "NO se pudo encender — hazlo desde el panel"; }; }
+trap volver EXIT
+
+# ── Copiar ────────────────────────────────────────────────────────────
+titulo "COPIANDO"
+mkdir -p "$CARPETA" || { mal "no puedo crear $CARPETA"; exit 1; }
+SALIDA="$CARPETA/$VM-$FECHA.qcow2"
+
+# qemu-img convert y no cp: deja fuera el espacio que el disco tiene
+# reservado y no usa, y de paso comprueba la estructura al leerla. Sale
+# más pequeño y más sano que una copia byte a byte.
+nota "esto tarda; la barra avanza sola"
+if qemu-img convert -p -O qcow2 "$DISCO" "$SALIDA"; then
+  ok "copiado: $(du -h "$SALIDA" 2>/dev/null | cut -f1)"
+else
+  mal "falló la copia"; rm -f "$SALIDA"; exit 1
+fi
+
+# ── Lo que ese disco NO lleva dentro ──────────────────────────────────
+# Sin esto, la copia arranca pero la máquina no se sabe armar: cuántos
+# núcleos, qué red, si lleva arranque seguro. Y con BitLocker, sin el chip
+# de seguridad emulado el Windows pide una clave que nadie tiene.
+vsh dumpxml "$VM" > "$CARPETA/$VM.xml" 2>/dev/null && ok "cómo está armada la máquina"
+for f in "/var/lib/libvirt/qemu/nvram/${VM}_VARS.fd" "/var/lib/libvirt/qemu/nvram/${VM}-efivars.fd"; do
+  [ -f "$f" ] && { cp -f "$f" "$CARPETA/nvram.fd" && ok "memoria del firmware UEFI"; break; }
+done
+[ -d "/var/lib/libvirt/swtpm" ] && \
+  tar -cf "$CARPETA/tpm.tar" -C /var/lib/libvirt/swtpm . 2>/dev/null && ok "chip de seguridad emulado"
+
+# ── Comprobar que sirve ───────────────────────────────────────────────
+titulo "COMPROBANDO LA COPIA"
+# No basta con que el archivo exista y pese: se le pide a qemu que la abra
+# y la revise. Una copia que no se comprueba es una suposición.
+#
+# 🔴 Aquí ponía «if qemu-img check … | sed …», y un «if» sobre una tubería
+# mira el resultado del ÚLTIMO eslabón: el de sed, que siempre sale bien.
+# Es decir, una copia rota habría entrado por la rama del «todo correcto».
+# El mismo verde barato de siempre, esta vez sobre lo único que importa.
+# Ahora se guarda el código del propio qemu-img y se exige ADEMÁS que lo
+# diga con sus palabras.
+REVISION=/tmp/rh-check.$$
+qemu-img check "$SALIDA" > "$REVISION" 2>&1; CODIGO=$?
+tail -3 "$REVISION" | sed 's/^/   /'
+if [ "$CODIGO" = "0" ] && grep -qiE 'No errors|no se encontraron errores' "$REVISION"; then
+  ok "la copia se abre y no tiene errores"
+else
+  mal "la copia NO pasa la revisión — no confíes en ella"
+  nota "se deja en su sitio para que puedas mirarla, pero NO cuenta como respaldo"
+fi
+rm -f "$REVISION"
+
+cat > "$CARPETA/LEEME.txt" <<FIN
+La MÁQUINA de $VM
+Copiada el $(date '+%d de %B de %Y, %H:%M') desde $(cat /proc/sys/kernel/hostname)
+
+Esto NO son los datos del centro: los datos van en el respaldo de cada
+día. Esto es la máquina entera, con Windows, SQL Server, SOAPS, SNIS y
+SALMI ya instalados y configurados.
+
+Sirve para el día en que el disco del servidor muera. Sin esto habría que
+rehacerlo todo desde cero, y eso son dias.
+
+QUE HAY AQUI
+  $VM-$FECHA.qcow2   el disco entero
+  $VM.xml            como esta armada la maquina
+  nvram.fd           la memoria del firmware UEFI
+  tpm.tar            el chip de seguridad (hace falta si hay BitLocker)
+
+COMO DEVOLVERLA
+  1. copiar el .qcow2 a  /var/lib/libvirt/images/
+  2. si hay tpm.tar:  sudo tar -xf tpm.tar -C /var/lib/libvirt/swtpm
+  3. si hay nvram.fd: sudo cp nvram.fd /var/lib/libvirt/qemu/nvram/${VM}_VARS.fd
+  4. sudo virsh define $VM.xml
+  5. abrirla con  redhornoma-entrar
+
+  Si el .xml apunta a una ruta distinta, corregirla dentro del .xml antes
+  del paso 4.
+
+Y DESPUES
+  Los datos de este disco son los del dia de la copia. Encima hay que
+  restaurar el ultimo respaldo:  redhornoma-recuperar
+FIN
+ok "instrucciones para devolverla, guardadas al lado"
+
+printf "\n   ${VE}Queda en:${V} %s\n\n" "$CARPETA"
+exit 0
