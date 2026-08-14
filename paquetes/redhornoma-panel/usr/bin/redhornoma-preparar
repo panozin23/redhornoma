@@ -170,11 +170,29 @@ queda apagada, y a 100 km eso significa viajar hasta allá.
   ejecutar "Probando el despertador" "pkexec /usr/bin/redhornoma-horario --probar 4"
 }
 
+sin_horario(){
+  yad --question --center --width=470 --borders=14 --title="¿Hace falta horario aquí?" \
+    --text="<b>El horario sirve para encender una computadora desde lejos.</b>
+
+Es imprescindible donde no hay nadie —Hornoma, a 100 km— porque una
+máquina apagada no se enciende por la red: solo la despierta la alarma
+de su propio reloj.
+
+Si en esta computadora hay quien pulse el botón, no hace falta.
+
+<i>Se puede cambiar de idea cuando quieras: el botón de poner el horario
+sigue estando.</i>" \
+    --button="Cancelar:1" --button="Aquí no hace falta:0" >/dev/null 2>&1 || return 0
+  ejecutar "Anotando que aquí no hace falta horario" \
+    "pkexec /bin/sh -c 'mkdir -p /etc/redhornoma && printf \"%s\\n\" \"puesto el $(date +%d/%m/%Y): en esta maquina hay quien pulse el boton\" > /etc/redhornoma/sin-horario'"
+}
+
 # ── Cuando esto lo lanza un botón ─────────────────────────────────────
 if [ -n "$HACER" ]; then
   case "$HACER" in
     horario) poner_horario ;;
     probar)  probar_despertador ;;
+    sinhorario) sin_horario ;;
     [0-9]*)
       # El número es la línea del apunte. Si no está, no se hace nada:
       # más vale un botón que no responde que uno que ejecuta otra cosa.
@@ -255,11 +273,17 @@ fi
 # el Windows apagado no encuentra ninguna y el botón fallaría sin explicar
 # por qué. Un botón que no puede funcionar no se ofrece: se dice qué falta.
 if hay redhornoma-canal; then
+  # 🔴 Aquí se contaba solo «cifs» y daba ROJO en un servidor que tenía el
+  # canal perfectamente puesto. Con automontaje —que es como lo deja
+  # redhornoma-canal— la carpeta figura como «autofs» hasta que alguien la
+  # toca, y solo entonces aparece el cifs encima. Es la misma trampa que ya
+  # está anotada dentro de redhornoma-canal, y aun así se repitió aquí.
+  # Visto el 14/08/2026 en servidor-ciudad.
   MONTADAS=0
   if [ -d /mnt/windows ]; then
     for d in /mnt/windows/*; do
       [ -d "$d" ] || continue
-      findmnt -nro FSTYPE "$d" 2>/dev/null | grep -qx cifs && MONTADAS=$((MONTADAS+1))
+      findmnt -nro FSTYPE "$d" 2>/dev/null | grep -qxE 'cifs|autofs' && MONTADAS=$((MONTADAS+1))
     done
   fi
   if [ "${MAQUINAS:-0}" = "0" ]; then
@@ -315,17 +339,31 @@ fi
 # ── 6 · El horario de encendido ───────────────────────────────────────
 # 🔴 Aquí NO se pregunta «is-enabled»: contesta que sí aunque el archivo
 # esté vacío. Se exige que systemd sepa decir CUÁNDO es la próxima vez.
+#
+# Y no todos los servidores lo necesitan. El de Cochabamba está en la misma
+# habitación que euflo: si se apaga, alcanza con pulsar el botón. El de
+# Hornoma está a 100 km y allí el horario es lo único que lo enciende.
+#
+# Como esta pantalla no puede saber a cuál de los dos está mirando, no lo
+# pinta de ROJO —que significa «esto está mal»— sino de amarillo, que
+# significa «decide tú». Y una vez decidido se calla: la marca queda
+# puesta y deja de preguntar. Un aviso que sigue saliendo después de haber
+# contestado es la forma más rápida de que se ignoren todos los demás.
 if hay redhornoma-horario && [ "$PAPEL" = "servidor" ]; then
   PROX=$(LC_ALL=C systemctl list-timers --all 2>/dev/null \
          | awk '/redhornoma-apagar-noche/{print $1" "$2" "$3; exit}')
   if [ -n "$PROX" ] && [ "$PROX" != "n/a - -" ]; then
     fila "🟢" "Horario de encendido" "próximo apagado: $PROX"
     accion "Ver o cambiar el horario" "$(icono appointment-new preferences-system-time clock)" "TERMINAL:redhornoma-horario --ver"
-  else
-    fila "🔴" "Horario de encendido" "sin horario — si se apaga, se queda apagada"
+    accion "Probar el despertador (se apaga 4 min)" "$(icono alarm-clock chronometer clock)" "PROBAR"
+  elif [ -f "$CONF/sin-horario" ]; then
+    fila "⚪" "Horario de encendido" "no hace falta: hay quien pulse el botón aquí"
     accion "Poner el horario de encendido" "$(icono appointment-new preferences-system-time clock)" "HORARIO"
+  else
+    fila "🟡" "Horario de encendido" "sin horario — si se apaga, solo se enciende yendo"
+    accion "Poner el horario de encendido" "$(icono appointment-new preferences-system-time clock)" "HORARIO"
+    accion "Aquí no hace falta horario" "$(icono dialog-information)" "SINHORARIO"
   fi
-  accion "Probar el despertador (se apaga 4 min)" "$(icono alarm-clock chronometer clock)" "PROBAR"
 fi
 
 # ── 7 · El respaldo programado ────────────────────────────────────────
@@ -365,8 +403,18 @@ else
 fi
 
 # ── 9 · El vigía ──────────────────────────────────────────────────────
+#
+# El vigía avisa AL INICIAR SESIÓN, y en un servidor no inicia sesión nadie:
+# está encendido solo, sin pantalla y sin persona delante. Ponerlo ahí no
+# avisaría a nadie, y la pantalla estaría pidiendo algo inútil.
+#
+# Quien vigila a todos los centros es el equipo desde donde se trabaja —el
+# portátil—, leyendo las señales que cada centro deja en la nube. Por eso
+# aquí se dice «no aplica» en vez de pedirlo.
 if hay redhornoma-vigia; then
-  if [ -f /etc/xdg/autostart/redhornoma-vigia.desktop ]; then
+  if [ "$PAPEL" = "servidor" ]; then
+    fila "⚪" "Aviso cuando algo falle" "no aplica: vigila el equipo de administración"
+  elif [ -f /etc/xdg/autostart/redhornoma-vigia.desktop ]; then
     fila "🟢" "Aviso cuando algo falle" "avisa al iniciar sesión"
   else
     fila "🟡" "Aviso cuando algo falle" "puesto pero no vigila — nadie se enteraría"
@@ -418,6 +466,7 @@ for a in "${ACCIONES[@]}"; do
   case "$or" in
     HORARIO) CAMPOS+=(--field="$et!$ic:fbtn" "bash -c '$SELF --hacer horario &'") ;;
     PROBAR)  CAMPOS+=(--field="$et!$ic:fbtn" "bash -c '$SELF --hacer probar &'") ;;
+    SINHORARIO) CAMPOS+=(--field="$et!$ic:fbtn" "bash -c '$SELF --hacer sinhorario &'") ;;
     *)       N=$((N+1)); printf '%s|%s\n' "$et" "$or" >> "$SPOOL"
              CAMPOS+=(--field="$et!$ic:fbtn" "bash -c '$SELF --hacer $N &'") ;;
   esac
