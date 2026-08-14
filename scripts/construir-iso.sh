@@ -169,6 +169,39 @@ if lb config >/tmp/redhornoma-config.log 2>&1; then
               "$BASE/paquetes/deb" 2>/dev/null || true
       fi
 
+      # ── Tailscale, que no puede venir de su repositorio ──────────
+      #
+      # 🔴 El 14/08/2026 se puso su repositorio en config/archives y la ISO
+      # FALLÓ a mitad, tras 3 GB de descarga:
+      #
+      #     SSL connection failed: certificate verify failed
+      #     E: Unable to locate package tailscale
+      #
+      # El sistema que se construye todavía no tiene los certificados para
+      # hablar por HTTPS cuando le toca leer ese origen, y Tailscale solo
+      # sirve por HTTPS: su HTTP redirige. Es un problema del huevo y la
+      # gallina que no se arregla desde la receta.
+      #
+      # Así que el programa entra como paquete suelto, bajado AQUÍ, donde
+      # sí hay certificados. «apt-get download» comprueba la firma del
+      # repositorio antes de dárnoslo, así que no se pierde nada.
+      #
+      # Sin esto la ISO sale sin el enlace entre centros, y con él se cae el
+      # objetivo 11 entero.
+      rm -f "$RECETA/config/packages.chroot"/tailscale_*.deb
+      printf "\n      Bajando Tailscale, que une los centros…\n"
+      if ( cd "$RECETA/config/packages.chroot" && apt-get download tailscale >/dev/null 2>&1 ); then
+        T=$(ls -1 "$RECETA/config/packages.chroot"/tailscale_*.deb 2>/dev/null | head -1)
+        [ -n "$T" ] && ok "tailscale $(basename "$T" | sed 's/tailscale_//; s/_amd64.deb//') irá dentro"
+      fi
+      if ! ls "$RECETA/config/packages.chroot"/tailscale_*.deb >/dev/null 2>&1; then
+        # Se avisa y se sigue: una ISO sin Tailscale sirve para un centro
+        # suelto. Lo que no se hace es callarlo, que fue justo lo que dejó
+        # este agujero sin ver durante semanas.
+        avi "no se pudo bajar Tailscale: la ISO saldrá SIN el enlace entre centros"
+        avi "para arreglarlo:  sudo apt update  y volver a construir"
+      fi
+
       N=$(ls "$RECETA/config/packages.chroot"/redhornoma-*.deb 2>/dev/null | wc -l)
       if [ "$N" -gt 0 ]; then
         ok "$N paquetes de RedHornoma irán dentro de la ISO"

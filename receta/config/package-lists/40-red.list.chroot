@@ -28,16 +28,20 @@ rsync
 ufw
 # Unir los centros entre sí — el objetivo 11.
 #
-# Los dos centros están detrás de CGNAT: ninguno tiene dirección propia en
-# internet. Sin esto no se puede llegar a Hornoma desde Cochabamba, y el
-# vigía se queda sin saber qué centros existen ni cuándo se vio a cada uno.
+# Tailscale NO se declara aquí: viaja como paquete suelto en
+# config/packages.chroot, que lo pone construir-iso.sh.
 #
-# 🔴 Se instalaba A MANO y no estaba declarado: una ISO reconstruida salía
-# sin el enlace, y con ella se caía el objetivo 11 entero. Su archivo y su
-# llave están en config/archives/tailscale.*
-tailscale
+# 🔴 Se intentó por el camino normal —su repositorio en config/archives— y
+# la ISO falló: el sistema en construcción aún no tiene los certificados
+# para hablar por HTTPS, y Tailscale solo sirve por HTTPS. El archivo de su
+# repositorio va dentro de redhornoma-red, para que la máquina ya instalada
+# sí lo actualice.
 # Leer la respuesta de Tailscale, que viene en JSON. Lo usa el vigía para
 # saber cuándo se conectó cada centro por última vez. Va en Depends de
 # redhornoma-base desde 1.2.1, y aun así se declara: la regla del proyecto
 # es que nada entre de arrastre.
 jq
+# Lo necesita Tailscale para armar sus reglas de red. Viene de arrastre con
+# él, y se declara igual: la regla del proyecto es que nada entre solo, y
+# menos algo de lo que depende el objetivo 11.
+iptables

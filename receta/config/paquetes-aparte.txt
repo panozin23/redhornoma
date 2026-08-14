@@ -1,0 +1,20 @@
+# Paquetes que SÍ van en la ISO pero NO por una lista de la receta.
+#
+# live-build no lee este archivo —no termina en .list.chroot— y por eso
+# está aquí: lo lee comprobar-receta.sh, para no dar una falsa alarma con
+# algo que sí viaja, y para que quede escrito POR QUÉ va por otro camino.
+#
+# La regla del proyecto es que nada entre de arrastre. Esto no es una
+# excepción a esa regla: es la misma regla, anotada donde se puede leer.
+
+tailscale
+#   Baja construir-iso.sh a config/packages.chroot/ desde este equipo.
+#
+#   Por su repositorio no se puede: el 14/08/2026 se probó y la ISO falló
+#   a mitad, tras 3 GB de descarga, con «SSL connection failed: certificate
+#   verify failed». El sistema en construcción todavía no tiene los
+#   certificados para hablar por HTTPS cuando le toca leer ese origen, y
+#   Tailscale solo sirve por HTTPS: su HTTP redirige.
+#
+#   El archivo de su repositorio va dentro de redhornoma-red, para que la
+#   máquina ya instalada —que sí tiene certificados— lo actualice sola.

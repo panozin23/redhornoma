@@ -1,0 +1,23 @@
+# De aquí salen las mejoras de Tailscale, que es lo que une los centros.
+#
+# 🔴 POR QUÉ ESTÁ AQUÍ Y NO EN LA RECETA
+#
+# El 14/08/2026 se puso en config/archives de la receta y la construcción
+# de la ISO FALLÓ:
+#
+#   SSL connection failed: certificate verify failed
+#   E: Unable to locate package tailscale
+#
+# El sistema que se está construyendo todavía no tiene los certificados
+# para hablar por HTTPS cuando le toca leer este origen, y Tailscale solo
+# sirve por HTTPS —su HTTP redirige—. Así que por ahí no se puede.
+#
+# La solución es la misma que ya usaba el repositorio propio de RedHornoma:
+# el programa entra en la ISO como paquete suelto, y este archivo se pone
+# al instalarlo. Cuando la máquina ya está en marcha sí tiene certificados,
+# y a partir de ahí Tailscale se actualiza solo con el resto.
+#
+# La firma se comprueba contra la llave de al lado. Se verificó al ponerla:
+#   Tailscale Inc. (Package repository signing key) <info@tailscale.com>
+#   2596A99EAAB33821893C0A79458CA832957F5868
+deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian trixie main

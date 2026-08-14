@@ -152,6 +152,11 @@ GUIONES=$(grep -rl '^#!.*\(bash\|/sh\)' "$BASE"/paquetes/*/usr/bin/ 2>/dev/null)
 if [ -z "$GUIONES" ]; then
   printf "   ${AM}⚠️ ${V} no encuentro las herramientas: no se pudo comprobar\n"
 else
+  # Los que viajan por otro camino: bajados aparte a packages.chroot. No
+  # están en ninguna lista de live-build y aun así entran en la ISO, así
+  # que contarlos como «sin declarar» sería una falsa alarma. El archivo
+  # explica el motivo de cada uno.
+  APARTE=$(grep -vE '^\s*#|^\s*$' "$BASE/receta/config/paquetes-aparte.txt" 2>/dev/null | tr -d ' ')
   # Lo que Debian trae siempre no hace falta declararlo.
   BASICOS=$(dpkg-query -W -f='${Package} ${Priority}\n' 2>/dev/null \
             | awk '$2=="required"||$2=="important"||$2=="standard"{print $1}' | sort -u)
@@ -170,6 +175,7 @@ else
   # De quién viene un archivo, sin que las desviaciones de dpkg estorben.
   de_quien(){ LC_ALL=C dpkg -S "$1" 2>/dev/null | grep -v 'diversion' | head -1 | cut -d: -f1; }
   vale(){ echo "$DECLARADOS" | grep -qx "$1" && return 0
+          echo "$APARTE"     | grep -qx "$1" && return 0
           echo "$BASICOS"    | grep -qx "$1" && return 0
           echo "$ARRASTRE"   | grep -qx "$1" && return 0
           return 1; }
