@@ -94,20 +94,30 @@ apaga, no la alcanza nadie.
 ## 📋 LO PRIMERO AL LLEGAR A HORNOMA — lista para seguir sin pensar
 
 ```
-1 · ENCENDER el .101 (botón, o el enchufe inteligente si ya está puesto)
+1 · ENCENDER el .101 (botón, o el enchufe inteligente, que ya está comprado)
 2 · leer por qué no despertó:
        cat /var/lib/redhornoma/horario.log
-3 · ponerlo al día:
+3 · ponerlo al día — trae TODO lo del 13 y 14 de agosto:
        sudo apt update && sudo apt full-upgrade
-4 · LOS DISCOS EXTERNOS, que se abran solos:      ← pedido por euflo el 13/08
-       sudo redhornoma-discos --siempre
-       y COMPROBARLO REINICIANDO, no ejecutándolo a mano
+4 · y entonces, UNA SOLA PANTALLA lo dice todo:      ← nuevo el 14/08
+       redhornoma-preparar
+   Enseña qué le falta a esa máquina y lo pone con un botón: los discos,
+   el canal con Windows, el horario, el respaldo. Lo rojo es lo que falta.
 5 · el despertador, verlo funcionar ANTES de confiar:
        sudo redhornoma-horario --probar 4
-6 · y solo entonces el horario:
-       sudo redhornoma-horario --instalar --encender 01:00 --apagar 08:00
-7 · montar el PRIMER PUESTO  →  cierra el objetivo 2 y el 3
+   (o el botón «Probar el despertador» de esa misma pantalla)
+6 · GUARDAR LA MÁQUINA — allá tampoco tiene copia:   ← nuevo el 14/08
+       sudo redhornoma-copiar-maquina --a /media/<usuario>/<disco>
+   Apaga el Windows, copia unos 40 GB (~20 min) y lo vuelve a encender.
+7 · PROBAR UNA RESTAURACIÓN, como se hizo aquí el 14/08
+8 · montar el PRIMER PUESTO  →  cierra el objetivo 2 y el 3
 ```
+
+**🔴 Y una que solo se ve desde fuera:** el vigía avisa de que Hornoma
+**«no avisa cuando se apaga ni cuando despierta»**. Es cierto: allá no
+está puesto `redhornoma-aviso`, así que ese centro **puede morirse en
+silencio** — que es exactamente lo que pasó el 12/08. El paso 3 lo trae,
+y el paso 6 del horario lo deja funcionando.
 
 **El paso 4 y el 5 son los que ya nos costaron caro.** El 4 tiene cuatro
 fallos detrás, y ninguno se ve ejecutando el comando: solo reiniciando.
@@ -120,7 +130,9 @@ El 5 es el que no hicimos el 12/08 y por eso se perdió la máquina.
                                 escriba) y el 3
 2 · Traer AGOSTO del .103       y con él deshacer otra vez los 7 registros del
                                 2064, que volvieron con el .wak de julio
-3 · PROBAR UNA RESTAURACIÓN     es el 25% que le falta al objetivo 8
+3 · PROBAR UNA RESTAURACIÓN     es el 25% que le falta al objetivo 8.
+                                Receta probada en Cochabamba el 14/08:
+                                ver objetivo-8-probado-cochabamba
 4 · Que algo AVISE              el objetivo 9 sigue en 10%
 ```
 
