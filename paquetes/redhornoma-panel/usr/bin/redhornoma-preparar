@@ -224,9 +224,15 @@ fi
 
 # ── 2 · El Windows de dentro ──────────────────────────────────────────
 MAQUINAS=$(vsh list --all --name | grep -c .)
+ENCENDIDAS=0
 if [ "${MAQUINAS:-0}" -gt 0 ]; then
   ENCENDIDAS=$(vsh list --name | grep -c .)
-  fila "🟢" "Windows dentro del Linux" "$MAQUINAS instalado(s), $ENCENDIDAS en marcha"
+  if [ "$MAQUINAS" = "1" ]; then
+    [ "$ENCENDIDAS" = "1" ] && DET="instalado y en marcha" || DET="instalado, ahora apagado"
+  else
+    DET="$MAQUINAS instalados, $ENCENDIDAS en marcha"
+  fi
+  fila "🟢" "Windows dentro del Linux" "$DET"
 elif hay virsh; then
   fila "🔴" "Windows dentro del Linux" "no hay ninguno instalado"
   hay redhornoma-asistente && accion "Instalar el Windows de los programas" "$(icono distributor-logo-windows computer)" "redhornoma-asistente"
@@ -235,8 +241,19 @@ else
 fi
 
 # ── 3 · El canal Windows ↔ Linux ──────────────────────────────────────
+#
 # No basta con que exista el archivo de credenciales: eso solo dice que
 # alguien lo intentó. Lo que importa es que HAY CARPETAS MONTADAS.
+#
+# Y aquí hubo que hilar más fino, porque la primera versión decía dos
+# cosas que no pegaban en la misma pantalla: «el respaldo no puede leer
+# las bases» junto a «el respaldo no aplica aquí». En un portátil el canal
+# no es para respaldar —eso lo hace el servidor— sino para ver las
+# carpetas del Windows. La misma falta, distinta gravedad según el papel.
+#
+# Y sobre todo: «redhornoma-canal» busca la máquina que esté ENCENDIDA. Con
+# el Windows apagado no encuentra ninguna y el botón fallaría sin explicar
+# por qué. Un botón que no puede funcionar no se ofrece: se dice qué falta.
 if hay redhornoma-canal; then
   MONTADAS=0
   if [ -d /mnt/windows ]; then
@@ -245,13 +262,24 @@ if hay redhornoma-canal; then
       findmnt -nro FSTYPE "$d" 2>/dev/null | grep -qx cifs && MONTADAS=$((MONTADAS+1))
     done
   fi
-  if [ "$MONTADAS" -gt 0 ]; then
+  if [ "${MAQUINAS:-0}" = "0" ]; then
+    fila "⚪" "Canal con el Windows" "no aplica: no hay Windows instalado"
+  elif [ "$MONTADAS" -gt 0 ]; then
     fila "🟢" "Canal con el Windows" "$MONTADAS carpeta(s) del Windows, visibles desde Linux"
-  elif [ "${MAQUINAS:-0}" -gt 0 ]; then
-    fila "🔴" "Canal con el Windows" "sin montar — el respaldo no puede leer las bases"
+  elif [ "$ENCENDIDAS" = "0" ]; then
+    if [ -f "$CONF/windows-cifs.credenciales" ]; then
+      fila "🟡" "Canal con el Windows" "puesto, pero el Windows está apagado"
+    else
+      fila "🟡" "Canal con el Windows" "sin abrir — hay que encender el Windows primero"
+    fi
+    hay redhornoma-entrar && \
+      accion "Encender el Windows" "$(icono distributor-logo-windows computer)" "TERMINAL:redhornoma-entrar"
+  elif [ "$PAPEL" = "servidor" ]; then
+    fila "🔴" "Canal con el Windows" "sin abrir — el respaldo no puede leer las bases"
     accion "Abrir el canal con el Windows" "$(icono network-connect network-workgroup)" "pkexec /usr/bin/redhornoma-canal"
   else
-    fila "⚪" "Canal con el Windows" "no aplica: no hay Windows instalado"
+    fila "🟡" "Canal con el Windows" "sin abrir — no verás las carpetas del Windows"
+    accion "Abrir el canal con el Windows" "$(icono network-connect network-workgroup)" "pkexec /usr/bin/redhornoma-canal"
   fi
 fi
 
