@@ -37,9 +37,35 @@
 set -u
 
 CONF_RESP=/var/lib/redhornoma/respaldo.conf
+CONF_CENTROS=/etc/redhornoma/centros.conf
 MEMORIA="${XDG_CACHE_HOME:-$HOME/.cache}/redhornoma-vigia"
 # Cuántos días sin poder mirar la nube antes de preocuparse por eso.
 CIEGO_MAX=3
+
+# 🔴 EL PUNTO CIEGO, VISTO EL 14/08/2026
+#
+# El vigía decía «todos los centros respaldaron a tiempo y dan señal»
+# mientras Hornoma llevaba DOS DÍAS muerta. Y no mentía por un fallo: hacía
+# exactamente lo que se le pidió. Miraba las señales que hay en la nube y
+# las encontraba en orden.
+#
+# El problema era otro, y es el más viejo de este proyecto: SOLO VEÍA LO
+# QUE ESTABA. Un centro que deja de dar señales no aparece en ninguna
+# lista, así que no había nada que revisar. Cuanto peor va un centro, menos
+# se le ve.
+#
+# La cura es tener una lista de a QUIÉN se espera, y esa lista ya existía
+# sin darnos cuenta: Tailscale sabe qué máquinas hay y cuándo se vio a cada
+# una por última vez. No hay que escribirla ni mantenerla a mano.
+#
+# Cuántas horas sin conectarse antes de avisar. 36 y no 48 a propósito: una
+# máquina que enciende todas las noches y falla una sola ya pasa de 24, y
+# esperar dos días completos es perder una noche más.
+SILENCIO_HORAS=36
+[ -f "$CONF_CENTROS" ] && {
+  _s=$(grep -oP '^silencio_horas=\K[0-9]+' "$CONF_CENTROS" 2>/dev/null | head -1)
+  [ -n "${_s:-}" ] && SILENCIO_HORAS="$_s"
+}
 
 V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; GR=$'\033[0;90m'
 export GDK_BACKEND=x11
@@ -135,6 +161,62 @@ if [ "$SE_PUDO" = "si" ]; then
     [ "$Q" = "apagando" ] && [ "$HORAS" -gt 24 ] && \
       PROBLEMAS="$PROBLEMAS🟡|$C ($M)|dijo que volvía el $VU y lleva $((HORAS/24)) días sin dar señal"$'\n'
   done
+  # ── Los centros que se esperan, y no están ──
+  #
+  # Esto es lo que arregla el punto ciego. Lo de arriba revisa las señales
+  # que HAY; esto revisa a los centros que DEBERÍAN estar dando señales.
+  #
+  # Dos avisos distintos, y conviene no confundirlos:
+  #
+  #   · «lleva N días sin conectarse» — el centro está caído o sin luz.
+  #   · «nunca ha avisado» — el centro funciona, pero no sabe avisar.
+  #     Es el caso de Hornoma: tiene respaldos en la nube y ni una sola
+  #     señal de estado, porque le falta el aviso puesto. Un centro así
+  #     puede morirse en silencio, y por eso se dice aunque esté sano.
+  if command -v tailscale >/dev/null 2>&1; then
+    YO=$(timeout 10 tailscale status --self=true --peers=false 2>/dev/null | awk 'NR==1{print $2}')
+    # Se guarda la respuesta ANTES de intentar leerla, para poder
+    # distinguir «Tailscale no dijo nada» de «no supe leer lo que dijo».
+    # No es lo mismo: lo primero es un centro suelto, lo segundo es este
+    # equipo estropeado, y solo lo segundo hay que contarlo.
+    CRUDO=$(timeout 15 tailscale status --json 2>/dev/null)
+    LISTA=""
+    [ -n "$CRUDO" ] && LISTA=$(printf '%s' "$CRUDO" \
+      | jq -r '.Peer[]? | "\(.HostName)|\(.Online)|\(.LastSeen // "")"' 2>/dev/null)
+    if [ -n "$CRUDO" ] && [ -z "$LISTA" ] && printf '%s' "$CRUDO" | grep -q '"Peer"'; then
+      # Tailscale contestó y traía centros, pero no se pudo leer la
+      # respuesta: falta jq o está roto. Sin esto, la revisión entera
+      # desaparecía SIN DECIRLO y el vigía volvía a estar ciego callado,
+      # que es justo el fallo que este trozo vino a arreglar.
+      PROBLEMAS="$PROBLEMAS🟡|este equipo|no puede revisar los centros — falla «jq»"$'\n'
+      LISTA=""
+    fi
+    if [ -n "$LISTA" ]; then
+      while IFS='|' read -r maq en_linea visto; do
+        [ -n "$maq" ] || continue
+        [ "$maq" = "$YO" ] && continue
+        # El centro al que pertenece la máquina se saca del nombre del
+        # archivo de señal: «centro--maquina.txt». Si no hay ninguno, es
+        # una máquina que nunca respaldó y no se le exige nada.
+        ARCH=$(ls "$TD"/resp/*--"$maq".txt 2>/dev/null | head -1)
+        [ -n "$ARCH" ] || continue
+        CEN=$(grep -oP '^centro=\K.*' "$ARCH" 2>/dev/null); CEN="${CEN:-$maq}"
+
+        if [ "$en_linea" != "true" ] && [ -n "$visto" ] && [ "${visto:0:4}" != "0001" ]; then
+          SEG=$(date -d "$visto" +%s 2>/dev/null)
+          if [ -n "${SEG:-}" ]; then
+            H=$(( (AHORA - SEG) / 3600 ))
+            [ "$H" -gt "$SILENCIO_HORAS" ] && \
+              PROBLEMAS="$PROBLEMAS🔴|$CEN ($maq)|lleva $((H/24)) día(s) y $((H%24)) h sin conectarse"$'\n'
+          fi
+        fi
+        # ¿Sabe avisar? Si nunca dejó una señal de estado, no puede decir
+        # que se apaga ni que despertó, y su silencio no significa nada.
+        [ -f "$TD/estado/$(basename "$ARCH")" ] || \
+          PROBLEMAS="$PROBLEMAS🟡|$CEN ($maq)|no avisa cuando se apaga ni cuando despierta"$'\n'
+      done <<< "$LISTA"
+    fi
+  fi
 else
   # 🔴 No poder mirar NO es «todo bien». Pero un rato sin internet es
   # normal: se calla ese día. Si pasan varios, eso ya es el problema.
