@@ -10,3 +10,9 @@ nut-server
 
 # Eventos de energía
 acpid
+# Memoria comprimida.
+#
+# En los centros hay máquinas de 2 GB, y ahí la diferencia entre ir lento e
+# ir inservible es tener esto. El perfil de prueba «minima» se abandonó por
+# eso mismo. Cuesta un poco de procesador y ahorra mucho disco.
+zram-tools

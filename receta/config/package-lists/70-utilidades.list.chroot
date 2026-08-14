@@ -63,3 +63,27 @@ rsyslog
 # a mano cada comando de prueba.
 spice-vdagent
 qemu-guest-agent
+# Órdenes que las herramientas de RedHornoma usan de verdad.
+#
+# Estas cinco salieron el 14/08/2026 de una comprobación nueva: mirar QUÉ
+# ÓRDENES invocan las herramientas y de qué paquete viene cada una. Todas
+# estaban instaladas aquí de arrastre y ninguna declarada, así que en una
+# ISO reconstruida podían faltar y la herramienta fallaría sin explicar por
+# qué. Ahora esa comprobación la hace comprobar-receta.sh sola.
+#
+# fuser         · redhornoma-discos, para ver quién retiene un disco
+# xdg-user-dir  · redhornoma-equipos y la carpeta compartida
+# xorriso       · redhornoma-virtio-reducido, para abrir y rehacer la ISO
+#                 de controladores de Windows
+# genisoimage   · lo mismo, en máquinas donde xorriso no basta
+psmisc
+xdg-user-dirs
+xorriso
+genisoimage
+# Que la máquina se ponga al día ella sola. Es parte del objetivo 9: un
+# centro donde no hay informático no puede depender de que alguien se
+# acuerde de actualizar.
+unattended-upgrades
+# El cortafuegos, con ventana. «ufw» ya estaba, pero solo se maneja
+# escribiendo, y esta distro no se maneja escribiendo.
+gufw

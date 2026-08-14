@@ -42,3 +42,16 @@ netcat-openbsd
 qemu-system-modules-spice
 spice-client-gtk
 libspice-server1
+# Compartir carpetas con el Windows sin pasar por la red.
+#
+# Es lo que hace que /var/lib/libvirt/compartido se vea dentro del Windows
+# aunque la red esté caída. Entraba de arrastre; declararlo es lo que
+# impide que una actualización de Debian lo quite y nadie se entere.
+virtiofsd
+# Saber QUÉ LLAVE tiene un disco de Windows cifrado, en vez de suponer lo
+# peor. Lo usa redhornoma-importar antes de rendirse con un BitLocker.
+#
+# Estaba solo como «Recommends» del paquete, y eso significa «hoy sí,
+# mañana quién sabe»: basta con que alguien construya sin recomendados
+# para que la herramienta pierda la vista sin avisar.
+libbde-utils

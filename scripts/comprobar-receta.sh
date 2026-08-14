@@ -104,13 +104,127 @@ else
   printf "\n   ${AM}Añádelos a la lista que les corresponda antes de construir.${V}\n"
 fi
 
+# ── ¿Y las ÓRDENES que las herramientas usan de verdad? ───────────────
+#
+# Lo de arriba comprueba lo que los paquetes DICEN que necesitan. Esto
+# comprueba lo que las herramientas HACEN: cada orden que invocan tiene que
+# poder venir de la receta.
+#
+# 🔴 Nació el 14/08/2026 y encontró cinco agujeros a la primera: psmisc,
+# xdg-user-dirs, xorriso, genisoimage y tailscale. Los cinco estaban
+# instalados de arrastre y ninguno declarado, así que una ISO reconstruida
+# podía salir sin ellos y la herramienta fallaría sin decir por qué.
+# Tailscale era el peor: se llevaba por delante el objetivo 11 entero.
+#
+# LA PARTE DIFÍCIL FUE NO GRITAR EN FALSO. La primera versión señaló once
+# cosas y NINGUNA era un agujero: palabras sueltas de los comentarios,
+# «import» de un guion de Python, y paquetes que sí están pero por otro
+# camino. Un aviso que se equivoca se aprende a ignorar, así que se afinó
+# hasta que solo queda lo real:
+#
+#   · se miran solo los guiones de bash, no los de Python
+#   · y solo las palabras en POSICIÓN DE ORDEN — al principio, tras una
+#     tubería, tras sudo… — no cualquier palabra suelta
+#   · vale que el paquete esté declarado, que Debian lo traiga siempre, o
+#     que venga de arrastre de algo declarado (se calcula el arrastre)
+#   · las órdenes que se eligen por alternativas —«awk»— se comprueban
+#     mirando a TODOS los que podrían darla
+titulo "LAS ÓRDENES QUE USAN LAS HERRAMIENTAS"
+
+# Terminales de repuesto: se prueban una tras otra y konsole, que sí está
+# declarada, es la primera. Que las otras falten es lo normal, no un fallo.
+OPCIONALES=" gnome-terminal xfce4-terminal xterm x-terminal-emulator "
+
+# Palabras que PARECEN órdenes y no lo son. Se listan una a una, con su
+# motivo, en vez de afinar el filtro: se intentó quitar todo lo que va
+# entre comillas y el filtro empezó a comerse órdenes de verdad —bdeinfo,
+# xorriso, mdb-tables— que sí hacen falta. Perder una de verdad es peor
+# que arrastrar dos falsas, y una lista escrita se entiende de un vistazo.
+#
+#   import  · palabra de Python, dentro de los trozos de Python incrustados
+#   docker  · parte de un patrón de búsqueda de nombres de interfaz de red,
+#             en redhornoma-papel: (virbr[0-9]+|docker[0-9]+|...)
+NO_SON_ORDENES=" import docker "
+
+FALTAN_ORD=0
+GUIONES=$(grep -rl '^#!.*\(bash\|/sh\)' "$BASE"/paquetes/*/usr/bin/ 2>/dev/null)
+
+if [ -z "$GUIONES" ]; then
+  printf "   ${AM}⚠️ ${V} no encuentro las herramientas: no se pudo comprobar\n"
+else
+  # Lo que Debian trae siempre no hace falta declararlo.
+  BASICOS=$(dpkg-query -W -f='${Package} ${Priority}\n' 2>/dev/null \
+            | awk '$2=="required"||$2=="important"||$2=="standard"{print $1}' | sort -u)
+  # Y lo que viene de arrastre de lo declarado también vale. Se parte de
+  # las listas MÁS los paquetes propios, que no van en ninguna lista
+  # porque viajan como .deb dentro de la receta.
+  PROPIOS=""
+  for _d in "$BASE"/paquetes/redhornoma-*/; do
+    [ -d "$_d" ] && PROPIOS="$PROPIOS $(basename "$_d")"
+  done
+  # shellcheck disable=SC2086
+  ARRASTRE=$(apt-cache depends --recurse --installed --no-recommends --no-suggests \
+               --no-conflicts --no-breaks --no-replaces --no-enhances \
+               $DECLARADOS $PROPIOS 2>/dev/null | grep -oP '^\w[\w.+-]*' | sort -u)
+
+  # De quién viene un archivo, sin que las desviaciones de dpkg estorben.
+  de_quien(){ LC_ALL=C dpkg -S "$1" 2>/dev/null | grep -v 'diversion' | head -1 | cut -d: -f1; }
+  vale(){ echo "$DECLARADOS" | grep -qx "$1" && return 0
+          echo "$BASICOS"    | grep -qx "$1" && return 0
+          echo "$ARRASTRE"   | grep -qx "$1" && return 0
+          return 1; }
+
+  ORDENES=$(grep -hoP '(^|[;&|]|\$\(|&&|\|\||\bsudo |\bpkexec |\bexec |\bcommand -v |\bthen |\bdo |\bif |\bxargs )[[:space:]]*\K[a-z][a-z0-9_-]{2,}\b' \
+            $GUIONES 2>/dev/null | sort -u)
+  REVISADAS=0
+  for o in $ORDENES; do
+    case "$o" in redhornoma-*) continue ;; esac
+    echo "$OPCIONALES"     | grep -q " $o " && continue
+    echo "$NO_SON_ORDENES" | grep -q " $o " && continue
+    RUTA=$(command -v "$o" 2>/dev/null) || continue
+    [ -x "$RUTA" ] || continue
+    REVISADAS=$((REVISADAS+1))
+    PAQ=$(de_quien "$RUTA")
+    # Sin dueño = la elige el sistema de alternativas. Basta con que UNO de
+    # los que podrían darla esté en la receta.
+    if [ -z "$PAQ" ]; then
+      # 🔴 Aquí ponía «break 2» para salir de los dos bucles de una vez, y
+      # el 2 se llevaba por delante el bucle de FUERA: la comprobación
+      # terminaba tras dos órdenes y daba un verde precioso habiendo mirado
+      # el 1% . Es el fallo favorito de esta casa: no un rojo equivocado,
+      # sino un verde barato. Ahora se usa una marca.
+      RESUELTA=no
+      for alt in $(update-alternatives --list "$o" 2>/dev/null); do
+        vale "$(de_quien "$alt")" && { RESUELTA=si; break; }
+      done
+      [ "$RESUELTA" = "si" ] && continue
+      PAQ=$(de_quien "$(readlink -f "$RUTA")")
+    fi
+    [ -n "$PAQ" ] || continue
+    vale "$PAQ" && continue
+    printf "   ${RO}✖${V} %-24s la usa «%s» y no puede venir de la receta\n" "$PAQ" "$o"
+    FALTAN_ORD=$((FALTAN_ORD+1))
+  done
+  if [ "$REVISADAS" -lt 40 ]; then
+    # No se puede cantar victoria habiendo mirado cuatro cosas. Las
+    # herramientas usan del orden de 150 órdenes; si salen muchas menos, es
+    # que la comprobación se rompió, no que todo esté bien.
+    printf "   ${AM}⚠️ ${V} solo se pudieron revisar %s órdenes: la comprobación no sirve\n" "$REVISADAS"
+    FALTAN_ORD=1
+  elif [ "$FALTAN_ORD" -eq 0 ]; then
+    printf "   ${VE}●${V} las %s órdenes revisadas vienen de la receta\n" "$REVISADAS"
+  else
+    printf "\n   ${AM}Declara esos paquetes en la lista que les toque.${V}\n"
+  fi
+fi
+
 # ── Resumen ───────────────────────────────────────────────────────────
 titulo "RESUMEN"
 printf "   Paquetes declarados:  %s\n" "$TOTAL"
 printf "   ${VE}Encontrados:          %s${V}\n" "$OK"
 [ "$NO" -gt 0 ] && printf "   ${RO}Sin encontrar:        %s${V}\n" "$NO"
 
-if [ "$NO" -eq 0 ] && [ "$FALTAN_DEP" -eq 0 ]; then
+if [ "$NO" -eq 0 ] && [ "$FALTAN_DEP" -eq 0 ] && [ "$FALTAN_ORD" -eq 0 ]; then
   echo
   printf "   ${VE}✅ La receta está limpia. Se puede construir.${V}\n"
   echo

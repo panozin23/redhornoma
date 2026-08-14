@@ -30,3 +30,8 @@ kio-fuse
 libreoffice-writer
 libreoffice-calc
 libreoffice-l10n-es
+# Que se pueda añadir una impresora sin ser administrador.
+#
+# Sin esto, poner una impresora nueva pide contraseña de root en una
+# terminal. Con esto la pide en una ventana, como todo lo demás.
+cups-pk-helper

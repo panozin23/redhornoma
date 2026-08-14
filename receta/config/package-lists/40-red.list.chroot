@@ -26,3 +26,18 @@ rsync
 
 # Cortafuegos
 ufw
+# Unir los centros entre sí — el objetivo 11.
+#
+# Los dos centros están detrás de CGNAT: ninguno tiene dirección propia en
+# internet. Sin esto no se puede llegar a Hornoma desde Cochabamba, y el
+# vigía se queda sin saber qué centros existen ni cuándo se vio a cada uno.
+#
+# 🔴 Se instalaba A MANO y no estaba declarado: una ISO reconstruida salía
+# sin el enlace, y con ella se caía el objetivo 11 entero. Su archivo y su
+# llave están en config/archives/tailscale.*
+tailscale
+# Leer la respuesta de Tailscale, que viene en JSON. Lo usa el vigía para
+# saber cuándo se conectó cada centro por última vez. Va en Depends de
+# redhornoma-base desde 1.2.1, y aun así se declara: la regla del proyecto
+# es que nada entre de arrastre.
+jq
