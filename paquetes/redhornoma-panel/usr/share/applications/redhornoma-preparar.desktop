@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Preparar el centro
+GenericName=Poner a punto esta computadora
+Comment=Enseña qué le falta al centro y lo pone con un botón: horario, discos, canal con Windows, respaldo
+Exec=redhornoma-preparar
+Icon=/usr/share/pixmaps/redhornoma.png
+Terminal=false
+Categories=System;Settings;
+Keywords=preparar;instalar;poner;montar;horario;encender;discos;respaldo;canal;windows;nuevo;centro;
+StartupNotify=true
+StartupWMClass=redhornomapanel

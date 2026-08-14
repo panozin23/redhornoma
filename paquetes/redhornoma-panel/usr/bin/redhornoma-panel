@@ -574,6 +574,13 @@ if command -v redhornoma-equipos >/dev/null 2>&1; then
   CAMPOS+=(--field="Ver las otras computadoras!network-workgroup:fbtn"
            "bash -c 'redhornoma-equipos &'")
 fi
+# Lo de montar y poner a punto va aquí abajo, después de lo del día a día:
+# se usa una vez por centro, no todas las mañanas. Pero tiene que estar en
+# el panel, porque el panel es lo único que alguien abre sin que le digan.
+if command -v redhornoma-preparar >/dev/null 2>&1; then
+  CAMPOS+=(--field="Preparar el centro — qué le falta!preferences-system:fbtn"
+           "bash -c 'redhornoma-preparar &'")
+fi
 CAMPOS+=(--field="Pedir ayuda — preparar el informe!help-contents:fbtn"
          "bash -c '$SELF --ayuda &'")
 

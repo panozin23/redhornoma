@@ -1,0 +1,386 @@
+#!/bin/bash
+# redhornoma-preparar — Poner a punto un centro sin escribir un comando.
+#
+# EL PORQUÉ
+#
+# Es el objetivo 6, y era el más flojo del proyecto por una razón concreta:
+# de las 25 herramientas, 11 tenían ventana y 14 solo funcionaban
+# escribiendo. Y no eran las de andar por casa —esas ya estaban en el
+# panel— sino justo las de MONTAR y ARREGLAR: el horario de encendido, los
+# discos externos, el canal con Windows, la carpeta compartida.
+#
+# O sea: lo que se usa el día que se llega a un centro, con la máquina
+# recién puesta, a 100 km, sin nadie que sepa de esto al lado.
+#
+# LA DECISIÓN: UNA PANTALLA, NO CATORCE
+#
+# Lo evidente era ponerle una ventana a cada herramienta. Se descartó por
+# tres motivos:
+#
+#   · Serían catorce ventanas que mantener y catorce sitios donde
+#     equivocarse, para una persona que va a usarlas una vez por centro.
+#   · No resuelve lo importante. El problema no es «no sé escribir el
+#     comando de los discos»: es NO SABER QUÉ FALTA. Catorce ventanas
+#     sueltas siguen sin decirlo.
+#   · La herramienta debajo seguiría siendo la misma. Con una pantalla
+#     encima, cualquier arreglo en ella vale para todas.
+#
+# Así que esto es una lista de lo que un centro necesita, con su estado
+# medido AHORA, y un botón junto a lo que falte. Se abre, se mira lo rojo,
+# se pulsa. Ese es todo el manual.
+#
+# LA REGLA QUE HEREDA DEL PANEL
+#
+# Ningún dato se supone. Cada uno se le pregunta a la máquina en el
+# momento, y cuando no se puede saber se dice «sin dato» en gris. Un verde
+# inventado aquí es peor que en el panel: ahí solo informa mal, aquí hace
+# que alguien se vaya del centro creyendo que lo dejó listo.
+#
+# Uso:
+#   redhornoma-preparar           la ventana
+#   redhornoma-preparar --texto   lo mismo escrito, para SSH
+set -u
+
+export GDK_BACKEND=x11
+
+CONF=/etc/redhornoma
+SELF="$(readlink -f "$0")"
+
+# A virsh se le habla en inglés SIEMPRE que se vaya a leer su respuesta:
+# esta distro está en español y contesta «ejecutando», no «running». Esa
+# confusión ya rompió el panel el 09/08 y el «entrar» el 13/08.
+vsh(){ LC_ALL=C virsh -c qemu:///system "$@" 2>/dev/null; }
+
+MODO=ventana; HACER=""
+case "${1:-}" in
+  --texto)   MODO=texto ;;
+  --hacer)   HACER="${2:-}" ;;
+  -h|--ayuda|--help) sed -n '2,45p' "$0" | sed 's/^# \?//'; exit 0 ;;
+  "")        ;;
+  *)         echo "no entiendo «$1»"; exit 1 ;;
+esac
+[ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && MODO=texto
+command -v yad >/dev/null 2>&1 || MODO=texto
+
+# Dónde se apuntan las órdenes de los botones.
+#
+# No se meten dentro del propio botón: yad recibe cada orden como un texto
+# que vuelve a pasar por el intérprete, y una etiqueta con acento o una
+# ruta con espacio bastaba para partirla por la mitad. Se apuntan aquí y
+# el botón solo lleva un número, que no se puede romper.
+SPOOL="${XDG_RUNTIME_DIR:-/tmp}/redhornoma-preparar.$(id -u)"
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; GR=$'\033[0;90m'
+
+hay(){ command -v "$1" >/dev/null 2>&1; }
+esc(){ printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+# Rellenar hasta un ancho CONTANDO LETRAS, no bytes.
+#
+# «printf %-28s» cuenta bytes, y en UTF-8 una «í» ocupa dos. Así que cada
+# palabra con acento salía una casilla corrida, y como aquí casi todos los
+# asuntos llevan tilde —«Respaldo automático», «Programas al día»— la
+# columna quedaba en zigzag. ${#texto} sí cuenta letras.
+pad(){ local s="$1" n="$2" l=${#1}; printf '%s' "$s"
+       while [ "$l" -lt "$n" ]; do printf ' '; l=$((l+1)); done; }
+
+# ══ LO QUE HACE CADA BOTÓN ════════════════════════════════════════════
+#
+# Va antes que las comprobaciones a propósito: cuando esto se ejecuta por
+# un botón no hace falta volver a medir nada, y medir cuesta unos segundos
+# —preguntarle a apt, a virsh y a systemd— que se notan como un retraso
+# entre pulsar y que pase algo.
+
+# Enseñar lo que dijo una orden MIENTRAS ocurre, no al final: poner los
+# discos tarda, y una ventana congelada hace que la gente la cierre a
+# mitad. Con --tail se va viendo línea a línea, igual que en la terminal.
+ejecutar(){
+  local titulo="$1" orden="$2"
+  case "$orden" in
+    TERMINAL:*)
+      x-terminal-emulator -e bash -c "${orden#TERMINAL:}; echo; read -rp 'Pulsa Enter para cerrar'" &
+      return 0 ;;
+    TEXTO:*)
+      ${orden#TEXTO:} 2>&1 | yad --text-info --center --width=760 --height=460 \
+        --title="$titulo" --button="Cerrar:0" >/dev/null 2>&1
+      return 0 ;;
+  esac
+  ( eval "$orden" 2>&1; printf '\n──────────\nTerminado.\n' ) \
+    | yad --text-info --tail --center --width=760 --height=440 \
+          --title="$titulo" --button="Cerrar:0" >/dev/null 2>&1
+}
+
+poner_horario(){
+  local r ENC APA DIA
+  r=$(yad --form --center --width=460 --borders=14 \
+        --title="Horario de encendido" \
+        --text="<b>¿A qué hora quieres que la computadora se encienda sola?</b>
+
+Se enciende con la alarma del reloj de la placa. Es la <b>única</b> forma
+de encenderla sin que haya nadie delante." \
+        --field="Se enciende a las":CB "01:00!02:00!03:00!04:00!05:00!06:00" \
+        --field="Se apaga a las":CB "08:00!09:00!10:00!12:00!04:00!06:00" \
+        --field="Días":CB "miércoles a domingo!todos los días!lunes a viernes" \
+        --button="Cancelar:1" --button="Poner el horario:0" 2>/dev/null) || return 0
+  ENC=$(printf '%s' "$r" | cut -d'|' -f1)
+  APA=$(printf '%s' "$r" | cut -d'|' -f2)
+  DIA=$(printf '%s' "$r" | cut -d'|' -f3)
+  case "$DIA" in
+    "todos los días")   DIA="*-*-*" ;;
+    "lunes a viernes")  DIA="Mon..Fri" ;;
+    *)                  DIA="Wed..Sun" ;;
+  esac
+  [ -n "$ENC" ] && [ -n "$APA" ] || return 0
+  ejecutar "Poniendo el horario de encendido" \
+    "pkexec /usr/bin/redhornoma-horario --instalar --encender $ENC --apagar $APA --dias $DIA"
+}
+
+probar_despertador(){
+  yad --question --center --width=470 --borders=14 --title="Probar el despertador" \
+    --text="<b>Esta computadora se va a APAGAR</b>, y debe encenderse sola en 4 minutos.
+
+Es la única prueba que vale: si la placa no arma la alarma, la máquina se
+queda apagada, y a 100 km eso significa viajar hasta allá.
+
+<i>Hazlo solo si estás delante de ella.</i>" \
+    --button="No:1" --button="Apagar y probar:0" >/dev/null 2>&1 || return 0
+  ejecutar "Probando el despertador" "pkexec /usr/bin/redhornoma-horario --probar 4"
+}
+
+# ── Cuando esto lo lanza un botón ─────────────────────────────────────
+if [ -n "$HACER" ]; then
+  case "$HACER" in
+    horario) poner_horario ;;
+    probar)  probar_despertador ;;
+    [0-9]*)
+      # El número es la línea del apunte. Si no está, no se hace nada:
+      # más vale un botón que no responde que uno que ejecuta otra cosa.
+      LINEA=$(sed -n "${HACER}p" "$SPOOL" 2>/dev/null)
+      [ -n "$LINEA" ] || exit 0
+      ejecutar "${LINEA%%|*}" "${LINEA#*|}" ;;
+  esac
+  exit 0
+fi
+
+# ══ QUÉ NECESITA UN CENTRO, Y CÓMO SABER SI LO TIENE ══════════════════
+#
+# Cada comprobación mira LO QUE HACE FALTA PARA QUE FUNCIONE, no que el
+# archivo exista. Un temporizador que existe pero está vacío contesta que
+# sí a «is-enabled» y no despierta a nadie: eso dejó el .101 de Hornoma
+# apagado a 100 km. Por eso al horario se le pregunta CUÁNDO es la próxima
+# vez, que es lo único que no se puede fingir.
+
+PAPEL=$(cat "$CONF/papel" 2>/dev/null)
+CENTRO=$(grep -oP '^centro=\K.*' "$CONF/centro.conf" 2>/dev/null | head -1)
+CENTRO="${CENTRO:-sin centro definido}"
+# El nombre se lee del núcleo, no con «hostname».
+#
+# La orden «hostname» resuelve por /etc/hosts y en esta máquina contesta
+# «localhost.localdomain», mientras el equipo se llama «portatil». Sale un
+# nombre que no es el suyo justo donde la persona mira para saber en qué
+# computadora está. Es la misma fuente que usa el panel.
+NOMBRE=$(cat /proc/sys/kernel/hostname 2>/dev/null || uname -n)
+
+# Lo que se va enseñando. Formato: icono|asunto|cómo está
+FILAS=()
+# Lo que se puede pulsar. Formato: etiqueta|icono|orden
+ACCIONES=()
+
+fila(){ FILAS+=("$1|$2|$3"); }
+accion(){ ACCIONES+=("$1|$2|$3"); }
+
+# ── 1 · El papel de esta computadora ──────────────────────────────────
+# Va primero porque de él dependen casi todos los demás: un puesto no
+# necesita ni horario ni discos externos, y ofrecérselos solo confunde.
+if [ -n "$PAPEL" ]; then
+  fila "🟢" "Papel de esta computadora" "$PAPEL"
+else
+  fila "🔴" "Papel de esta computadora" "sin definir — es lo PRIMERO"
+  hay redhornoma-asistente && accion "Poner en marcha esta computadora" "preferences-system" "redhornoma-asistente"
+fi
+
+# ── 2 · El Windows de dentro ──────────────────────────────────────────
+MAQUINAS=$(vsh list --all --name | grep -c .)
+if [ "${MAQUINAS:-0}" -gt 0 ]; then
+  ENCENDIDAS=$(vsh list --name | grep -c .)
+  fila "🟢" "Windows dentro del Linux" "$MAQUINAS instalado(s), $ENCENDIDAS en marcha"
+elif hay virsh; then
+  fila "🔴" "Windows dentro del Linux" "no hay ninguno instalado"
+  hay redhornoma-asistente && accion "Instalar el Windows de los programas" "distributor-logo-windows" "redhornoma-asistente"
+else
+  fila "⚪" "Windows dentro del Linux" "esta computadora no lleva virtualización"
+fi
+
+# ── 3 · El canal Windows ↔ Linux ──────────────────────────────────────
+# No basta con que exista el archivo de credenciales: eso solo dice que
+# alguien lo intentó. Lo que importa es que HAY CARPETAS MONTADAS.
+if hay redhornoma-canal; then
+  MONTADAS=0
+  if [ -d /mnt/windows ]; then
+    for d in /mnt/windows/*; do
+      [ -d "$d" ] || continue
+      findmnt -nro FSTYPE "$d" 2>/dev/null | grep -qx cifs && MONTADAS=$((MONTADAS+1))
+    done
+  fi
+  if [ "$MONTADAS" -gt 0 ]; then
+    fila "🟢" "Canal con el Windows" "$MONTADAS carpeta(s) del Windows, visibles desde Linux"
+  elif [ "${MAQUINAS:-0}" -gt 0 ]; then
+    fila "🔴" "Canal con el Windows" "sin montar — el respaldo no puede leer las bases"
+    accion "Abrir el canal con el Windows" "network-connect" "pkexec /usr/bin/redhornoma-canal"
+  else
+    fila "⚪" "Canal con el Windows" "no aplica: no hay Windows instalado"
+  fi
+fi
+
+# ── 4 · La carpeta que ven los dos mundos ─────────────────────────────
+if hay redhornoma-carpeta-compartida; then
+  if grep -q '^\[compartido\]' /etc/samba/smb.conf 2>/dev/null; then
+    fila "🟢" "Carpeta compartida" "creada y publicada"
+  else
+    fila "🟡" "Carpeta compartida" "sin crear — hace falta para pasar archivos"
+    accion "Crear la carpeta compartida" "folder-publicshare" "pkexec /usr/bin/redhornoma-carpeta-compartida --crear"
+  fi
+fi
+
+# ── 5 · Los discos externos, solos ────────────────────────────────────
+# Se exigen LAS DOS piezas: el servicio para cuando se arranca con el
+# disco puesto, y la regla para cuando se enchufa después. Con una sola,
+# la mitad de las veces el disco no aparece y parece que está roto.
+if hay redhornoma-discos; then
+  SERV=no; REGLA=no
+  systemctl is-enabled redhornoma-discos.service >/dev/null 2>&1 && SERV=si
+  [ -f /etc/udev/rules.d/99-redhornoma-discos.rules ] && REGLA=si
+  if [ "$SERV$REGLA" = "sisi" ]; then
+    fila "🟢" "Discos externos" "se abren solos al arrancar y al enchufarlos"
+  elif [ "$SERV$REGLA" = "nono" ]; then
+    fila "🔴" "Discos externos" "hay que abrirlos a mano cada vez"
+    accion "Que los discos se abran solos" "drive-harddisk-usb" "pkexec /usr/bin/redhornoma-discos --siempre"
+  else
+    fila "🟡" "Discos externos" "a medias: servicio=$SERV, al enchufar=$REGLA"
+    accion "Terminar de poner los discos" "drive-harddisk-usb" "pkexec /usr/bin/redhornoma-discos --siempre"
+  fi
+fi
+
+# ── 6 · El horario de encendido ───────────────────────────────────────
+# 🔴 Aquí NO se pregunta «is-enabled»: contesta que sí aunque el archivo
+# esté vacío. Se exige que systemd sepa decir CUÁNDO es la próxima vez.
+if hay redhornoma-horario && [ "$PAPEL" = "servidor" ]; then
+  PROX=$(LC_ALL=C systemctl list-timers --all 2>/dev/null \
+         | awk '/redhornoma-apagar-noche/{print $1" "$2" "$3; exit}')
+  if [ -n "$PROX" ] && [ "$PROX" != "n/a - -" ]; then
+    fila "🟢" "Horario de encendido" "próximo apagado: $PROX"
+    accion "Ver o cambiar el horario" "appointment-new" "TERMINAL:redhornoma-horario --ver"
+  else
+    fila "🔴" "Horario de encendido" "sin horario — si se apaga, se queda apagada"
+    accion "Poner el horario de encendido" "appointment-new" "HORARIO"
+  fi
+  accion "Probar el despertador (se apaga 4 min)" "alarm-symbolic" "PROBAR"
+fi
+
+# ── 7 · El respaldo programado ────────────────────────────────────────
+#
+# Solo se le exige al SERVIDOR. En un puesto o en el portátil no vive la
+# información del centro —vive en el servidor—, así que pintarlo de rojo
+# ahí sería un susto falso, y los sustos falsos enseñan a ignorar los de
+# verdad. Es el mismo motivo por el que el vigía calla cuando todo va bien.
+if hay redhornoma-respaldo; then
+  if [ "$PAPEL" = "servidor" ]; then
+    PROXR=$(LC_ALL=C systemctl list-timers --all 2>/dev/null \
+            | awk '/redhornoma-respaldo/{print $1" "$2" "$3; exit}')
+    if [ -n "$PROXR" ] && [ "$PROXR" != "n/a - -" ]; then
+      fila "🟢" "Respaldo automático" "próximo: $PROXR"
+    else
+      fila "🔴" "Respaldo automático" "sin programar — nadie copia nada solo"
+      accion "Programar el respaldo automático" "document-save" "pkexec /usr/bin/redhornoma-respaldo --programar"
+    fi
+  else
+    fila "⚪" "Respaldo automático" "no aplica: la información vive en el servidor"
+  fi
+fi
+
+# ── 8 · El sistema al día ─────────────────────────────────────────────
+# Sin internet no se puede saber, y eso NO es «está al día»: se dice en
+# gris. Un verde aquí haría que alguien se fuera del centro sin actualizar.
+PEND=$(LC_ALL=C apt-get -s upgrade 2>/dev/null | grep -c '^Inst ')
+if LC_ALL=C apt-get -s upgrade >/dev/null 2>&1; then
+  if [ "${PEND:-0}" -gt 0 ]; then
+    fila "🟡" "Programas al día" "$PEND mejora(s) esperando"
+    accion "Actualizar RedHornoma" "system-software-update" "TERMINAL:sudo apt update && sudo apt full-upgrade -y"
+  else
+    fila "🟢" "Programas al día" "sin nada pendiente"
+  fi
+else
+  fila "⚪" "Programas al día" "sin dato — no se pudo consultar"
+fi
+
+# ── 9 · El vigía ──────────────────────────────────────────────────────
+if hay redhornoma-vigia; then
+  if [ -f /etc/xdg/autostart/redhornoma-vigia.desktop ]; then
+    fila "🟢" "Aviso cuando algo falle" "avisa al iniciar sesión"
+  else
+    fila "🟡" "Aviso cuando algo falle" "puesto pero no vigila — nadie se enteraría"
+    accion "Que avise cuando algo falle" "dialog-warning" "pkexec /usr/bin/redhornoma-vigia --instalar"
+  fi
+fi
+
+# ── Siempre disponibles, aunque todo esté verde ───────────────────────
+hay redhornoma-windows-agil && [ "${MAQUINAS:-0}" -gt 0 ] && \
+  accion "Agilizar el Windows" "preferences-system-performance" "TERMINAL:sudo redhornoma-windows-agil --aplicar"
+hay redhornoma-informe && \
+  accion "Informe técnico de este equipo" "help-contents" "TEXTO:redhornoma-informe --sin-color"
+
+# ══ ENSEÑARLO ═════════════════════════════════════════════════════════
+
+if [ "$MODO" = "texto" ]; then
+  printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+  printf "${AZ} PREPARAR EL CENTRO — %s${V}\n" "$CENTRO"
+  printf "${AZ}══════════════════════════════════════════════════════${V}\n\n"
+  for f in "${FILAS[@]}"; do
+    IFS='|' read -r i a c <<< "$f"
+    printf "   %s %s %s\n" "$i" "$(pad "$a" 28)" "$c"
+  done
+  if [ "${#ACCIONES[@]}" -gt 0 ]; then
+    printf "\n${AZ}   Lo que se puede hacer${V}\n\n"
+    for a in "${ACCIONES[@]}"; do
+      IFS='|' read -r et ic or <<< "$a"
+      printf "   ${GR}·${V} %s ${GR}%s${V}\n" "$(pad "$et" 42)" "${or#*:}"
+    done
+  fi
+  printf "\n   ${GR}Con escritorio, esto mismo sale con botones: redhornoma-preparar${V}\n\n"
+  exit 0
+fi
+
+# ── La ventana ────────────────────────────────────────────────────────
+TABLA=""
+for f in "${FILAS[@]}"; do
+  IFS='|' read -r i a c <<< "$f"
+  TABLA="$TABLA$i  $(pad "$(esc "$a")" 28)$(esc "$c")"$'\n'
+done
+
+# Las órdenes se apuntan en el archivo, una por línea, y el botón lleva el
+# número de línea. Así ninguna etiqueta con acentos ni ninguna ruta con
+# espacios puede partir la orden.
+: > "$SPOOL" 2>/dev/null || SPOOL=/dev/null
+CAMPOS=(); N=0
+for a in "${ACCIONES[@]}"; do
+  IFS='|' read -r et ic or <<< "$a"
+  case "$or" in
+    HORARIO) CAMPOS+=(--field="$et!$ic:fbtn" "bash -c '$SELF --hacer horario &'") ;;
+    PROBAR)  CAMPOS+=(--field="$et!$ic:fbtn" "bash -c '$SELF --hacer probar &'") ;;
+    *)       N=$((N+1)); printf '%s|%s\n' "$et" "$or" >> "$SPOOL"
+             CAMPOS+=(--field="$et!$ic:fbtn" "bash -c '$SELF --hacer $N &'") ;;
+  esac
+done
+
+yad --borders=14 --center --width=720 \
+  --title="RedHornoma — preparar el centro" \
+  --window-icon=preferences-system --align=left \
+  --text="<span size=\"x-large\"><b>Preparar $(esc "$CENTRO")</b></span>
+<i>$(esc "$NOMBRE") · ${PAPEL:-sin papel} · $(date '+%d/%m/%Y %H:%M')</i>
+
+<tt>$(esc "$TABLA")</tt>
+<small>Lo rojo es lo que falta. Cada botón hace una cosa y te enseña qué pasó.</small>" \
+  --form --columns=2 "${CAMPOS[@]}" \
+  --button="🔄   Actualizar:bash -c '$SELF &'" \
+  --button="Cerrar:1" >/dev/null 2>&1
+exit 0

@@ -1,5 +1,5 @@
 Package: redhornoma-panel
-Version: 1.0.10
+Version: 1.0.11
 Section: admin
 Priority: optional
 Architecture: all
@@ -25,3 +25,9 @@ Description: La pantalla única de control de RedHornoma
  explica en español, lo arregla si puede y después COMPRUEBA que quedó
  arreglado. Antes el panel terminaba dando un comando que copiar, y en un
  centro rural ese comando no lo escribe nadie.
+ .
+ Y desde 1.0.11 trae «Preparar el centro»: una pantalla que dice qué le
+ falta a esta computadora —el horario de encendido, los discos externos,
+ el canal con Windows, el respaldo— y lo pone con un botón. Antes esas
+ catorce herramientas solo funcionaban escribiendo comandos, y son justo
+ las que hacen falta el día que se monta un centro, lejos y sin ayuda.
