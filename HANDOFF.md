@@ -91,6 +91,28 @@ haya nadie allí**: se enciende sola a la 1:00. Por eso su objetivo 11 supera al
 de Cochabamba, que tiene las mismas piezas pero **no tiene despertador**: si se
 apaga, no la alcanza nadie.
 
+## 📋 LO PRIMERO AL LLEGAR A HORNOMA — lista para seguir sin pensar
+
+```
+1 · ENCENDER el .101 (botón, o el enchufe inteligente si ya está puesto)
+2 · leer por qué no despertó:
+       cat /var/lib/redhornoma/horario.log
+3 · ponerlo al día:
+       sudo apt update && sudo apt full-upgrade
+4 · LOS DISCOS EXTERNOS, que se abran solos:      ← pedido por euflo el 13/08
+       sudo redhornoma-discos --siempre
+       y COMPROBARLO REINICIANDO, no ejecutándolo a mano
+5 · el despertador, verlo funcionar ANTES de confiar:
+       sudo redhornoma-horario --probar 4
+6 · y solo entonces el horario:
+       sudo redhornoma-horario --instalar --encender 01:00 --apagar 08:00
+7 · montar el PRIMER PUESTO  →  cierra el objetivo 2 y el 3
+```
+
+**El paso 4 y el 5 son los que ya nos costaron caro.** El 4 tiene cuatro
+fallos detrás, y ninguno se ve ejecutando el comando: solo reiniciando.
+El 5 es el que no hicimos el 12/08 y por eso se perdió la máquina.
+
 **Lo que queda en Hornoma, por orden:**
 
 ```
