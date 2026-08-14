@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=¿Cómo están los centros?
+GenericName=Vigía de los centros
+Comment=Mirar si algún centro dejó de respaldar o de dar señales
+Exec=redhornoma-vigia --siempre
+Icon=dialog-information
+Terminal=false
+Categories=System;
+Keywords=centros;vigia;aviso;respaldo;hornoma;estado;alerta;
+StartupNotify=true

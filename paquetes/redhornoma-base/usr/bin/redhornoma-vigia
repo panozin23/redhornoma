@@ -1,0 +1,192 @@
+#!/bin/bash
+# redhornoma-vigia — Avisa cuando un centro deja de estar bien, sin que
+#                    nadie tenga que preguntar.
+#
+# EL PORQUÉ
+#
+# Es el objetivo 9, y es el que más falta hace. El sistema YA sabe cuándo
+# algo va mal: lo anota, deja señales en la nube, y hay pantallas que lo
+# enseñan. Lo que faltaba es que lo DIGA.
+#
+# Y no es teoría. Ha pasado dos veces:
+#
+#   · SOAPS estuvo CINCO SEMANAS sin respaldo (visto el 08/08/2026)
+#   · Hornoma, NUEVE DÍAS (visto el 12/08/2026)
+#
+# Las dos veces el sistema hizo bien su trabajo y lo apuntó. Las dos veces
+# nadie leyó el apunte. Un centro que anota sus fallos en un archivo que
+# nadie abre está tan roto como uno que no los anota.
+#
+# LAS DOS REGLAS QUE LO HACEN ÚTIL
+#
+# 1 · SI TODO VA BIEN, NO DICE NADA. Un aviso que sale todos los días se
+#     ignora a la semana, y entonces el día que importa tampoco se lee.
+#     El silencio es la señal de que todo está en orden.
+#
+# 2 · SI NO PUEDE COMPROBARLO, NO DICE «TODO BIEN». Sin internet no se
+#     sabe nada de los centros, y eso NO es lo mismo que estar bien.
+#     Se calla ese día —quedarse sin internet un rato es normal— pero si
+#     pasan varios días sin poder mirar, avisa de eso también: el vigía
+#     también se vigila a sí mismo.
+#
+# Uso:
+#   redhornoma-vigia              mira y avisa solo si hay algo
+#   redhornoma-vigia --siempre    habla aunque todo esté bien (para probar)
+#   redhornoma-vigia --texto      escrito, sin ventana
+#   sudo redhornoma-vigia --instalar   que mire solo al iniciar sesión
+set -u
+
+CONF_RESP=/var/lib/redhornoma/respaldo.conf
+MEMORIA="${XDG_CACHE_HOME:-$HOME/.cache}/redhornoma-vigia"
+# Cuántos días sin poder mirar la nube antes de preocuparse por eso.
+CIEGO_MAX=3
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; GR=$'\033[0;90m'
+export GDK_BACKEND=x11
+
+MODO=auto; SIEMPRE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --siempre)  SIEMPRE=1; shift ;;
+    --texto)    MODO=texto; shift ;;
+    --instalar) MODO=instalar; shift ;;
+    -h|--ayuda) sed -n '2,35p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) echo "No entiendo «$1»"; exit 1 ;;
+  esac
+done
+
+# ── Dejarlo puesto para que mire al iniciar sesión ────────────────────
+if [ "$MODO" = "instalar" ]; then
+  D=/etc/xdg/autostart/redhornoma-vigia.desktop
+  [ "$(id -u)" = "0" ] || { echo "Hace falta sudo: sudo redhornoma-vigia --instalar"; exit 1; }
+  cat > "$D" <<'FIN'
+[Desktop Entry]
+Type=Application
+Name=Vigía de los centros
+Comment=Avisa si algún centro dejó de respaldar o de dar señales
+# El retraso es a propósito: al iniciar sesión la red tarda en estar
+# lista, y preguntar antes daría un «no se pudo comprobar» que no es
+# verdad. Se espera a que el escritorio esté en marcha.
+Exec=sh -c 'sleep 90; redhornoma-vigia'
+Terminal=false
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+FIN
+  printf "   ✅ puesto: mirará al iniciar sesión, 90 segundos después\n"
+  printf "   %s\n" "$D"
+  printf "\n   Para quitarlo:  sudo rm %s\n\n" "$D"
+  exit 0
+fi
+
+# ── Dónde está el permiso de la nube ──────────────────────────────────
+leer(){ [ -f "$2" ] && grep -oP "^$1=\K.*" "$2" 2>/dev/null | head -1; }
+if [ -z "${RCLONE_CONFIG:-}" ]; then
+  for _p in "$HOME/.config/rclone/rclone.conf" /etc/redhornoma/rclone.conf \
+            "/home/${SUDO_USER:-nadie}/.config/rclone/rclone.conf"; do
+    [ -r "$_p" ] && { export RCLONE_CONFIG="$_p"; break; }
+  done
+fi
+NUBE=$(leer nube "$CONF_RESP"); REMOTO="${NUBE%%:*}"; REMOTO="${REMOTO:-drive}"
+
+mkdir -p "$(dirname "$MEMORIA")" 2>/dev/null
+ULTIMA_BUENA=$(cat "$MEMORIA" 2>/dev/null | head -1)
+case "$ULTIMA_BUENA" in ''|*[!0-9]*) ULTIMA_BUENA=0 ;; esac
+
+# ── Traer las señales ─────────────────────────────────────────────────
+PROBLEMAS=""; SE_PUDO=no
+if command -v rclone >/dev/null 2>&1 && [ -n "${RCLONE_CONFIG:-}" ]; then
+  TD=$(mktemp -d); trap 'rm -rf "$TD"' EXIT
+  if timeout 120 rclone copy "$REMOTO:SENALES-REDHORNOMA" "$TD/resp" --include '*.txt' >/dev/null 2>&1; then
+    SE_PUDO=si
+  fi
+  timeout 120 rclone copy "$REMOTO:ESTADO-REDHORNOMA" "$TD/estado" --include '*.txt' >/dev/null 2>&1
+fi
+
+if [ "$SE_PUDO" = "si" ]; then
+  AHORA=$(date +%s)
+  printf '%s\n' "$AHORA" > "$MEMORIA" 2>/dev/null
+
+  # ── Los respaldos: ¿alguno lleva demasiado sin copiar? ──
+  for f in "$TD"/resp/*.txt; do
+    [ -f "$f" ] || continue
+    C=$(grep -oP '^centro=\K.*' "$f");   M=$(grep -oP '^maquina=\K.*' "$f")
+    S=$(grep -oP '^segundos=\K.*' "$f"); CADA=$(grep -oP '^cada_dias=\K.*' "$f")
+    OK=$(grep -oP '^confirmado=\K.*' "$f")
+    case "$S" in ''|*[!0-9]*) continue ;; esac
+    case "$CADA" in ''|*[!0-9]*) CADA=2 ;; esac
+    DIAS=$(( (AHORA - S) / 86400 ))
+    # Margen de un día: que el respaldo se retrase unas horas es normal.
+    if [ "$DIAS" -gt $(( CADA + 1 )) ]; then
+      PROBLEMAS="$PROBLEMAS🔴|$C ($M)|lleva $DIAS días sin respaldar"$'\n'
+    elif [ "$OK" != "si" ]; then
+      PROBLEMAS="$PROBLEMAS🔴|$C ($M)|su último respaldo NO pasó la comprobación"$'\n'
+    fi
+  done
+
+  # ── Los que dijeron «vuelvo» y no volvieron ──
+  for f in "$TD"/estado/*.txt; do
+    [ -f "$f" ] || continue
+    C=$(grep -oP '^centro=\K.*' "$f");  M=$(grep -oP '^maquina=\K.*' "$f")
+    Q=$(grep -oP '^que=\K.*' "$f");     S=$(grep -oP '^segundos=\K.*' "$f")
+    VU=$(grep -oP '^vuelve=\K.*' "$f")
+    case "$S" in ''|*[!0-9]*) continue ;; esac
+    HORAS=$(( (AHORA - S) / 3600 ))
+    # Solo preocupa si dijo que se iba y lleva más de un día callado.
+    [ "$Q" = "apagando" ] && [ "$HORAS" -gt 24 ] && \
+      PROBLEMAS="$PROBLEMAS🟡|$C ($M)|dijo que volvía el $VU y lleva $((HORAS/24)) días sin dar señal"$'\n'
+  done
+else
+  # 🔴 No poder mirar NO es «todo bien». Pero un rato sin internet es
+  # normal: se calla ese día. Si pasan varios, eso ya es el problema.
+  CIEGO=$(( ( $(date +%s) - ULTIMA_BUENA ) / 86400 ))
+  if [ "$ULTIMA_BUENA" = "0" ]; then
+    [ "$SIEMPRE" = "1" ] && PROBLEMAS="⚪|este equipo|nunca ha podido leer la nube — ¿tiene permiso de Drive?"$'\n'
+  elif [ "$CIEGO" -ge "$CIEGO_MAX" ]; then
+    PROBLEMAS="🟡|este equipo|lleva $CIEGO días sin poder mirar los centros"$'\n'
+  fi
+fi
+
+# ── Decir lo que haya ─────────────────────────────────────────────────
+N=$(printf '%s' "$PROBLEMAS" | grep -c . || true)
+
+if [ "$N" = "0" ] && [ "$SIEMPRE" = "0" ]; then
+  exit 0            # todo bien: el silencio es la señal
+fi
+
+if [ "$MODO" = "texto" ] || ! command -v yad >/dev/null 2>&1 \
+   || [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+  printf "\n${AZ}══════════════════════════════════════════════════════${V}\n"
+  printf "${AZ} VIGÍA DE LOS CENTROS${V}\n"
+  printf "${AZ}══════════════════════════════════════════════════════${V}\n\n"
+  if [ "$N" = "0" ]; then
+    printf "   ${VE}●${V} todos los centros respaldaron a tiempo y dan señal\n\n"
+  else
+    printf '%s' "$PROBLEMAS" | while IFS='|' read -r ico quien detalle; do
+      [ -n "$quien" ] || continue
+      printf "   %s %-26s %s\n" "$ico" "$quien" "$detalle"
+    done
+    printf "\n   ${GR}Para verlo con detalle:  redhornoma-vigilar${V}\n\n"
+  fi
+  exit 0
+fi
+
+if [ "$N" = "0" ]; then
+  yad --info --center --width=420 --title="Vigía de los centros" \
+      --text="<b>Todos los centros están al día.</b>\n\nRespaldaron a tiempo y dan señal." \
+      --button="Entendido:0" >/dev/null 2>&1
+  exit 0
+fi
+
+TEXTO="<b>Hay algo que mirar en los centros:</b>\n"
+while IFS='|' read -r ico quien detalle; do
+  [ -n "$quien" ] || continue
+  TEXTO="$TEXTO\n$ico  <b>$quien</b>\n     $detalle\n"
+done <<< "$PROBLEMAS"
+TEXTO="$TEXTO\n<small>Este aviso solo sale cuando hay algo. Si no lo ves, es que todo va bien.</small>"
+
+yad --warning --center --width=520 --title="Vigía de los centros" \
+    --text="$TEXTO" --button="Ver detalle:2" --button="Entendido:0" >/dev/null 2>&1
+[ "$?" = "2" ] && command -v redhornoma-vigilar >/dev/null 2>&1 && {
+  redhornoma-vigilar 2>&1 | yad --text-info --center --width=760 --height=420 \
+    --title="Los centros, con detalle" --button="Cerrar:0" >/dev/null 2>&1; }
+exit 0
