@@ -75,6 +75,29 @@ V=$'\033[0m'; AZ=$'\033[1;34m'; GR=$'\033[0;90m'
 hay(){ command -v "$1" >/dev/null 2>&1; }
 esc(){ printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
 
+# Un icono que el tema no tiene sale como un cuadrito vacío, y un botón con
+# un cuadrito parece roto — pasó con «drive-harddisk-usb», que no existe.
+#
+# Y no basta con elegir bien mirando ESTA máquina: aquí conviven Papirus y
+# Breeze, y en un centro puede haber solo uno. Así que se le dan varios
+# nombres, se usa el primero que de verdad esté, y si no está ninguno se
+# pone el del ejecutable, que lo trae cualquier tema.
+#
+# Se buscó guardar el resultado en una tabla para no repetir el rebusco, y
+# NO SIRVE: cada «$(icono …)» es un proceso aparte, así que la tabla nace
+# vacía en cada llamada. Se midió: once búsquedas cuestan medio segundo, y
+# recorrer el tema entero de una vez cuesta lo mismo. Se deja lo sencillo.
+icono(){
+  local n
+  for n in "$@"; do
+    if find /usr/share/icons /usr/share/pixmaps "$HOME/.local/share/icons" \
+            -name "$n.*" -print -quit 2>/dev/null | grep -q .; then
+      printf '%s' "$n"; return
+    fi
+  done
+  printf 'application-x-executable'
+}
+
 # Rellenar hasta un ancho CONTANDO LETRAS, no bytes.
 #
 # «printf %-28s» cuenta bytes, y en UTF-8 una «í» ocupa dos. Así que cada
@@ -196,7 +219,7 @@ if [ -n "$PAPEL" ]; then
   fila "🟢" "Papel de esta computadora" "$PAPEL"
 else
   fila "🔴" "Papel de esta computadora" "sin definir — es lo PRIMERO"
-  hay redhornoma-asistente && accion "Poner en marcha esta computadora" "preferences-system" "redhornoma-asistente"
+  hay redhornoma-asistente && accion "Poner en marcha esta computadora" "$(icono preferences-system system-run)" "redhornoma-asistente"
 fi
 
 # ── 2 · El Windows de dentro ──────────────────────────────────────────
@@ -206,7 +229,7 @@ if [ "${MAQUINAS:-0}" -gt 0 ]; then
   fila "🟢" "Windows dentro del Linux" "$MAQUINAS instalado(s), $ENCENDIDAS en marcha"
 elif hay virsh; then
   fila "🔴" "Windows dentro del Linux" "no hay ninguno instalado"
-  hay redhornoma-asistente && accion "Instalar el Windows de los programas" "distributor-logo-windows" "redhornoma-asistente"
+  hay redhornoma-asistente && accion "Instalar el Windows de los programas" "$(icono distributor-logo-windows computer)" "redhornoma-asistente"
 else
   fila "⚪" "Windows dentro del Linux" "esta computadora no lleva virtualización"
 fi
@@ -226,7 +249,7 @@ if hay redhornoma-canal; then
     fila "🟢" "Canal con el Windows" "$MONTADAS carpeta(s) del Windows, visibles desde Linux"
   elif [ "${MAQUINAS:-0}" -gt 0 ]; then
     fila "🔴" "Canal con el Windows" "sin montar — el respaldo no puede leer las bases"
-    accion "Abrir el canal con el Windows" "network-connect" "pkexec /usr/bin/redhornoma-canal"
+    accion "Abrir el canal con el Windows" "$(icono network-connect network-workgroup)" "pkexec /usr/bin/redhornoma-canal"
   else
     fila "⚪" "Canal con el Windows" "no aplica: no hay Windows instalado"
   fi
@@ -238,7 +261,7 @@ if hay redhornoma-carpeta-compartida; then
     fila "🟢" "Carpeta compartida" "creada y publicada"
   else
     fila "🟡" "Carpeta compartida" "sin crear — hace falta para pasar archivos"
-    accion "Crear la carpeta compartida" "folder-publicshare" "pkexec /usr/bin/redhornoma-carpeta-compartida --crear"
+    accion "Crear la carpeta compartida" "$(icono folder-publicshare folder-shared folder)" "pkexec /usr/bin/redhornoma-carpeta-compartida --crear"
   fi
 fi
 
@@ -254,10 +277,10 @@ if hay redhornoma-discos; then
     fila "🟢" "Discos externos" "se abren solos al arrancar y al enchufarlos"
   elif [ "$SERV$REGLA" = "nono" ]; then
     fila "🔴" "Discos externos" "hay que abrirlos a mano cada vez"
-    accion "Que los discos se abran solos" "drive-harddisk-usb" "pkexec /usr/bin/redhornoma-discos --siempre"
+    accion "Que los discos se abran solos" "$(icono drive-removable-media-usb drive-removable-media drive-harddisk)" "pkexec /usr/bin/redhornoma-discos --siempre"
   else
     fila "🟡" "Discos externos" "a medias: servicio=$SERV, al enchufar=$REGLA"
-    accion "Terminar de poner los discos" "drive-harddisk-usb" "pkexec /usr/bin/redhornoma-discos --siempre"
+    accion "Terminar de poner los discos" "$(icono drive-removable-media-usb drive-removable-media drive-harddisk)" "pkexec /usr/bin/redhornoma-discos --siempre"
   fi
 fi
 
@@ -269,12 +292,12 @@ if hay redhornoma-horario && [ "$PAPEL" = "servidor" ]; then
          | awk '/redhornoma-apagar-noche/{print $1" "$2" "$3; exit}')
   if [ -n "$PROX" ] && [ "$PROX" != "n/a - -" ]; then
     fila "🟢" "Horario de encendido" "próximo apagado: $PROX"
-    accion "Ver o cambiar el horario" "appointment-new" "TERMINAL:redhornoma-horario --ver"
+    accion "Ver o cambiar el horario" "$(icono appointment-new preferences-system-time clock)" "TERMINAL:redhornoma-horario --ver"
   else
     fila "🔴" "Horario de encendido" "sin horario — si se apaga, se queda apagada"
-    accion "Poner el horario de encendido" "appointment-new" "HORARIO"
+    accion "Poner el horario de encendido" "$(icono appointment-new preferences-system-time clock)" "HORARIO"
   fi
-  accion "Probar el despertador (se apaga 4 min)" "alarm-symbolic" "PROBAR"
+  accion "Probar el despertador (se apaga 4 min)" "$(icono alarm-clock chronometer clock)" "PROBAR"
 fi
 
 # ── 7 · El respaldo programado ────────────────────────────────────────
@@ -291,7 +314,7 @@ if hay redhornoma-respaldo; then
       fila "🟢" "Respaldo automático" "próximo: $PROXR"
     else
       fila "🔴" "Respaldo automático" "sin programar — nadie copia nada solo"
-      accion "Programar el respaldo automático" "document-save" "pkexec /usr/bin/redhornoma-respaldo --programar"
+      accion "Programar el respaldo automático" "$(icono document-save media-floppy)" "pkexec /usr/bin/redhornoma-respaldo --programar"
     fi
   else
     fila "⚪" "Respaldo automático" "no aplica: la información vive en el servidor"
@@ -319,15 +342,15 @@ if hay redhornoma-vigia; then
     fila "🟢" "Aviso cuando algo falle" "avisa al iniciar sesión"
   else
     fila "🟡" "Aviso cuando algo falle" "puesto pero no vigila — nadie se enteraría"
-    accion "Que avise cuando algo falle" "dialog-warning" "pkexec /usr/bin/redhornoma-vigia --instalar"
+    accion "Que avise cuando algo falle" "$(icono dialog-warning)" "pkexec /usr/bin/redhornoma-vigia --instalar"
   fi
 fi
 
 # ── Siempre disponibles, aunque todo esté verde ───────────────────────
 hay redhornoma-windows-agil && [ "${MAQUINAS:-0}" -gt 0 ] && \
-  accion "Agilizar el Windows" "preferences-system-performance" "TERMINAL:sudo redhornoma-windows-agil --aplicar"
+  accion "Agilizar el Windows" "$(icono preferences-system-performance speedometer)" "TERMINAL:sudo redhornoma-windows-agil --aplicar"
 hay redhornoma-informe && \
-  accion "Informe técnico de este equipo" "help-contents" "TEXTO:redhornoma-informe --sin-color"
+  accion "Informe técnico de este equipo" "$(icono document-properties dialog-information)" "TEXTO:redhornoma-informe --sin-color"
 
 # ══ ENSEÑARLO ═════════════════════════════════════════════════════════
 
