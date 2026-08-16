@@ -30,7 +30,20 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+# Colores SOLO cuando se habla con una terminal.
+#
+# 🔴 El 15/08/2026 euflo abrió «Ver detalle» desde el vigía y la ventana
+# salió llena de basura: «[1;34m», «[0m»… Los códigos de color son para una
+# terminal; una ventana no los entiende y los pinta tal cual. La lista de
+# centros quedó ilegible justo en el sitio donde más falta hace leerla.
+#
+# Es la misma idea de siempre: preguntar antes de suponer. Aquí se pregunta
+# «¿me está leyendo una terminal?» en vez de dar por hecho que sí.
+if [ -t 1 ]; then
+  V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+else
+  V=""; AZ=""; VE=""; RO=""; AM=""; GR=""
+fi
 titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
 mal(){ printf "   ${RO}✗${V} %s\n" "$1"; }
 nota(){ printf "   ${GR}%s${V}\n" "$1"; }

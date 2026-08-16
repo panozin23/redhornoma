@@ -269,6 +269,10 @@ TEXTO="$TEXTO\n<small>Este aviso solo sale cuando hay algo. Si no lo ves, es que
 yad --warning --center --width=520 --title="Vigía de los centros" \
     --text="$TEXTO" --button="Ver detalle:2" --button="Entendido:0" >/dev/null 2>&1
 [ "$?" = "2" ] && command -v redhornoma-vigilar >/dev/null 2>&1 && {
-  redhornoma-vigilar 2>&1 | yad --text-info --center --width=760 --height=420 \
+  # El «sed» quita los códigos de color: una ventana no los entiende y los
+  # pinta como basura. La herramienta de al lado ya no los manda cuando no
+  # hay terminal, pero esto vale también para las que aún no lo sepan.
+  redhornoma-vigilar 2>&1 | sed -r 's/\x1b\[[0-9;]*[mK]//g' \
+    | yad --text-info --center --width=760 --height=420 \
     --title="Los centros, con detalle" --button="Cerrar:0" >/dev/null 2>&1; }
 exit 0

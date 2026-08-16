@@ -154,11 +154,14 @@ ejecutar(){
       x-terminal-emulator -e bash -c "${orden#TERMINAL:}; echo; read -rp 'Pulsa Enter para cerrar'" &
       return 0 ;;
     TEXTO:*)
-      ${orden#TEXTO:} 2>&1 | yad --text-info --center --width=760 --height=460 \
+      # Sin códigos de color: una ventana los pinta como basura.
+      ${orden#TEXTO:} 2>&1 | sed -r 's/\x1b\[[0-9;]*[mK]//g' \
+        | yad --text-info --center --width=760 --height=460 \
         --title="$titulo" --button="Cerrar:0" >/dev/null 2>&1
       return 0 ;;
   esac
   ( eval "$orden" 2>&1; printf '\n──────────\nTerminado.\n' ) \
+    | sed -r 's/\x1b\[[0-9;]*[mK]//g' \
     | yad --text-info --tail --center --width=760 --height=440 \
           --title="$titulo" --button="Cerrar:0" >/dev/null 2>&1
 }
