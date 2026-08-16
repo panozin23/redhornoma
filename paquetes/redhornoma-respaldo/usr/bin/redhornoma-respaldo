@@ -1594,14 +1594,22 @@ for m in /media/*/* /run/media/*/*; do
   fi
 done
 
-# Segunda pasada: copiar, solo a un disco de verdad.
+# Segunda pasada: copiar a TODOS los discos de verdad que haya.
+#
+# Antes se paraba en el primero. Y en Hornoma, el 15/08/2026, había dos
+# enchufados —el Toshiba y el Samsung— y solo uno recibía copia. Son 53 MB:
+# no copiar al segundo no ahorra nada que merezca la pena, y los dos discos
+# tienen sectores dañados anotados. Dos copias en dos discos gastados
+# protegen mucho más que una en uno.
 for m in /media/*/* /run/media/*/*; do
   [ -d "$m" ] && [ -w "$m" ] || continue
   DEV=$(findmnt -nro SOURCE "$m" 2>/dev/null | head -1)
   [ -n "$DEV" ] && [ "$DEV" != "$RAIZ_DEV" ] || continue
   RUTA="$m/B-SALMI26"
   if mkdir -p "$RUTA" 2>/dev/null && cp -r "$CARPETA_DEST" "$RUTA/" 2>/dev/null; then
-    ok "copiado al disco externo: $m"; FUERA=$((FUERA+1)); break
+    ok "copiado al disco externo: $m"; FUERA=$((FUERA+1))
+  else
+    avi "no se pudo copiar a $m"
   fi
 done
 
