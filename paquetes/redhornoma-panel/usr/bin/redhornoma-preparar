@@ -111,21 +111,33 @@ icono(){
 # estaba PROGRAMADO. Programado estaba, en efecto. Lo que no iba a pasar era
 # el despertar. Un verde sobre la intención en vez de sobre el resultado.
 #
-# Se detecta sin tocar nada: se compara lo que el reloj MARCABA al arrancar
-# —la primera línea del registro de este arranque— con la hora REAL de ese
-# arranque, que se saca de cuánto lleva encendida. Si al arrancar iba horas
-# atrasado, es que estuvo parado mientras la máquina no tenía corriente.
+# Se detecta sin tocar nada, comparando dos apuntes del propio registro.
+# El detalle está en la función.
 #
-# Casi siempre es la pila de la placa, que dura unos diez años.
+# Casi siempre es la pila de la placa, que dura unos diez años. Pero ojo:
+# el 16/08/2026 se cambió la del .101 por otra usada y siguió parado. Una
+# pila vieja no se distingue de una muerta hasta que se prueba.
 reloj_parado(){
-  local ahora encendida arranque t0
-  ahora=$(date +%s)
-  encendida=$(cut -d. -f1 /proc/uptime 2>/dev/null) || return 1
-  arranque=$(( ahora - encendida ))
-  t0=$(LC_ALL=C journalctl -b 0 -o short-unix --no-pager 2>/dev/null | head -1 | cut -d. -f1)
-  case "${t0:-}" in ''|*[!0-9]*) return 1 ;; esac
-  # Una hora de margen: los husos y algún ajuste pequeño no cuentan.
-  [ $(( arranque - t0 )) -gt 3600 ]
+  local fin ini
+  # Se compara el ÚLTIMO apunte del arranque anterior con el PRIMERO de
+  # este. Si el reloj camina mientras la máquina está apagada, entre uno y
+  # otro habrá pasado todo el rato que estuvo sin encender. Si está parado,
+  # los dos caen casi en el mismo segundo: el reloj retoma donde lo dejó.
+  #
+  # 🔴 Antes se comparaba con la hora real de arranque y se daba por bueno
+  # cualquier desfase menor de una hora. El 16/08/2026, tras cambiar la
+  # pila del .101, la máquina estuvo apagada 21 minutos y arrancó 21
+  # minutos atrasada —o sea, el reloj seguía parado— y esta comprobación
+  # dijo VERDE. El umbral de una hora tapaba justo los apagados cortos, que
+  # son los normales. Con la comparación entre arranques da igual cuánto
+  # tiempo estuviera apagada: lo que se mira es si el tiempo PASÓ.
+  fin=$(LC_ALL=C journalctl -b -1 -o short-unix --no-pager 2>/dev/null | tail -1 | cut -d. -f1)
+  ini=$(LC_ALL=C journalctl -b  0 -o short-unix --no-pager 2>/dev/null | head -1 | cut -d. -f1)
+  case "${fin:-}${ini:-}" in ''|*[!0-9]*) return 1 ;; esac
+  # Menos de minuto y medio entre apagarse y arrancar es imposible salvo
+  # que el reloj no haya avanzado. Se permite que sea negativo: al retomar
+  # puede quedar unos segundos ANTES del último apunte.
+  [ $(( ini - fin )) -lt 90 ]
 }
 
 # Rellenar hasta un ancho CONTANDO LETRAS, no bytes.
