@@ -1176,9 +1176,30 @@ fi
 # Mientras está congelado, el agente bloquea leer archivos. Hay que
 # descongelar ANTES de sacarlos: la copia sigue siendo buena porque
 # Windows ya volcó al disco todo lo que tenía pendiente.
-if [ "$CONGELADO" = "frozen" ]; then
+#
+# 🔴 SE DESCONGELA SIEMPRE, DIGA LO QUE DIGA EL ESTADO.
+#
+# Aquí ponía «if [ "$CONGELADO" = "frozen" ]», o sea: descongelar solo si
+# habíamos podido CONFIRMAR que estaba congelado. Y el 15/08/2026 en Hornoma
+# pasó lo que tenía que pasar: la orden de congelar salió, el estado no se
+# pudo leer a tiempo, el guion dijo «no se pudo congelar; se copia igual»…
+# y el disco SÍ estaba congelado. Las tres bases fallaron una detrás de otra
+# y el respaldo se fue en blanco:
+#
+#     bdSalmiDis.mdb         falló
+#     bdPrescripcion.mdb     falló
+#     bdExterna.mdb          falló
+#     ❌ no se pudo copiar nada
+#
+# El fallo no es no saber: es DECIDIR SOBRE LO QUE NO SE SABE. Y para colmo
+# decidiendo lo cómodo —«si no me consta, no hago nada»— cuando lo que no
+# consta es justo lo peligroso: un disco congelado deja Windows clavado.
+#
+# Descongelar algo que ya está descongelado no cuesta nada y no rompe nada.
+# Así que se hace siempre y se comprueba después.
+if true; then
   if descongelar_seguro; then
-    ok "disco descongelado — todo lo pendiente quedó escrito"
+    [ "$CONGELADO" = "frozen" ] && ok "disco descongelado — todo lo pendiente quedó escrito"
   else
     mal "EL DISCO SIGUE CONGELADO — Windows se quedará clavado"
     echo "      Descongélalo a mano ahora mismo:"
