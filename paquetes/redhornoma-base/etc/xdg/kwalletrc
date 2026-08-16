@@ -1,0 +1,22 @@
+# La cartera de KDE, apagada.
+#
+# 🔴 El 15/08/2026, de madrugada, al servidor de Hornoma le salió sola una
+# ventana: «la aplicación kdeb6 ha solicitado crear una nueva cartera con
+# el nombre de kdewallet», y al final dos botones —«clásico» y «usar
+# cifrado GPG»— que no significan nada para quien lleva un centro de salud.
+# euflo preguntó, con razón: «qué hago, o lo dejo».
+#
+# La respuesta es que no hace falta. RedHornoma NO usa la cartera de KDE
+# para nada: sus contraseñas viven en archivos suyos —las de Windows en
+# /etc/redhornoma/*.credenciales, la de la nube en la configuración de
+# rclone—, con permisos de root y respaldados con el resto.
+#
+# Dejarla activa solo trae problemas en un servidor: pide contraseña al
+# iniciar sesión, y en una máquina que enciende sola de madrugada eso es
+# una ventana esperando a alguien que no está.
+#
+# Si algún día hiciera falta —un escritorio de administración que guarde
+# claves de wifi—, se quita este archivo y vuelve.
+[Wallet]
+Enabled=false
+First Use=false
