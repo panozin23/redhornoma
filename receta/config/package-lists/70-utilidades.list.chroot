@@ -87,3 +87,8 @@ unattended-upgrades
 # El cortafuegos, con ventana. «ufw» ya estaba, pero solo se maneja
 # escribiendo, y esta distro no se maneja escribiendo.
 gufw
+# Reinicia los servicios que se quedaron con una librería vieja después de
+# actualizar. Viene de arrastre con unattended-upgrades y se declara igual,
+# porque redhornoma-base le trae su configuración: sin él, ese archivo no
+# lo lee nadie.
+needrestart
