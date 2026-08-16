@@ -98,6 +98,36 @@ icono(){
   printf 'application-x-executable'
 }
 
+# ¿Camina el reloj de la placa cuando la máquina está apagada?
+#
+# 🔴 De esto dependía TODO el horario de noche, y nadie lo comprobaba nunca.
+#
+# El 15/08/2026 se descubrió que el .101 de Hornoma tenía el reloj parado:
+# arrancaba marcando el segundo exacto en que se apagó tres días antes. Con
+# el reloj congelado, la alarma «despierta el 13 a la 01:00» NUNCA llega, y
+# la máquina se queda apagada para siempre. Eso costó tres días de centro.
+#
+# Y la pantalla decía 🟢 en «Horario de encendido», porque miraba lo que
+# estaba PROGRAMADO. Programado estaba, en efecto. Lo que no iba a pasar era
+# el despertar. Un verde sobre la intención en vez de sobre el resultado.
+#
+# Se detecta sin tocar nada: se compara lo que el reloj MARCABA al arrancar
+# —la primera línea del registro de este arranque— con la hora REAL de ese
+# arranque, que se saca de cuánto lleva encendida. Si al arrancar iba horas
+# atrasado, es que estuvo parado mientras la máquina no tenía corriente.
+#
+# Casi siempre es la pila de la placa, que dura unos diez años.
+reloj_parado(){
+  local ahora encendida arranque t0
+  ahora=$(date +%s)
+  encendida=$(cut -d. -f1 /proc/uptime 2>/dev/null) || return 1
+  arranque=$(( ahora - encendida ))
+  t0=$(LC_ALL=C journalctl -b 0 -o short-unix --no-pager 2>/dev/null | head -1 | cut -d. -f1)
+  case "${t0:-}" in ''|*[!0-9]*) return 1 ;; esac
+  # Una hora de margen: los husos y algún ajuste pequeño no cuentan.
+  [ $(( arranque - t0 )) -gt 3600 ]
+}
+
 # Rellenar hasta un ancho CONTANDO LETRAS, no bytes.
 #
 # «printf %-28s» cuenta bytes, y en UTF-8 una «í» ocupa dos. Así que cada
@@ -356,7 +386,12 @@ if hay redhornoma-horario && [ "$PAPEL" = "servidor" ]; then
   PROX=$(LC_ALL=C systemctl list-timers --all 2>/dev/null \
          | awk '/redhornoma-apagar-noche/{print $1" "$2" "$3; exit}')
   if [ -n "$PROX" ] && [ "$PROX" != "n/a - -" ]; then
-    fila "🟢" "Horario de encendido" "próximo apagado: $PROX"
+    if reloj_parado; then
+      fila "🔴" "Horario de encendido" "programado, pero el reloj NO despertará"
+      fila "  " "  el porqué" "su reloj se para al apagarse — cambiar la pila"
+    else
+      fila "🟢" "Horario de encendido" "próximo apagado: $PROX"
+    fi
     accion "Ver o cambiar el horario" "$(icono appointment-new preferences-system-time clock)" "TERMINAL:redhornoma-horario --ver"
     accion "Probar el despertador (se apaga 4 min)" "$(icono alarm-clock chronometer clock)" "PROBAR"
   elif [ -f "$CONF/sin-horario" ]; then
