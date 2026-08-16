@@ -96,17 +96,20 @@ apaga, no la alcanza nadie.
 **En Hornoma quedó cerrado el 2 y el 8.** Lo que sigue pendiente, por orden:
 
 ```
-1 · LA PILA DEL .101              CR2032, unos 10 Bs
-     Sin ella esa maquina NO PUEDE despertar sola: su reloj se para al
-     apagarse. El horario de noche no sirve, y el enchufe inteligente
-     pasa a ser la unica forma de encenderla desde Cochabamba.
-     Se detecta solo: redhornoma-preparar lo dice en rojo.
+1 · ✅ RESUELTO el 16/08 — el despertador del .101 ya funciona
+     No era solo la pila: en el BIOS estaba "Deep Sleep = Enabled in S5",
+     que corta la corriente de reserva de la placa al apagarse. Puesto en
+     Disabled, el despertador volvio a sonar (probado: 245 segundos).
+     Queda flojo solo tras un CORTE DE LUZ, y para eso esta el enchufe.
+     Una pila nueva lo cerraria del todo, sin prisa.
 
-2 · EL ENCHUFE INTELIGENTE         comprado, sin instalar
-     Falta saber cual de los dos cables de la pared es el vivo.
-     Metodo acordado con euflo: foco entre el agujerito y un clavo
-     en tierra mojada con sal. El que alumbra es el vivo.
-     ⚠️ MARCAR LOS CABLES ANTES de conectarlos, o la prueba no sirve.
+2 · ✅ RESUELTO el 16/08 — el enchufe inteligente esta puesto
+     ARGO T-SMART, aplicacion Smart Life. Empotrado y funcionando con el
+     circulo. FALTA EMPAREJARLO al wifi para mandarlo desde Cochabamba;
+     eso solo se puede hacer estando en Hornoma.
+     ⚠️ EL ROUTER NO DEBE IR AHI. Si se apaga esa toma se va el wifi y el
+     enchufe se queda sordo. El consultorio tiene una sola toma: euflo va
+     a extender un cable para sacar el router.
 
 3 · EMPAQUETAR EL INSTALADOR DE PUESTOS
      documentacion/hornoma/instalar-puesto.ps1 ya funciona y esta probado.
