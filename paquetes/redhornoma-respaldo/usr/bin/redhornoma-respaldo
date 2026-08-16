@@ -1537,8 +1537,47 @@ if [ -n "$EXTRA" ]; then
 fi
 
 # 2) Cualquier disco externo que esté enchufado
+#
+# 🔴 EL 15/08/2026 ESTA COPIA SE ESTABA GUARDANDO EN EL MISMO SERVIDOR.
+#
+# Aquí solo se preguntaba «¿existe la carpeta y puedo escribir en ella?». Y
+# una carpeta vacía que quedó de un disco que ya no está —el punto donde se
+# montaba— contesta que sí a las dos cosas. Es una carpeta del disco del
+# sistema con nombre de disco externo.
+#
+# En Hornoma había tres: SANSUNG1, SANSUNG2 y el Toshiba. Solo el Toshiba
+# estaba de verdad. El bucle se paraba en el PRIMERO que le servía —SANSUNG1,
+# por orden alfabético— y dejaba 53 MB dentro del propio servidor, contándolos
+# como «copia fuera». El disco externo de verdad se quedó con la copia del 12.
+#
+# O sea: el registro decía «3 copias fuera» y una de las tres era mentira. Si
+# ese disco muere, se lleva por delante lo que creíamos protegido de eso mismo.
+#
+# Ahora se exige que la carpeta SEA un punto de montaje y que su disco no sea
+# el mismo del sistema. Una carpeta suelta ya no puede hacerse pasar por disco.
+# Se hace en DOS pasadas, y no es capricho: la copia se detiene en cuanto
+# encuentra un disco bueno, así que si el aviso fuera dentro del mismo bucle
+# se lo saltaría justo cuando hay un disco de verdad — es decir, callaría
+# precisamente el día en que todo parece ir bien.
+RAIZ_DEV=$(findmnt -nro SOURCE / 2>/dev/null | head -1)
+
+# Primera pasada: decir en voz alta lo que NO es un disco.
+for m in /media/*/* /run/media/*/*; do
+  [ -d "$m" ] || continue
+  DEV=$(findmnt -nro SOURCE "$m" 2>/dev/null | head -1)
+  if [ -z "$DEV" ]; then
+    avi "«$(basename "$m")» parece un disco y NO hay ninguno montado ahí"
+    avi "   es una carpeta del servidor: lo que se copie ahí NO sale de la máquina"
+  elif [ "$DEV" = "$RAIZ_DEV" ]; then
+    avi "«$(basename "$m")» está en el disco del sistema: no cuenta como copia fuera"
+  fi
+done
+
+# Segunda pasada: copiar, solo a un disco de verdad.
 for m in /media/*/* /run/media/*/*; do
   [ -d "$m" ] && [ -w "$m" ] || continue
+  DEV=$(findmnt -nro SOURCE "$m" 2>/dev/null | head -1)
+  [ -n "$DEV" ] && [ "$DEV" != "$RAIZ_DEV" ] || continue
   RUTA="$m/B-SALMI26"
   if mkdir -p "$RUTA" 2>/dev/null && cp -r "$CARPETA_DEST" "$RUTA/" 2>/dev/null; then
     ok "copiado al disco externo: $m"; FUERA=$((FUERA+1)); break
