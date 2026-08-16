@@ -44,7 +44,25 @@ set -u
 export GDK_BACKEND=x11
 
 CONF=/etc/redhornoma
-RECUERDO="$CONF/maquina"          # cuál es LA máquina de los programas
+# Dónde se recuerda la última máquina elegida.
+#
+# 🔴 Estaba solo en /etc/redhornoma/maquina, y a esa carpeta un usuario
+# normal NO puede escribir. El 16/08/2026, en Hornoma, la pantalla soltó
+# «/etc/redhornoma/maquina: Permiso denegado» antes de abrir nada. Y el
+# «2>/dev/null» de al lado no lo tapaba: ese error lo da el intérprete al
+# abrir el archivo, antes de ejecutar la orden, así que no hay forma de
+# callarlo desde la orden misma.
+#
+# Ahora, si /etc no deja, se recuerda en la carpeta de la persona. Cada
+# quien recuerda su máquina, que además es lo correcto.
+if [ -w "$CONF" ] 2>/dev/null; then
+  RECUERDO="$CONF/maquina"
+else
+  RECUERDO="${XDG_CONFIG_HOME:-$HOME/.config}/redhornoma/maquina"
+fi
+# Para LEER se mira primero el de la persona y luego el común: así, si
+# alguien ya lo dejó puesto en /etc con sudo, se sigue respetando.
+recordada(){ cat "$RECUERDO" 2>/dev/null || cat "$CONF/maquina" 2>/dev/null; }
 REMOTO=""                         # vacío = esta computadora
 CONEXION="qemu:///system"
 # Ventana normal y sin reconexión: son los dos ajustes que se probaron y
@@ -172,7 +190,7 @@ else
   if [ -n "$REMOTO" ]; then
     RECORDADA=$(timeout 10 ssh -o BatchMode=yes "$REMOTO" "cat $RECUERDO" 2>/dev/null)
   else
-    RECORDADA=$(cat "$RECUERDO" 2>/dev/null)
+    RECORDADA=$(recordada)
   fi
   if [ -n "$RECORDADA" ] && existe "$RECORDADA"; then
     VM="$RECORDADA"
@@ -204,8 +222,10 @@ fi
 
 # Recordar la elección, para que la próxima vez sea directa. Si no hay
 # permiso de escritura en /etc no pasa nada: solo se preguntará otra vez.
-if [ -z "$REMOTO" ] && [ "$(cat "$RECUERDO" 2>/dev/null)" != "$VM" ]; then
-  mkdir -p "$CONF" 2>/dev/null && printf '%s\n' "$VM" > "$RECUERDO" 2>/dev/null
+if [ -z "$REMOTO" ] && [ "$(recordada)" != "$VM" ]; then
+  # El paréntesis es lo que calla el error si aun así no se puede escribir:
+  # dentro de un subshell, el fallo de abrir el archivo sí queda tapado.
+  ( mkdir -p "$(dirname "$RECUERDO")" && printf '%s\n' "$VM" > "$RECUERDO" ) 2>/dev/null
 fi
 
 # ── Encenderla si está apagada ────────────────────────────────────────
