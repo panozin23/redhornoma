@@ -134,6 +134,48 @@ for nombre in "${ORDEN[@]}"; do
   fi
 done
 
+# ── ¿Alguno pisa un archivo que ya tiene dueño? ───────────────────────
+#
+# 🔴 EL 15/08/2026 ESTO REVENTÓ UNA ACTUALIZACIÓN A MEDIO CAMINO.
+#
+# redhornoma-red 1.1.5 traía /usr/share/keyrings/tailscale-archive-keyring.gpg
+# —copiado tal cual de este equipo— y ese archivo YA ES de otro paquete, el
+# «tailscale-archive-keyring», que está en toda máquina donde se instaló
+# Tailscale a mano. Dos paquetes no pueden traer el mismo archivo, así que
+# dpkg se planta:
+#
+#   trying to overwrite '...', which is also in package tailscale-archive-keyring
+#
+# Y no se planta en el equipo de quien construye: se planta EN EL CENTRO, a
+# mitad de la actualización, dejando media docena de paquetes desempaquetados
+# y sin configurar. En Hornoma, a 100 km, con euflo delante y de noche.
+#
+# Se comprueba aquí porque aquí no cuesta nada: preguntarle a dpkg de quién es
+# cada archivo que vamos a repartir.
+titulo "¿PISAMOS ARCHIVOS DE OTROS PAQUETES?"
+CHOQUES=0
+for d in "$FUENTE"/*/; do
+  [ -d "$d" ] || continue
+  P=$(basename "$d")
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    DUENO=$(LC_ALL=C dpkg -S "$f" 2>/dev/null | grep -v diversion | head -1 | cut -d: -f1)
+    [ -n "$DUENO" ] && [ "$DUENO" != "$P" ] && {
+      printf "   ${RO}✖${V} %s trae %s
+" "$P" "$f"
+      printf "       y ese archivo es de «%s»: dpkg lo va a rechazar
+" "$DUENO"
+      CHOQUES=$((CHOQUES+1)); }
+  done <<< "$(find "$d" -type f -not -path '*/DEBIAN/*' -printf '/%P\n' 2>/dev/null)"
+done
+if [ "$CHOQUES" -eq 0 ]; then
+  printf "   ${VE}●${V} ninguno pisa nada de otro paquete\n"
+else
+  printf "\n   ${AM}Cámbiale el nombre al archivo, o la ruta. Publicarlo así rompe\n"
+  printf "   la actualización en los centros, no aquí.${V}\n"
+  exit 1
+fi
+
 titulo "RESUMEN"
 printf "   construidos: %s      fallidos: %s\n" "$HECHOS" "$FALLOS"
 printf "   quedaron en: %s\n" "$SALIDA"

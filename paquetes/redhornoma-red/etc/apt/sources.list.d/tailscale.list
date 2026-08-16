@@ -17,7 +17,19 @@
 # al instalarlo. Cuando la máquina ya está en marcha sí tiene certificados,
 # y a partir de ahí Tailscale se actualiza solo con el resto.
 #
+# 🔴 La llave se llama «redhornoma-tailscale.gpg» y NO
+# «tailscale-archive-keyring.gpg», que sería el nombre natural. El 15/08/2026
+# se puso con ese nombre y la actualización de Hornoma REVENTÓ a mitad:
+#
+#   dpkg: error al procesar redhornoma-red_1.1.4_all.deb (--unpack):
+#    trying to overwrite '/usr/share/keyrings/tailscale-archive-keyring.gpg',
+#    which is also in package tailscale-archive-keyring
+#
+# Ese archivo ya tiene dueño: el paquete «tailscale-archive-keyring», que se
+# instala en cualquier máquina donde se puso Tailscale a mano. Dos paquetes no
+# pueden traer el mismo archivo. Con nombre propio no le pisamos nada a nadie.
+#
 # La firma se comprueba contra la llave de al lado. Se verificó al ponerla:
 #   Tailscale Inc. (Package repository signing key) <info@tailscale.com>
 #   2596A99EAAB33821893C0A79458CA832957F5868
-deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian trixie main
+deb [signed-by=/usr/share/keyrings/redhornoma-tailscale.gpg] https://pkgs.tailscale.com/stable/debian trixie main
