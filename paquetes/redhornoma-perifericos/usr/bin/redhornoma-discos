@@ -28,9 +28,16 @@
 #     donde no hay quien la atienda.
 #
 #   · Windows deja el disco marcado como EN USO cuando lo apagan con el
-#     «inicio rápido». Linux se niega a escribir en él, y hace bien:
-#     forzarlo es la forma más típica de perder archivos. Se detecta y se
-#     dice, y limpiarlo va en un comando aparte.
+#     «inicio rápido». Desde el 15/08/2026 ESO SE ARREGLA SOLO: quitar esa
+#     marca no toca ningún archivo, es un bit. Antes había que volver a
+#     escribir el comando con «--forzar», y euflo lo dijo con razón: «en
+#     Windows lo colocas y se abre, así de sencillo; en Linux nos hacemos
+#     mucho lío». Un disco que no se abre solo es un disco roto para quien
+#     lo usa.
+#
+#     Lo que NO se arregla solo es un Windows HIBERNADO: ahí hay escrituras
+#     a medio terminar y tocarlas pierde archivos de verdad. Se distingue
+#     por el mensaje y se para.
 #
 #   · Windows 10 y 11 BLOQUEAN de fábrica entrar a carpetas de red sin
 #     contraseña. Samba las sirve bien y Windows se niega sin explicar
@@ -39,8 +46,7 @@
 # Uso:
 #   redhornoma-discos              qué discos hay y cómo están
 #   sudo redhornoma-discos --abrir       montarlos y dárselos a Windows
-#   sudo redhornoma-discos --abrir --forzar   además, limpiar la marca de
-#                                             «en uso» que dejó Windows
+#   sudo redhornoma-discos --abrir --forzar   insistir cuando ni así se abre
 #   sudo redhornoma-discos --soltar      soltarlos para desenchufar
 #   sudo redhornoma-discos --siempre     que se abran SOLOS de aquí en adelante
 set -u
@@ -311,11 +317,32 @@ for d in $DISCOS; do
       ok "$ETQ ya estaba abierta en $YA"; ABIERTAS="$ABIERTAS$SEG|$YA"$'\n'; continue
     fi
 
-    # La carpeta vacía queda CERRADA a cal y canto. Así, si el disco no
+    # La carpeta vacía queda SIN PERMISO DE ESCRITURA. Así, si el disco no
     # llega a montarse, nadie —ni Windows ni una persona— puede escribir
     # dentro creyendo que escribe en el disco. Al montarse encima, mandan
-    # los permisos del disco y este 000 deja de verse.
-    mkdir -p "$PUNTO"; chmod 000 "$PUNTO" 2>/dev/null
+    # los permisos del disco y esto deja de verse.
+    #
+    # 🔴 Antes era «chmod 000», y eso hacía que la carpeta ni siquiera se
+    # pudiera ABRIR: el explorador decía «permiso denegado» y nadie entendía
+    # por qué. Se veía como una avería del disco cuando era una protección.
+    # Con 555 se puede entrar y leer —solo no escribir— y dentro hay un
+    # papelito que explica lo que pasa. Protege igual y no asusta.
+    mkdir -p "$PUNTO"
+    if ! findmnt -nro TARGET "$PUNTO" >/dev/null 2>&1; then
+      printf '%s\n' \
+        "AQUI NO HAY NINGUN DISCO." \
+        "" \
+        "Esta carpeta es el sitio donde se abre el disco externo cuando esta" \
+        "enchufado. Ahora mismo no lo esta, asi que esto es una carpeta vacia" \
+        "del disco de la computadora." \
+        "" \
+        "Por eso no deja escribir: lo que copiaras aqui NO iria al disco" \
+        "externo, se quedaria dentro de esta maquina y desapareceria de la" \
+        "vista en cuanto el disco se enchufe." \
+        "" \
+        "Enchufa el disco y esta carpeta se llenara sola." > "$PUNTO/LEEME-NO-HAY-DISCO.txt" 2>/dev/null
+      chmod 555 "$PUNTO" 2>/dev/null
+    fi
     U=$(id -u "$USUARIO"); G=$(id -g "$USUARIO")
     ERR=""
     case "$F" in
@@ -351,13 +378,46 @@ for d in $DISCOS; do
     else
       mal "$ETQ no se dejó abrir ni siquiera para leer"
       [ -n "$ERR" ] && printf '%s\n' "$ERR" | head -2 | sed 's/^/         /'
+      # ¿Por qué no se dejó abrir? Hay dos casos y NO son lo mismo.
+      #
+      # 🔴 Hasta el 15/08/2026 se trataban igual: los dos pedían que la
+      # persona volviera a escribir el comando con «--forzar». Y euflo lo
+      # dijo con razón: «en Windows lo colocas y se abre, así de sencillo;
+      # en Linux nos hacemos mucho lío». Tenía razón — un disco que no se
+      # abre solo es un disco roto para quien lo usa.
+      HIBERNADO=no; MARCADO=no
       case "$ERR" in
-        *[Dd]irty*|*unclean*|*hibernat*|*"was not shut down"*|*"Metadata kept"*)
-          SUCIOS=1
-          avi "viene marcada como EN USO por Windows" ;;
+        *hibernat*|*hiberfil*)               HIBERNADO=si ;;
+        *[Dd]irty*|*unclean*|*"was not shut down"*|*"Metadata kept"*) MARCADO=si ;;
       esac
-      # Limpiar la marca solo si se ha pedido: eso ESCRIBE en el disco.
-      if [ "$FORZAR" = "si" ] && command -v ntfsfix >/dev/null 2>&1; then
+
+      # Caso 1 · HIBERNADO. Aquí NO se toca nada. El Windows no está
+      # apagado: está dormido, con media escritura por terminar guardada en
+      # su archivo de hibernación. Escribir encima es la forma más rápida de
+      # perder lo que hay. Se dice y se para.
+      if [ "$HIBERNADO" = "si" ]; then
+        SUCIOS=2
+        avi "el Windows de este disco está DORMIDO, no apagado"
+        nota "hay que encenderlo y apagarlo del todo antes de tocarlo aquí"
+
+      # Caso 2 · solo MARCADO como en uso. Esto sí se arregla solo: es el
+      # «inicio rápido» de Windows, que al apagar no cierra del todo y deja
+      # una banderita puesta. Quitarla no toca ni un archivo: es un bit.
+      elif [ "$MARCADO" = "si" ] && command -v ntfsfix >/dev/null 2>&1; then
+        avi "venía marcada como EN USO por Windows — se limpia sola"
+        printf "   %-30s " "quitando la marca"
+        ntfsfix -d "/dev/$N" >/dev/null 2>&1
+        if mount -t ntfs3 -o "rw,uid=$U,gid=$G,windows_names" "/dev/$N" "$PUNTO" 2>/dev/null \
+           || mount -t ntfs-3g -o "rw,uid=$U,gid=$G" "/dev/$N" "$PUNTO" 2>/dev/null; then
+          printf "${VE}abierta${V}\n"; ABIERTAS="$ABIERTAS$SEG|$PUNTO"$'\n'
+          rm -f "$PUNTO/LEEME-NO-HAY-DISCO.txt" 2>/dev/null
+          continue
+        else printf "${RO}sigue sin abrirse${V}\n"; SUCIOS=1; fi
+      fi
+
+      # Y si aun así se pidió --forzar, se intenta igual: puede ser un caso
+      # que no supimos leer en el mensaje de error.
+      if [ "$FORZAR" = "si" ] && [ "$HIBERNADO" = "no" ] && command -v ntfsfix >/dev/null 2>&1; then
         printf "   %-30s " "limpiando la marca"
         ntfsfix -d "/dev/$N" >/dev/null 2>&1
         if mount -t ntfs3 -o "rw,uid=$U,gid=$G,windows_names" "/dev/$N" "$PUNTO" 2>/dev/null \
@@ -372,12 +432,16 @@ done
 
 if [ -z "$ABIERTAS" ]; then
   echo
-  [ "$SUCIOS" = "1" ] && [ "$FORZAR" = "no" ] && {
-    printf "   ${AM}Windows dejó el disco marcado como EN USO.${V}\n"
-    printf "   No está roto: es el «inicio rápido», que al apagar no cierra del\n"
-    printf "   todo. Linux se niega a escribir para no estropear lo que haya.\n\n"
-    printf "   Se limpia con:  ${AZ}sudo redhornoma-discos --abrir --forzar${V}\n"
-    printf "   ${GR}Eso escribe en el disco: solo quita la marca, no toca archivos.${V}\n\n"; exit 1; }
+  [ "$SUCIOS" = "2" ] && {
+    printf "   ${AM}El Windows de ese disco está DORMIDO, no apagado.${V}\n"
+    printf "   Tiene escrituras a medio terminar guardadas. Tocarlo desde aquí\n"
+    printf "   es la forma más rápida de perder lo que hay dentro.\n\n"
+    printf "   Enciende ese Windows y apágalo del todo —Inicio → Apagar,\n"
+    printf "   no cerrar la tapa— y vuelve a enchufarlo.\n\n"; exit 1; }
+  [ "$SUCIOS" = "1" ] && {
+    printf "   ${AM}Se quitó la marca de Windows y aun así no se abre.${V}\n"
+    printf "   Eso ya no es la marca: el disco puede tener el sistema de\n"
+    printf "   archivos dañado. Pásale ${AZ}chkdsk /f${V}${AM} en Windows.${V}\n\n"; exit 1; }
   mal "no se pudo abrir ninguna partición"
   limpiar_samba
   echo; exit 1
