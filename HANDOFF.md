@@ -91,6 +91,44 @@ haya nadie allí**: se enciende sola a la 1:00. Por eso su objetivo 11 supera al
 de Cochabamba, que tiene las mismas piezas pero **no tiene despertador**: si se
 apaga, no la alcanza nadie.
 
+## 🔴 LO QUE QUEDA, CON NOMBRE Y APELLIDO — al 16/08/2026
+
+**En Hornoma quedó cerrado el 2 y el 8.** Lo que sigue pendiente, por orden:
+
+```
+1 · LA PILA DEL .101              CR2032, unos 10 Bs
+     Sin ella esa maquina NO PUEDE despertar sola: su reloj se para al
+     apagarse. El horario de noche no sirve, y el enchufe inteligente
+     pasa a ser la unica forma de encenderla desde Cochabamba.
+     Se detecta solo: redhornoma-preparar lo dice en rojo.
+
+2 · EL ENCHUFE INTELIGENTE         comprado, sin instalar
+     Falta saber cual de los dos cables de la pared es el vivo.
+     Metodo acordado con euflo: foco entre el agujerito y un clavo
+     en tierra mojada con sal. El que alumbra es el vivo.
+     ⚠️ MARCAR LOS CABLES ANTES de conectarlos, o la prueba no sirve.
+
+3 · EMPAQUETAR EL INSTALADOR DE PUESTOS
+     documentacion/hornoma/instalar-puesto.ps1 ya funciona y esta probado.
+     Falta que lo lance LA PERSONA desde su sesion —el agente no vale,
+     las contraseñas de red no se comparten entre sesiones— y añadirle:
+       · Set-NetIPInterface -InterfaceAlias "Wi-Fi" -InterfaceMetric 9000
+         para que el visitante siga usando SU internet (Entel) y la red
+         del centro solo para llegar al servidor
+       · un "desinstalar" que limpie la cuenta al terminar la jornada
+     Idea de euflo: que el dentista y la Dra. del Bono lleguen con su
+     portatil Windows y en dos minutos sean puesto del centro.
+
+4 · LA .103 COMO PUESTO DE CONSULTORIO
+     ⚠️ NO TOCARLA hasta comprobar que TODO lo suyo esta en el .101.
+     Queda pendiente traer agosto del .103. Convertirla en cliente borra
+     su papel de servidor: si algo quedo solo ahi, se pierde.
+
+5 · PROBAR QUE LA ISO INSTALA      bash scripts/probar-compatibilidad.sh centro
+6 · LA LLAVE DE BITLOCKER          lo unico del objetivo 4
+7 · EL INSTALADOR EN BOLIVIANO     lo unico del objetivo 7
+```
+
 ## 📋 LO PRIMERO AL LLEGAR A HORNOMA — lista para seguir sin pensar
 
 ```
