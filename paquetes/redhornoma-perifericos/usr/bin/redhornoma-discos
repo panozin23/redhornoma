@@ -216,10 +216,32 @@ fi
 # nada: Windows dará un error honesto en vez de enseñar una carpeta vacía.
 limpiar_samba(){
   [ -f "$CONF_SMB" ] || return 0
-  grep -q "^$MARCA_INI" "$CONF_SMB" 2>/dev/null || return 0
   cp -f "$CONF_SMB" "$CONF_SMB.antes-de-discos-$MARCA" 2>/dev/null
+  # Fuera el bloque de esta herramienta —se rehace entero cada vez— Y fuera
+  # también los recursos de disco que dejó una versión ANTERIOR, cuando esto
+  # todavía no ponía marcas.
+  #
+  # 🔴 En Hornoma, el 15/08/2026, había SANSUNG1 y SANSUNG2 repetidos TRES
+  # veces y un [TOSHIBA] que en realidad apuntaba al disco CURSAKIALINUX.
+  # Samba se queda con la PRIMERA definición de cada nombre, así que mandaban
+  # las viejas y no las de la herramienta. Por eso euflo abría un disco en
+  # Windows y veía otra cosa.
+  #
+  # Se reconocen sin margen de duda: son los que llevan «comment = Disco
+  # externo». Ese texto lo escribimos nosotros y nadie más. Una carpeta que
+  # haya compartido una persona a mano no dice eso, y no se toca.
   awk -v a="$MARCA_INI" -v b="$MARCA_FIN" '
-    $0==a {d=1; next} $0==b {d=0; next} !d {print}' "$CONF_SMB" > /tmp/smb.limpio
+    # Dentro de las marcas: fuera, se rehace luego.
+    $0==a {d=1; next} $0==b {d=0; next} d {next}
+    # Fuera de las marcas: se junta cada sección y se decide al cerrarla.
+    /^\[/ {
+      if (n>0) { if (!nuestro) for(i=0;i<n;i++) print buf[i]; }
+      n=0; nuestro=0
+    }
+    /comment[ \t]*=[ \t]*Disco externo/ { nuestro=1 }
+    { buf[n++]=$0 }
+    END { if (n>0 && !nuestro) for(i=0;i<n;i++) print buf[i] }
+  ' "$CONF_SMB" > /tmp/smb.limpio
   if ! cmp -s /tmp/smb.limpio "$CONF_SMB"; then
     cp -f /tmp/smb.limpio "$CONF_SMB"
     systemctl restart smbd 2>/dev/null
