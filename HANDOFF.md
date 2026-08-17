@@ -96,6 +96,12 @@ apaga, no la alcanza nadie.
 **En Hornoma quedó cerrado el 2 y el 8.** Lo que sigue pendiente, por orden:
 
 ```
+0 · ⚠️ ANTES DE METER INFORMACION REAL EN EL .101
+     Confirmar que sus 2.193 pacientes y 17.118 prestaciones incluyen TODO
+     AGOSTO del .103. Si falta, el mes queda partido en dos maquinas y
+     juntarlas despues es feo: correlativos rotos y recibos duplicados.
+     Pendiente desde el 12/08. Es lo PRIMERO.
+
 1 · ✅ RESUELTO el 16/08 — el despertador del .101 ya funciona
      No era solo la pila: en el BIOS estaba "Deep Sleep = Enabled in S5",
      que corta la corriente de reserva de la placa al apagarse. Puesto en
@@ -103,7 +109,14 @@ apaga, no la alcanza nadie.
      Queda flojo solo tras un CORTE DE LUZ, y para eso esta el enchufe.
      Una pila nueva lo cerraria del todo, sin prisa.
 
-2 · ✅ RESUELTO el 16/08 — el enchufe inteligente esta puesto
+2 · ✅ RESUELTO el 16/08 — enchufe puesto, emparejado y PROBADO
+     Probado con el telefono en datos moviles: corto la luz, la maquina
+     estuvo 14 min sin corriente y volvio sola. Se ve en la red como
+     192.168.1.102 (puerto 6668), asi se comprueba sin tocar el telefono.
+     OJO al usarlo: el horario apaga la PC pero NO el enchufe, asi que
+     para encenderla hay que APAGAR la toma, esperar 10 s y encenderla.
+
+2b · lo que costo descubrir del emparejamiento
      ARGO T-SMART, aplicacion Smart Life. Empotrado y funcionando con el
      circulo. FALTA EMPAREJARLO al wifi para mandarlo desde Cochabamba;
      eso solo se puede hacer estando en Hornoma.
