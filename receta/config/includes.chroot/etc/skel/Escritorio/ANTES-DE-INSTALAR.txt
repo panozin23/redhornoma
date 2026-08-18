@@ -1,6 +1,6 @@
 ========================================================================
   INSTALAR RedHornoma EN ESTE EQUIPO
-  Leer esto antes de pulsar el icono de instalar
+  Leer esto antes de pulsar «Instalar RedHornoma»
 ========================================================================
 
 
