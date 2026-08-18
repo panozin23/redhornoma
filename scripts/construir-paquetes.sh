@@ -176,6 +176,49 @@ else
   exit 1
 fi
 
+# ── ¿Alguno se rompe cuando lo lanza el sistema y no una persona? ─────
+#
+# 🔴 EL 18/08/2026 ESTO TUVO ROTO EL OBJETIVO 9 DESDE EL PRIMER DÍA.
+#
+# «redhornoma-aviso» es el que deja dicho en la nube «me apago» y «ya
+# desperté». Probado a mano funcionaba perfectamente. Lanzado por systemd
+# —que es EXACTAMENTE cuando tiene que funcionar— fallaba siempre, a los
+# 39 milisegundos, sin llegar a intentar la nube.
+#
+# La causa: nombraba «$HOME». Una persona con sudo lleva HOME; systemd no
+# se lo da a nadie. Y con «set -u» arriba, nombrar algo que no existe mata
+# el guion en el acto.
+#
+# Es un fallo silencioso perfecto: no deja rastro donde se busca, y la
+# prueba obvia —ejecutarlo a mano— da verde. Por eso se comprueba aquí.
+#
+# La regla: si un guion tiene «set -u» y puede lanzarlo el sistema, no
+# puede nombrar «$HOME» a secas. Se escribe «${HOME:-/root}».
+titulo "¿AGUANTAN QUE LOS LANCE EL SISTEMA?"
+DESNUDOS=0
+for d in "$FUENTE"/*/; do
+  [ -d "$d" ] || continue
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # Solo los que se plantan ante una variable que no existe.
+    grep -qE '^set -[a-z]*u' "$f" 2>/dev/null || continue
+    # Entre comillas SIMPLES no se expande aquí, sino en la otra máquina:
+    # ese uso es legítimo y no cuenta.
+    LINEAS=$(grep -nE '\$HOME[/"]' "$f" 2>/dev/null | grep -v '\${HOME:-' | grep -v "'.*\\\$HOME.*'")
+    [ -n "$LINEAS" ] && {
+      printf "   ${RO}✖${V} %s nombra \$HOME a secas:\n" "$(basename "$f")"
+      printf '%s\n' "$LINEAS" | sed 's/^/       línea /'
+      DESNUDOS=$((DESNUDOS+1)); }
+  done <<< "$(find "$d" -type f \( -path '*/usr/bin/*' -o -path '*/usr/local/sbin/*' \) 2>/dev/null)"
+done
+if [ "$DESNUDOS" -eq 0 ]; then
+  printf "   ${VE}●${V} ninguno se cae por falta de HOME\n"
+else
+  printf "\n   ${AM}Escríbelo «\${HOME:-/root}». Tal como está, funciona cuando lo\n"
+  printf "   pruebas tú y falla cuando lo lanza la máquina sola.${V}\n"
+  exit 1
+fi
+
 titulo "RESUMEN"
 printf "   construidos: %s      fallidos: %s\n" "$HECHOS" "$FALLOS"
 printf "   quedaron en: %s\n" "$SALIDA"

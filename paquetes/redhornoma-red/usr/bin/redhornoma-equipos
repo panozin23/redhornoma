@@ -48,7 +48,7 @@ if [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || ! command -v yad >/dev/null 2>&1
   exit 1
 fi
 
-CONF="$HOME/.config/redhornoma"
+CONF="${HOME:-/root}/.config/redhornoma"
 EQUIPOS="$CONF/equipos.conf"          # nombre|usuario|direccion
 SELF="$(readlink -f "$0")"
 mkdir -p "$CONF"
@@ -223,7 +223,7 @@ Es el nombre que aparece al iniciar sesión en esa computadora." \
 dar_llave(){  # nombre
   local nom="$1" u d
   u=$(usuario_de "$nom"); d=$(awk -F'|' -v n="$nom" '$1==n{print $3}' "$EQUIPOS" | head -1)
-  [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N '' -q -f "$HOME/.ssh/id_ed25519"
+  [ -f "${HOME:-/root}/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N '' -q -f "${HOME:-/root}/.ssh/id_ed25519"
 
   pregunta "<b>Dar permiso a «$nom»</b>
 
@@ -336,6 +336,9 @@ enviar_archivos(){
   [ -z "$archivos" ] && { equipo "$nom"; return; }
 
   local destino
+  # Aquí el «$HOME» va a secas y entre comillas SIMPLES a propósito: no se
+  # expande aquí, sino en la máquina de destino, y allí es el escritorio de
+  # esa persona. Ponerle un «:-/root» apuntaría a la carpeta equivocada.
   destino=$(ESPERA=15 ssh_a "$u@$d" 'xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME"' 2>/dev/null)
   destino="${destino:-.}"
   ( echo "20"; echo "# Enviando…"

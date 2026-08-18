@@ -90,7 +90,7 @@ esc(){ printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
 icono(){
   local n
   for n in "$@"; do
-    if find /usr/share/icons /usr/share/pixmaps "$HOME/.local/share/icons" \
+    if find /usr/share/icons /usr/share/pixmaps "${HOME:-/root}/.local/share/icons" \
             -name "$n.*" -print -quit 2>/dev/null | grep -q .; then
       printf '%s' "$n"; return
     fi

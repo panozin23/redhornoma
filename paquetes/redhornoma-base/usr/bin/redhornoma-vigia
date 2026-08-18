@@ -38,7 +38,7 @@ set -u
 
 CONF_RESP=/var/lib/redhornoma/respaldo.conf
 CONF_CENTROS=/etc/redhornoma/centros.conf
-MEMORIA="${XDG_CACHE_HOME:-$HOME/.cache}/redhornoma-vigia"
+MEMORIA="${XDG_CACHE_HOME:-${HOME:-/root}/.cache}/redhornoma-vigia"
 # Cuántos días sin poder mirar la nube antes de preocuparse por eso.
 CIEGO_MAX=3
 
@@ -107,7 +107,7 @@ fi
 # ── Dónde está el permiso de la nube ──────────────────────────────────
 leer(){ [ -f "$2" ] && grep -oP "^$1=\K.*" "$2" 2>/dev/null | head -1; }
 if [ -z "${RCLONE_CONFIG:-}" ]; then
-  for _p in "$HOME/.config/rclone/rclone.conf" /etc/redhornoma/rclone.conf \
+  for _p in "${HOME:-/root}/.config/rclone/rclone.conf" /etc/redhornoma/rclone.conf \
             "/home/${SUDO_USER:-nadie}/.config/rclone/rclone.conf"; do
     [ -r "$_p" ] && { export RCLONE_CONFIG="$_p"; break; }
   done
@@ -150,16 +150,45 @@ if [ "$SE_PUDO" = "si" ]; then
   done
 
   # ── Los que dijeron «vuelvo» y no volvieron ──
+  #
+  # 🔴 MEJORADO EL 18/08/2026. Antes esto solo saltaba tras 24 HORAS de
+  # silencio, y ese plazo no servía para el caso real:
+  #
+  #   Hornoma se apaga a las 08:00 y promete volver a la 01:00. Si no
+  #   vuelve, han pasado 17 horas — por debajo del plazo. El aviso llegaba
+  #   AL DÍA SIGUIENTE, con el centro ya un día entero sin respaldo.
+  #
+  # El problema de fondo era que la promesa iba escrita para una persona
+  # («19/08 a las 01:00») y ningún programa puede saber si esa hora ya
+  # pasó. Ahora el aviso escribe además «vuelve_segundos», y aquí se
+  # compara con el reloj: en cuanto pasa la hora prometida más una hora de
+  # margen, se dice. Sin esperar a mañana.
   for f in "$TD"/estado/*.txt; do
     [ -f "$f" ] || continue
     C=$(grep -oP '^centro=\K.*' "$f");  M=$(grep -oP '^maquina=\K.*' "$f")
     Q=$(grep -oP '^que=\K.*' "$f");     S=$(grep -oP '^segundos=\K.*' "$f")
     VU=$(grep -oP '^vuelve=\K.*' "$f")
+    VS=$(grep -oP '^vuelve_segundos=\K.*' "$f")
     case "$S" in ''|*[!0-9]*) continue ;; esac
+    [ "$Q" = "apagando" ] || continue
     HORAS=$(( (AHORA - S) / 3600 ))
-    # Solo preocupa si dijo que se iba y lleva más de un día callado.
-    [ "$Q" = "apagando" ] && [ "$HORAS" -gt 24 ] && \
-      PROBLEMAS="$PROBLEMAS🟡|$C ($M)|dijo que volvía el $VU y lleva $((HORAS/24)) días sin dar señal"$'\n'
+    case "${VS:-}" in
+      ''|*[!0-9]*)
+        # Señal antigua, sin hora comparable: se conserva el plazo de un
+        # día. Vale para no perder de vista a un centro que aún no se ha
+        # actualizado, aunque avise tarde.
+        [ "$HORAS" -gt 24 ] && \
+          PROBLEMAS="$PROBLEMAS🟡|$C ($M)|dijo que volvía el $VU y lleva $((HORAS/24)) días sin dar señal"$'\n'
+        ;;
+      *)
+        # Una hora de margen: arrancar, levantar la red y avisar lleva su
+        # rato, y en el campo el internet tarda en subir.
+        if [ "$AHORA" -gt $(( VS + 3600 )) ]; then
+          TARDE=$(( (AHORA - VS) / 3600 ))
+          PROBLEMAS="$PROBLEMAS🔴|$C ($M)|prometió volver el $VU y NO ha vuelto — lleva $TARDE h de retraso"$'\n'
+        fi
+        ;;
+    esac
   done
   # ── Los centros que se esperan, y no están ──
   #

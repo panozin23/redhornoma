@@ -43,18 +43,23 @@ CONF_CENTRO=/etc/redhornoma/centro.conf
 CONF_RESP=/var/lib/redhornoma/respaldo.conf
 REG=/var/lib/redhornoma/avisos.log
 
-QUE=""; VUELVE=""; DESPERTADOR=""; VER=0; TODOS=0
+QUE=""; VUELVE=""; VUELVE_SEG=""; DESPERTADOR=""; VER=0; TODOS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --apagando)    QUE=apagando; shift ;;
     --desperte)    QUE=desperte; shift ;;
     --vuelve)      VUELVE="${2:-}"; shift 2 ;;
+    # La MISMA hora de vuelta, pero en segundos, para que el vigía pueda
+    # compararla. El «--vuelve» de arriba es un texto para una persona
+    # («19/08 a las 01:00») y un programa no puede saber si ya pasó.
+    --vuelve-segundos) VUELVE_SEG="${2:-}"; shift 2 ;;
     --despertador) DESPERTADOR="${2:-}"; shift 2 ;;
     --ver)         VER=1; shift ;;
     --todos)       TODOS=1; shift ;;
     *) echo "No entiendo «$1»"; exit 1 ;;
   esac
 done
+case "${VUELVE_SEG}" in *[!0-9]*) VUELVE_SEG="" ;; esac
 
 leer(){ [ -f "$2" ] && grep -oP "^$1=\K.*" "$2" 2>/dev/null | head -1; }
 
@@ -65,11 +70,23 @@ NUBE=$(leer nube "$CONF_RESP")
 # El permiso de la nube lo guarda rclone en la carpeta de quien lo
 # configuró. Esto corre como administrador, que no tiene esa carpeta:
 # hay que decirle dónde mirar. Mismo criterio que redhornoma-respaldo.
+#
+# 🔴 El «${HOME:-/root}» es el arreglo del 18/08/2026, y costó entenderlo.
+#
+# Cuando a este programa lo lanza UNA PERSONA con sudo, HOME existe. Cuando
+# lo lanza SYSTEMD —que es justo cuando importa: al encender y al apagar—
+# **HOME no existe**. Y con «set -u» arriba, nombrar una variable que no
+# existe mata el guion en el acto: salía con error a los 39 milisegundos,
+# sin llegar a intentar la nube siquiera.
+#
+# El síntoma era desconcertante: a mano funcionaba y dejaba el aviso; por
+# el sistema fallaba siempre. Las dos mitades del objetivo 9 —el «me
+# apago» y el «ya desperté»— llevaban rotas desde el primer día por esto.
 if [ -z "${RCLONE_CONFIG:-}" ]; then
   RC=$(leer nube_permiso "$CONF_RESP")
   [ -z "$RC" ] && for p in /etc/redhornoma/rclone.conf \
                            "/home/${SUDO_USER:-nadie}/.config/rclone/rclone.conf" \
-                           "$HOME/.config/rclone/rclone.conf" \
+                           "${HOME:-/root}/.config/rclone/rclone.conf" \
                            /root/.config/rclone/rclone.conf; do
     [ -r "$p" ] && RC="$p" && break
   done
@@ -183,6 +200,7 @@ TMP=$(mktemp)
   case "$QUE" in
     apagando)
       printf 'vuelve=%s\n'      "${VUELVE:-no dijo}"
+      [ -n "$VUELVE_SEG" ] && printf 'vuelve_segundos=%s\n' "$VUELVE_SEG"
       printf 'despertador=%s\n' "${DESPERTADOR:-sin comprobar}"
       # El texto de abajo es para una PERSONA que abra el archivo desde el
       # teléfono. Nadie debería tener que descifrar campos para saber si su

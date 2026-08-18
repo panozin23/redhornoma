@@ -169,7 +169,7 @@ detectar_puestos(){
   vistas=$(echo "$salida" \
            | awk -F';' -v yo="$NOMBRE" '$1=="=" && $3=="IPv4" && $7!=yo {print $7}' \
            | sort -u | grep -c .)
-  roster="$HOME/.config/redhornoma/equipos.conf"
+  roster="${HOME:-/root}/.config/redhornoma/equipos.conf"
   conocidas=$(grep -c . "$roster" 2>/dev/null || echo 0)
 
   if [ "$conocidas" -gt 0 ] && [ "$vistas" -lt "$conocidas" ]; then
@@ -428,7 +428,7 @@ recoger_todo(){
 # explicar qué pasa por teléfono. No se envía solo: se deja un archivo y
 # se dice dónde está, para que el centro decida a quién se lo manda.
 pedir_ayuda(){
-  local destino="$HOME/informe-redhornoma-$(date '+%Y-%m-%d_%H%M').txt"
+  local destino="${HOME:-/root}/informe-redhornoma-$(date '+%Y-%m-%d_%H%M').txt"
   recoger_todo
   {
     echo "INFORME DE RedHornoma"

@@ -108,10 +108,11 @@ apaga, no la alcanza nadie.
      Idea de euflo: que el dentista y la Dra. del Bono lleguen con su
      portatil Windows y en dos minutos sean puesto del centro.
 
-2 · QUE HORNOMA SEPA AVISAR SOLA                     cierra el objetivo 9
-     El vigia dice que ese centro "no avisa cuando se apaga ni cuando
-     despierta". Con base 1.2.4 ya instalado deberia dejar señal al
-     apagarse: hay que COMPROBAR que aparece en drive:ESTADO-REDHORNOMA.
+2 · QUE HORNOMA SEPA AVISAR SOLA                     ✅ HECHO EL 18/08
+     Resulto que el aviso NUNCA habia funcionado lanzado por el sistema:
+     nombraba $HOME, que systemd no da a nadie, y con "set -u" moria a los
+     39 ms. Arreglado en base 1.2.6, probado las DOS mitades en Hornoma.
+     Ver la memoria [[aviso-fallaba-solo-por-systemd]].
 
 3 · EL INSTALADOR EN BOLIVIANO                       cierra el objetivo 7
      Es lo unico que le falta al 7.

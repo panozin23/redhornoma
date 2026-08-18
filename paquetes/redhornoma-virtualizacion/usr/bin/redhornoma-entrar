@@ -58,7 +58,7 @@ CONF=/etc/redhornoma
 if [ -w "$CONF" ] 2>/dev/null; then
   RECUERDO="$CONF/maquina"
 else
-  RECUERDO="${XDG_CONFIG_HOME:-$HOME/.config}/redhornoma/maquina"
+  RECUERDO="${XDG_CONFIG_HOME:-${HOME:-/root}/.config}/redhornoma/maquina"
 fi
 # Para LEER se mira primero el de la persona y luego el común: así, si
 # alguien ya lo dejó puesto en /etc con sudo, se sigue respetando.

@@ -30,7 +30,7 @@ printf "${AZ}══════════════════════�
 
 # ── Encontrar el original ─────────────────────────────────────────────
 if [ -z "$ORIGEN" ]; then
-  for f in "$IMG"/virtio-win*.iso ./virtio-win*.iso "$HOME"/Descargas/virtio-win*.iso; do
+  for f in "$IMG"/virtio-win*.iso ./virtio-win*.iso "${HOME:-/root}"/Descargas/virtio-win*.iso; do
     [ -r "$f" ] && ORIGEN="$f" && break
   done
 fi

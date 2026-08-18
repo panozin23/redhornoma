@@ -1,0 +1,74 @@
+#!/bin/bash
+# Se ejecuta en el centro justo después de desempaquetar el paquete.
+#
+# EL PORQUÉ — 18/08/2026
+#
+# El guion que apaga el servidor cada noche NO viene dentro del paquete: lo
+# ESCRIBE «redhornoma-horario --instalar» la primera vez, con los valores de
+# ese centro. Eso está bien —cada centro tiene su horario— pero tiene una
+# consecuencia que costó ver:
+#
+#   Actualizar el paquete NO cambia ese guion. Se queda como se escribió.
+#
+# En Hornoma el guion era del 12/08 y no sabía avisar a la nube. El paquete
+# se actualizó tres veces desde entonces y el guion siguió igual, callado,
+# sin que nada lo delatara.
+#
+# Así que aquí se vuelve a escribir, con LOS MISMOS VALORES que ya tiene
+# puestos —leídos de lo que hay instalado, no inventados—, para que reciba
+# las mejoras como cualquier otro archivo del paquete.
+#
+# REGLAS DE ORO DE ESTE ARCHIVO
+#
+#   · Si el centro no tiene horario, no se toca nada.
+#   · Si algo sale mal, NO se falla. Un postinst que falla deja el paquete a
+#     medio configurar, y eso es peor que un guion viejo. Por eso todo
+#     acaba en «|| true».
+set -u
+
+RELOJ=/etc/systemd/system/redhornoma-apagar-noche.timer
+UNIDAD=/etc/systemd/system/redhornoma-apagar-noche.service
+
+if [ "${1:-}" = "configure" ] && [ -f "$RELOJ" ] && [ -f "$UNIDAD" ]; then
+  # ── Recuperar los valores de lo que ya está puesto ──
+  #    OnCalendar=Wed,Thu,Fri,Sat,Sun *-*-* 8..12:00/30:00
+  #               └── días ──────────┘      └┘ hora de apagar
+  LINEA=$(grep -oP '^OnCalendar=\K.*' "$RELOJ" 2>/dev/null | head -1)
+  DIAS=$(printf '%s' "$LINEA" | awk '{print $1}')
+  HORA=$(printf '%s' "$LINEA" | awk '{print $3}' | cut -d. -f1)
+  ENCENDER=$(grep -oP '^Environment=ENCENDER=\K.*' "$UNIDAD" 2>/dev/null | head -1)
+
+  # Solo se sigue si los tres valores tienen sentido. Ante la duda, se deja
+  # el horario como está: mejor un guion viejo que un centro sin horario.
+  BIEN=1
+  case "$DIAS"     in ''|*[!A-Za-z,]*) BIEN=0 ;; esac
+  case "$HORA"     in ''|*[!0-9]*)     BIEN=0 ;; esac
+  case "$ENCENDER" in ''|*[!0-9:]*)    BIEN=0 ;; esac
+
+  if [ "$BIEN" = "1" ] && command -v redhornoma-horario >/dev/null 2>&1; then
+    APAGAR=$(printf '%02d:00' "$((10#$HORA))")
+    echo "   RedHornoma: rehaciendo el horario de noche ($ENCENDER → $APAGAR, $DIAS)"
+    redhornoma-horario --instalar \
+      --encender "$ENCENDER" --apagar "$APAGAR" --dias "$DIAS" >/dev/null 2>&1 || true
+
+    # 🔴 Se mira el RESULTADO, no el código de salida.
+    #
+    # «redhornoma-horario» acaba llamando a systemctl, y systemctl puede
+    # quejarse por motivos que no impiden nada —dentro de un contenedor, o
+    # a media instalación— y devolver error habiendo hecho el trabajo. Al
+    # revés también pasa: devolver cero sin haber escrito nada.
+    #
+    # Es el fallo más repetido de este proyecto: dar por bueno un verde que
+    # solo dice «el último comando no protestó». Así que se comprueba lo
+    # único que importa: que el guion existe y sabe avisar.
+    GUION=/usr/local/sbin/redhornoma-apagar-noche
+    if [ -s "$GUION" ] && grep -q 'redhornoma-aviso' "$GUION" 2>/dev/null; then
+      echo "   RedHornoma: horario al día — y ahora avisa a la nube antes de apagarse"
+    else
+      echo "   RedHornoma: el horario quedó como estaba (rehacerlo a mano con"
+      echo "               «sudo redhornoma-horario --instalar»)"
+    fi
+  fi
+fi
+
+exit 0

@@ -376,6 +376,7 @@ if command -v redhornoma-aviso >/dev/null 2>&1; then
   diga "Dejando dicho en la nube que me apago…"
   redhornoma-aviso --apagando \
     --vuelve "$(date -d "@$CUANDO" '+%d/%m a las %H:%M')" \
+    --vuelve-segundos "$CUANDO" \
     --despertador si 2>/dev/null || true
 fi
 
