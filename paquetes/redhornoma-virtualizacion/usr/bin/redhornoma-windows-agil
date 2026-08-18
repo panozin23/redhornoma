@@ -164,6 +164,8 @@ cat <<QUE
    ${AZ}Lo que trabaja de fondo${V}   — en un disco mecánico se nota
       · El buscador de Windows deja de indexar el disco
       · La precarga de programas se apaga
+      · Edge deja de quedarse cargado sin que nadie lo use (medido: 766 MB)
+      · OneDrive y Edge dejan de arrancar solos con la sesión
 
    ${AZ}Lo que NO se toca${V}
       · SALMI ni sus datos
@@ -232,6 +234,44 @@ for par in "WSearch:el buscador deja de indexar el disco" \
     *)  en_win "sc config $S start= disabled" >/dev/null 2>&1
         en_win "sc stop $S" >/dev/null 2>&1
         ok "$DESC"; CAMBIOS=$((CAMBIOS+1)) ;;
+  esac
+done
+
+printf "\n   ${AZ}Los que corren sin que nadie los llame${V}\n"
+# 🔴 MEDIDO EL 17/08/2026, y fue euflo quien lo sospechó: «escuché decir
+# que Edge utiliza mucha memoria».
+#
+# Tenía razón, y por bastante. Con NADIE usándolo:
+#
+#   Hornoma      Edge: 13 procesos, 766 MB
+#   Cochabamba   Edge: 17 procesos, 508 MB
+#
+# Más que el propio SQL Server, que es para lo que existe la máquina. Edge
+# se deja procesos vivos «por si acaso lo abres» —lo llaman arranque
+# rápido— y en un servidor de un centro de salud eso no sirve para nada:
+# nadie navega ahí.
+#
+# En Cochabamba había además OneDrive y Copilot arrancando solos. Se
+# comprobó: OneDrive NO tenía cuenta ni carpeta, así que no subía nada a
+# ninguna parte. Solo gastaba memoria y tocaba el disco.
+#
+# Lo importante no es la memoria —sobra— sino que en un disco de platos
+# cada programa que se despierta le roba la aguja a SQL Server.
+poner "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge" StartupBoostEnabled REG_DWORD 0 \
+      "Edge deja de quedarse cargado por si acaso"
+poner "HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge" BackgroundModeEnabled REG_DWORD 0 \
+      "Edge deja de correr en segundo plano"
+
+# Los que arrancan solos con la sesión. Se quitan del arranque, no se
+# desinstalan: si algún día hacen falta, se abren a mano y funcionan.
+for par in "OneDrive:OneDrive deja de arrancar solo" \
+           "MicrosoftEdgeAutoLaunch:Edge deja de arrancar solo"; do
+  V=${par%%:*}; DESC=${par#*:}
+  SAL=$(en_win "reg query \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v $V" 2>&1)
+  case "$SAL" in
+    *"$V"*) en_win "reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v $V /f" >/dev/null 2>&1
+            ok "$DESC"; CAMBIOS=$((CAMBIOS+1)) ;;
+    *)      d "${V}:" "no arranca solo en este Windows" ;;
   esac
 done
 
