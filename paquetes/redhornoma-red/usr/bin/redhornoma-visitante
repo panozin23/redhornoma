@@ -1,0 +1,243 @@
+#!/bin/bash
+# redhornoma-visitante — Preparar el centro para el portátil de un médico
+#                        que viene de visita.
+#
+# EL PORQUÉ
+#
+# Al centro llegan médicos con su propia computadora: el dentista, la
+# doctora del Bono. Vienen un día, atienden, y se van. Necesitan abrir
+# SOAPS y SALMI del centro durante esas horas.
+#
+# Hasta ahora eso se montaba a mano, ocho pasos dentro de Windows, y hacía
+# falta alguien que supiera hacerlos. El instalador ya existía, pero solo
+# servía para los Windows que el propio centro tiene dentro: se les manda
+# el guion por un canal que la máquina de un visitante no tiene.
+#
+# 🔴 Y ahí estaba el nudo: para darle el instalador hay que dejárselo en
+# algún sitio al que pueda llegar, y a las carpetas del centro NO puede
+# llegar todavía —justo lo que le falta es la cuenta—.
+#
+# Se resuelve con una carpeta aparte, de SOLO LECTURA y SIN CONTRASEÑA, que
+# contiene únicamente el instalador. Ahí no hay información de ningún
+# paciente ni ninguna clave: es el equivalente a dejar el folleto en la
+# puerta. La cuenta de las carpetas de verdad se la dice una persona, de
+# viva voz, y el instalador se la pide al arrancar.
+#
+# Uso:
+#   sudo redhornoma-visitante             preparar y decir qué hay que hacer
+#   sudo redhornoma-visitante --quitar    retirar la carpeta
+#   redhornoma-visitante --ver            mirar cómo está, sin tocar nada
+set -u
+
+CONF_SMB=/etc/samba/smb.conf
+CONF_CENTRO=/etc/redhornoma/centro.conf
+CARPETA=/srv/redhornoma/instalar-puesto
+ORIGEN=/usr/share/redhornoma/puesto
+RESP=/var/backups/redhornoma
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "      %s\n" "$1"; }
+
+ACCION=preparar
+case "${1:-}" in
+  --quitar) ACCION=quitar ;;
+  --ver)    ACCION=ver ;;
+  "")       ;;
+  *) echo "Uso: redhornoma-visitante [--quitar|--ver]"; exit 1 ;;
+esac
+
+leer(){ [ -f "$2" ] && grep -oP "^$1=\K.*" "$2" 2>/dev/null | head -1; }
+
+# ── Dónde está este centro ────────────────────────────────────────────
+RT=$(ip route get 1.1.1.1 2>/dev/null | head -1)
+IP_LAN=$(printf '%s' "$RT" | grep -oP 'src \K\S+')
+RED_LAN=$(printf '%s' "$IP_LAN" | cut -d. -f1-3)
+NOMBRE=$(leer nombre "$CONF_CENTRO"); NOMBRE="${NOMBRE:-$(cat /proc/sys/kernel/hostname)}"
+
+# El Windows del centro no está en ningún archivo de configuración: vive
+# dentro de una máquina virtual y se asoma a la red con su propia
+# dirección. Se busca preguntándole a libvirt, y si no se puede, se pide.
+buscar_windows(){
+  local vm ip
+  for vm in $(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
+    ip=$(LC_ALL=C virsh -c qemu:///system domifaddr "$vm" --source agent 2>/dev/null \
+         | grep -oP 'ipv4\s+\K[\d.]+' | grep -v '^127\.' | head -1)
+    [ -n "$ip" ] && { printf '%s' "$ip"; return 0; }
+  done
+  return 1
+}
+
+# ══ VER ═══════════════════════════════════════════════════════════════
+if [ "$ACCION" = "ver" ]; then
+  titulo "LA CARPETA PARA VISITANTES"
+  if grep -q '^\[INSTALAR\]' "$CONF_SMB" 2>/dev/null; then
+    ok "está publicada"
+    nota "se abre en:  \\\\${IP_LAN:-?}\\INSTALAR"
+    if [ -d "$CARPETA" ]; then
+      nota "contiene: $(ls -1 "$CARPETA" 2>/dev/null | tr '\n' ' ')"
+      S=$(grep -oP '^\$Servidor\s*=\s*"\K[^"]+' "$CARPETA/instalar-puesto.ps1" 2>/dev/null)
+      case "${S:-}" in
+        ''|@@*) avi "el instalador NO tiene puesta la dirección del centro" ;;
+        *)      nota "apunta al Windows del centro: $S" ;;
+      esac
+    else
+      mal "está publicada pero la carpeta no existe"
+    fi
+    if command -v smbclient >/dev/null 2>&1; then
+      # Se comprueba SIN cuenta, que es como llegará el visitante. Mirar el
+      # archivo de configuración solo dice lo que quisimos, no lo que pasa.
+      if smbclient -L "//${IP_LAN:-127.0.0.1}" -N 2>/dev/null | grep -qi 'INSTALAR'; then
+        ok "comprobado: se ve desde la red sin pedir contraseña"
+      else
+        avi "no la vi anunciarse en la red — pruébalo desde el portátil"
+      fi
+    fi
+  else
+    nota "no está publicada. Se prepara con:  sudo redhornoma-visitante"
+  fi
+  echo
+  exit 0
+fi
+
+[ "$(id -u)" = "0" ] || { titulo "PUESTO PARA UN VISITANTE"
+  mal "hace falta sudo"; nota "sudo redhornoma-visitante"; exit 1; }
+
+# ══ QUITAR ════════════════════════════════════════════════════════════
+if [ "$ACCION" = "quitar" ]; then
+  titulo "RETIRANDO LA CARPETA PARA VISITANTES"
+  if grep -q '^\[INSTALAR\]' "$CONF_SMB" 2>/dev/null; then
+    mkdir -p "$RESP"
+    cp -f "$CONF_SMB" "$RESP/smb.conf.antes-de-quitar-instalar-$(date '+%Y%m%d-%H%M%S')" 2>/dev/null
+    sed -i '/^\[INSTALAR\]/,/^$/d' "$CONF_SMB" 2>/dev/null
+    if testparm -s >/dev/null 2>&1; then
+      systemctl reload smbd >/dev/null 2>&1 || systemctl restart smbd >/dev/null 2>&1
+      ok "ya no se anuncia en la red"
+    else
+      mal "la configuración de Samba quedó mal — revísala"; exit 1
+    fi
+  else
+    nota "no estaba publicada"
+  fi
+  # La carpeta se deja: no ocupa nada y así volver a publicarla es
+  # instantáneo. Lo que importaba era dejar de anunciarla.
+  nota "los archivos siguen en $CARPETA"
+  echo
+  exit 0
+fi
+
+# ══ PREPARAR ══════════════════════════════════════════════════════════
+titulo "PUESTO PARA UN VISITANTE"
+
+[ -n "$RED_LAN" ] || { mal "este equipo no está en la red del centro"
+  nota "conecta el cable o el wifi y vuelve a intentarlo"; exit 1; }
+[ -d "$ORIGEN" ] || { mal "no encuentro $ORIGEN"
+  nota "¿está instalado «redhornoma-red»?"; exit 1; }
+if ! command -v smbd >/dev/null 2>&1 && [ ! -x /usr/sbin/smbd ]; then
+  mal "falta Samba"; nota "sudo apt install samba"; exit 1
+fi
+
+# ── La dirección del Windows del centro ──
+WIN=$(buscar_windows || true)
+if [ -z "$WIN" ]; then
+  avi "no pude preguntarle a la máquina virtual cuál es su dirección"
+  printf "   ¿Cuál es la dirección del Windows del centro? [192.168.1.50]: "
+  read -r WIN
+  WIN="${WIN:-192.168.1.50}"
+fi
+case "$WIN" in
+  [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
+  *) mal "«$WIN» no parece una dirección"; exit 1 ;;
+esac
+ok "el Windows del centro está en $WIN"
+ok "este servidor está en $IP_LAN"
+
+# ── Los archivos, con la dirección de ESTE centro puesta ──
+mkdir -p "$CARPETA"
+cp -f "$ORIGEN"/Instalar.bat "$ORIGEN"/Quitar.bat "$CARPETA"/ 2>/dev/null
+for g in instalar-puesto.ps1 quitar-puesto.ps1; do
+  [ -f "$ORIGEN/$g" ] || continue
+  sed -e "s|@@SERVIDOR_WINDOWS@@|$WIN|g" \
+      -e "s|@@SERVIDOR_LINUX@@|$IP_LAN|g" \
+      -e "s|@@NOMBRE_CENTRO@@|$NOMBRE|g" "$ORIGEN/$g" > "$CARPETA/$g"
+done
+
+# 🔴 Windows lee los .bat y los .ps1 línea a línea, y necesita el final de
+# línea suyo. Sin esto, un .bat escrito en Linux puede ejecutar la última
+# instrucción a medias o no ejecutarla, y el fallo es de los que no dan
+# ninguna pista.
+command -v unix2dos >/dev/null 2>&1 \
+  && unix2dos -q "$CARPETA"/*.bat "$CARPETA"/*.ps1 2>/dev/null \
+  || for f in "$CARPETA"/*.bat "$CARPETA"/*.ps1; do
+       [ -f "$f" ] && sed -i 's/\r*$/\r/' "$f"
+     done
+
+chmod 755 "$CARPETA"; chmod 644 "$CARPETA"/* 2>/dev/null
+ok "instalador preparado para «$NOMBRE»"
+
+# ── Publicarlo, sin contraseña y sin poder escribir ──
+#
+# «guest ok» es lo que permite entrar sin cuenta, y es a propósito: es lo
+# único a lo que el visitante puede llegar antes de tener una. Que sea de
+# SOLO LECTURA y esté limitado a la red del centro es lo que lo hace
+# aceptable: nadie de fuera lo ve, y nadie puede dejar nada ahí.
+mkdir -p "$RESP"
+cp -f "$CONF_SMB" "$RESP/smb.conf.antes-de-instalar-$(date '+%Y%m%d-%H%M%S')" 2>/dev/null
+sed -i '/^\[INSTALAR\]/,/^$/d' "$CONF_SMB" 2>/dev/null
+cat >> "$CONF_SMB" <<CFG
+
+[INSTALAR]
+   comment = Instalador de puesto - RedHornoma
+   path = $CARPETA
+   browseable = yes
+   read only = yes
+   guest ok = yes
+   hosts allow = $RED_LAN. 192.168.122. 127.
+   hosts deny = 0.0.0.0/0
+CFG
+
+if ! testparm -s >/dev/null 2>&1; then
+  mal "la configuración de Samba quedó mal"
+  ULT=$(ls -1t "$RESP"/smb.conf.antes-de-instalar-* 2>/dev/null | head -1)
+  [ -n "$ULT" ] && cp -f "$ULT" "$CONF_SMB" && ok "se restauró la anterior"
+  exit 1
+fi
+systemctl enable --now smbd >/dev/null 2>&1
+systemctl restart smbd >/dev/null 2>&1
+systemctl is-active smbd >/dev/null 2>&1 || { mal "Samba no arrancó"; exit 1; }
+
+command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qiE '^(Estado: activo|Status: active)' && \
+  ufw allow from "$RED_LAN.0/24" to any port 445 proto tcp >/dev/null 2>&1
+
+# 🔴 Se comprueba SIN cuenta —que es como llegará el visitante—, en vez de
+# darlo por bueno porque Samba no protestó. Es la diferencia entre «lo
+# configuré» y «funciona».
+if smbclient -L "//$IP_LAN" -N 2>/dev/null | grep -qi 'INSTALAR'; then
+  ok "comprobado: se ve desde la red SIN contraseña"
+else
+  avi "Samba arrancó pero no vi la carpeta — pruébalo desde el portátil"
+fi
+
+titulo "QUÉ DECIRLE AL MÉDICO"
+cat <<TEXTO
+
+   1 · Que conecte su computadora al wifi del centro.
+
+   2 · Que abra el explorador de archivos y escriba arriba:
+
+          \\\\$IP_LAN\\INSTALAR
+
+   3 · Doble clic en «Instalar.bat».
+       Le va a pedir la cuenta de las carpetas: díselas tú.
+       Y Windows le preguntará si permite los cambios: que diga SÍ.
+
+   4 · Al terminar la jornada, doble clic en «Quitar.bat»,
+       de esa misma carpeta. Su computadora queda como estaba.
+
+TEXTO
+avi "la cuenta de las carpetas SE DICE, no se escribe ahí"
+nota "esa carpeta se lee sin contraseña; por eso solo lleva el instalador"
+echo
