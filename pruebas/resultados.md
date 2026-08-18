@@ -6,6 +6,7 @@ ventana se cierra antes de que el guion llegue a preguntar.
 
 | Fecha | Máquina fingida | ISO | Resultado | Detalle |
 |---|---|---|---|---|
+| 2026-08-18 | **centro** | redhornoma-0.1-20260814 | ✅ instala y arranca | **La ISO nueva, la que lleva Tailscale y las herramientas de agosto.** BIOS antiguo, 4 GB, 2 núcleos core2duo, disco SATA. Instaló y arrancó DE LO INSTALADO **teniendo el CD puesto y con prioridad de arranque** — o sea que el instalador dejó bien el arranque. Comprobado por tres caminos: el disco seguía escribiéndose con el sistema en marcha (+192 y +448 KB cada pocos segundos, cosa que un sistema en vivo nunca hace), pidió la contraseña creada durante la instalación, y `redhornoma-preparar` respondió con su lista dentro del sistema recién instalado. Disco en 9,2G. |
 | 2026-08-06 06:50 | antigua | redhornoma-0.1-20260806 | ✅ instala y arranca | BIOS antiguo, 2 GB, core2duo, disco IDE. Instaló, y lo instalado arrancó solo sin el CD puesto. |
 | 2026-08-06 06:31 | segura | redhornoma-0.1-20260806 | ✅ instala y arranca | Arranque Seguro activado. Instaló y arrancó lo instalado, **sin ningún aviso**. Disco 8,4 GB. |
 | 2026-08-08 08:41 | minima (1,5 GB) | redhornoma-0.1-20260808 (daf365…) | ⚠️ arranca, se abandonó | Arrancó e instalaba, pero **inutilizable de lento**: 14 minutos solo para llegar al formulario de usuarios, con el procesador clavado al 100%. Se paró a propósito, no falló. Por eso el perfil pasó a 2 GB: máquinas de 1,5 GB ya no llegan a un centro. |
