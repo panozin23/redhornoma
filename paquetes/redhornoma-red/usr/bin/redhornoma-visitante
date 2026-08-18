@@ -61,15 +61,37 @@ NOMBRE=$(leer nombre "$CONF_CENTRO"); NOMBRE="${NOMBRE:-$(cat /proc/sys/kernel/h
 # El Windows del centro no está en ningún archivo de configuración: vive
 # dentro de una máquina virtual y se asoma a la red con su propia
 # dirección. Se busca preguntándole a libvirt, y si no se puede, se pide.
+#
+# 🔴 EL 18/08/2026 ESTO DIO UN ✅ CON UNA DIRECCIÓN INSERVIBLE.
+#
+# El Windows del centro tiene DOS direcciones, y solo una sirve aquí:
+#
+#   192.168.1.50      en la red del centro   ← esta ve el portátil del médico
+#   192.168.122.226   en la red interna de libvirt, que solo ve el servidor
+#
+# Se cogía la primera que contestaba, y salió la interna. El instalador
+# habría quedado apuntando a una dirección que el visitante NO PUEDE
+# ALCANZAR, y el fallo aparecería con el médico delante y el portátil
+# abierto, diciendo «no se llega» sin más explicación.
+#
+# La regla correcta no es «la primera»: es **la que está en la misma red
+# que este servidor**, porque esa es exactamente la red en la que estará
+# el visitante. Si ninguna lo está, se prefiere no adivinar y preguntar.
 buscar_windows(){
   local vm ip
   for vm in $(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
     ip=$(LC_ALL=C virsh -c qemu:///system domifaddr "$vm" --source agent 2>/dev/null \
-         | grep -oP 'ipv4\s+\K[\d.]+' | grep -v '^127\.' | head -1)
+         | grep -oP 'ipv4\s+\K[\d.]+' | grep -v '^127\.' \
+         | grep "^${RED_LAN}\." | head -1)
     [ -n "$ip" ] && { printf '%s' "$ip"; return 0; }
   done
   return 1
 }
+
+# Y se comprueba aparte, valga la dirección de donde venga —de la máquina
+# virtual o escrita a mano—, porque el error es el mismo por los dos
+# caminos: una dirección de otra red no la alcanza el visitante.
+en_la_red_del_centro(){ case "$1" in "$RED_LAN".*) return 0 ;; *) return 1 ;; esac; }
 
 # ══ VER ═══════════════════════════════════════════════════════════════
 if [ "$ACCION" = "ver" ]; then
@@ -82,7 +104,10 @@ if [ "$ACCION" = "ver" ]; then
       S=$(grep -oP '^\$Servidor\s*=\s*"\K[^"]+' "$CARPETA/instalar-puesto.ps1" 2>/dev/null)
       case "${S:-}" in
         ''|@@*) avi "el instalador NO tiene puesta la dirección del centro" ;;
-        *)      nota "apunta al Windows del centro: $S" ;;
+        "$RED_LAN".*) nota "apunta al Windows del centro: $S" ;;
+        *)      mal "apunta a $S, que NO está en la red del centro ($RED_LAN.0)"
+                nota "el portátil del médico no puede llegar ahí"
+                nota "vuelve a prepararlo:  sudo redhornoma-visitante" ;;
       esac
     else
       mal "está publicada pero la carpeta no existe"
@@ -143,16 +168,34 @@ fi
 # ── La dirección del Windows del centro ──
 WIN=$(buscar_windows || true)
 if [ -z "$WIN" ]; then
-  avi "no pude preguntarle a la máquina virtual cuál es su dirección"
-  printf "   ¿Cuál es la dirección del Windows del centro? [192.168.1.50]: "
+  avi "no encontré al Windows del centro en la red $RED_LAN.0"
+  nota "escríbela tú: es la que ponen los accesos directos de los puestos"
+  printf "   Dirección del Windows del centro [$RED_LAN.50]: "
   read -r WIN
-  WIN="${WIN:-192.168.1.50}"
+  WIN="${WIN:-$RED_LAN.50}"
 fi
 case "$WIN" in
   [0-9]*.[0-9]*.[0-9]*.[0-9]*) ;;
   *) mal "«$WIN» no parece una dirección"; exit 1 ;;
 esac
+# 🔴 Esto es lo que impide repetir el fallo del 18/08: una dirección de
+# otra red se ve perfectamente desde aquí y NO se ve desde el portátil del
+# médico. Mejor plantarse ahora que descubrirlo con él delante.
+if ! en_la_red_del_centro "$WIN"; then
+  mal "«$WIN» no está en la red del centro ($RED_LAN.0)"
+  nota "el portátil del médico estará en $RED_LAN.0 y no puede llegar ahí"
+  nota "si esa es la dirección interna de la máquina virtual, no sirve:"
+  nota "hace falta la que tiene el Windows EN LA RED DEL CENTRO"
+  exit 1
+fi
 ok "el Windows del centro está en $WIN"
+# Verlo no es lo mismo que llegar: se comprueba que contesta de verdad.
+if command -v nc >/dev/null 2>&1 && nc -z -w3 "$WIN" 445 2>/dev/null; then
+  ok "y contesta: sus carpetas están abiertas"
+else
+  avi "no contestó al llamar a sus carpetas (puerto 445)"
+  nota "puede estar apagado ahora mismo; el instalador se prepara igual"
+fi
 ok "este servidor está en $IP_LAN"
 
 # ── Los archivos, con la dirección de ESTE centro puesta ──
