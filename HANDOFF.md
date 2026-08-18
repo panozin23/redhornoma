@@ -91,6 +91,62 @@ haya nadie allí**: se enciende sola a la 1:00. Por eso su objetivo 11 supera al
 de Cochabamba, que tiene las mismas piezas pero **no tiene despertador**: si se
 apaga, no la alcanza nadie.
 
+## 📋 LO QUE FALTA — al 18/08/2026, el proyecto en 96%
+
+**Ya no hay obras: son remates.** Ninguno es difícil.
+
+```
+1 · LOS PUESTOS DE LOS MEDICOS                       cierra el objetivo 2
+     documentacion/hornoma/instalar-puesto.ps1 YA FUNCIONA y esta probado.
+     Falta empaquetarlo para que lo lance LA PERSONA desde su sesion -el
+     agente no vale, las contraseñas de red no se comparten entre sesiones-
+     y añadirle:
+       · Set-NetIPInterface -InterfaceAlias "Wi-Fi" -InterfaceMetric 9000
+         para que el visitante use SU internet (Entel) y la red del centro
+         solo para llegar al servidor
+       · un "desinstalar" que limpie la cuenta al terminar la jornada
+     Idea de euflo: que el dentista y la Dra. del Bono lleguen con su
+     portatil Windows y en dos minutos sean puesto del centro.
+
+2 · QUE HORNOMA SEPA AVISAR SOLA                     cierra el objetivo 9
+     El vigia dice que ese centro "no avisa cuando se apaga ni cuando
+     despierta". Con base 1.2.4 ya instalado deberia dejar señal al
+     apagarse: hay que COMPROBAR que aparece en drive:ESTADO-REDHORNOMA.
+
+3 · EL INSTALADOR EN BOLIVIANO                       cierra el objetivo 7
+     Es lo unico que le falta al 7.
+
+4 · LA LLAVE DE BITLOCKER                            cierra el objetivo 4
+     Cuando aparezca.
+
+5 · UNA MAQUINA PRESTADA DE VERDAD                   cierra el objetivo 1
+     Los 6 perfiles fingidos ya pasan. Falta hierro real, con fabricante
+     concreto: firmware defectuoso y tarjetas raras no se pueden fingir.
+
+6 · LA .103 COMO PUESTO DE CONSULTORIO
+     ⚠️ NO TOCARLA hasta comprobar que TODO lo suyo esta en el .101.
+
+7 · LOS OTROS 4 CENTROS DEL MUNICIPIO                idea de euflo, 17/08
+     Usan Windows 10 y no quieren cambiar. Seis de las siete cosas que
+     aporta RedHornoma NO necesitan Linux. Ya esta escrito lo mas dificil:
+     respaldo-programas.ps1 (213 lineas, corre dentro de Windows) e
+     instalar-puesto.ps1 (149). Faltaria subir a la nube desde Windows,
+     dejar la señal para el vigia, y juntarlo en UN instalador: medio dia.
+     El argumento, que ademas es verdad: "no les cambiamos nada, solo le
+     ponemos una red de seguridad".
+```
+
+## ✅ Cerrado y probado — no volver a tocarlo
+
+```
+· objetivo 5 y 8 al 100% en los DOS centros
+· la ISO del 14/08 instala y arranca, tambien con Arranque Seguro
+· los dos servidores con la misma informacion y el 2064 corregido
+· la red de Hornoma con direcciones fijas
+· el enchufe inteligente emparejado y probado desde datos moviles
+· el despertador funcionando: 7h30 seguidas, probado
+```
+
 ## 🔴 LO QUE QUEDA, CON NOMBRE Y APELLIDO — al 16/08/2026
 
 **En Hornoma quedó cerrado el 2 y el 8.** Lo que sigue pendiente, por orden:
