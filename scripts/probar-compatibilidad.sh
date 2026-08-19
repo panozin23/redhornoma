@@ -21,6 +21,7 @@
 #   probar-compatibilidad.sh --instalado antigua   arrancar lo ya instalado
 #   probar-compatibilidad.sh --desde-usb antigua   arrancar como PENDRIVE
 #   probar-compatibilidad.sh --resultados      qué salió en las pruebas
+#   probar-compatibilidad.sh --foto antigua    una foto de su pantalla AHORA
 set -u
 
 # ¿La ISO entra como CD o como pendrive?
@@ -157,6 +158,20 @@ arrancar_instalado(){
   esac
   ARG+=(-boot order=c)
   ARG+=(-vga virtio -display gtk,show-cursor=on)
+  # 🔴 Una puerta para MIRAR la pantalla sin estar delante.
+  #
+  # El 18/08/2026 se probó una ISO nueva y hubo que preguntarle a euflo qué
+  # veía, describirlo con palabras y creerle. Eso no es comprobar: es
+  # suponer con un intermediario. Y él estaba a 100 km de la máquina que
+  # importaba, haciendo de ojos.
+  #
+  # Con esto se le puede pedir a la máquina una foto de su propia pantalla
+  # en cualquier momento, desde otra terminal:
+  #
+  #   scripts/probar-compatibilidad.sh --foto segura
+  #
+  # No cambia nada de cómo arranca: es una puerta de servicio.
+  ARG+=(-qmp "unix:$TRABAJO/$NOMBRE/mando.sock,server=on,wait=off")
   ARG+=(-netdev user,id=n0 -device virtio-net-pci,netdev=n0)
 
   qemu-system-x86_64 "${ARG[@]}" 2>"$TRABAJO/$NOMBRE/qemu-instalado.log"
@@ -263,6 +278,20 @@ probar(){
     ARG+=(-boot order=cd,menu=on)
   fi
   ARG+=(-vga virtio -display gtk,show-cursor=on)
+  # 🔴 Una puerta para MIRAR la pantalla sin estar delante.
+  #
+  # El 18/08/2026 se probó una ISO nueva y hubo que preguntarle a euflo qué
+  # veía, describirlo con palabras y creerle. Eso no es comprobar: es
+  # suponer con un intermediario. Y él estaba a 100 km de la máquina que
+  # importaba, haciendo de ojos.
+  #
+  # Con esto se le puede pedir a la máquina una foto de su propia pantalla
+  # en cualquier momento, desde otra terminal:
+  #
+  #   scripts/probar-compatibilidad.sh --foto segura
+  #
+  # No cambia nada de cómo arranca: es una puerta de servicio.
+  ARG+=(-qmp "unix:$TRABAJO/$NOMBRE/mando.sock,server=on,wait=off")
   ARG+=(-netdev user,id=n0 -device virtio-net-pci,netdev=n0)
 
   printf "\n"
@@ -334,9 +363,54 @@ if [ "${1:-}" = "--desde-usb" ]; then
   [ $# -gt 0 ] || set -- --todas
 fi
 
+
+# ── Una foto de lo que hay ahora mismo en la pantalla ─────────────────
+#
+# Sirve mientras la prueba está abierta, desde otra terminal. Es la única
+# forma de comprobar lo que se VE sin estar delante de la máquina: útil
+# cuando quien la tiene delante y quien la revisa no son la misma persona.
+foto(){
+  local NOMBRE="$1" SOCK DESTINO
+  SOCK="$TRABAJO/$NOMBRE/mando.sock"
+  [ -S "$SOCK" ] || { mal "«$NOMBRE» no está abierta ahora mismo"
+                      nota "primero:  scripts/probar-compatibilidad.sh $NOMBRE"; return 1; }
+  DESTINO="${2:-$TRABAJO/$NOMBRE/pantalla-$(date '+%H%M%S').png}"
+  python3 - "$SOCK" "$DESTINO" <<'PYFIN'
+import socket, json, sys, os, time
+sock, destino = sys.argv[1], os.path.abspath(sys.argv[2])
+s = socket.socket(socket.AF_UNIX); s.connect(sock); f = s.makefile('rw')
+f.readline()                                    # el saludo de qemu
+f.write(json.dumps({"execute": "qmp_capabilities"}) + "\n"); f.flush(); f.readline()
+f.write(json.dumps({"execute": "screendump",
+                    "arguments": {"filename": destino}}) + "\n"); f.flush()
+r = json.loads(f.readline())
+print("error: " + str(r["error"]) if "error" in r else "")
+# El screendump vuelve en cuanto lo acepta, no cuando ha escrito.
+for _ in range(40):
+    if os.path.exists(destino) and os.path.getsize(destino) > 0: break
+    time.sleep(0.25)
+PYFIN
+  # 🔴 qemu guarda en PPM, un formato de los años ochenta, aunque el
+  # archivo se llame «.png». Ningún visor moderno lo abre, y el error que
+  # da es «no es una imagen válida», que despista mucho. Se convierte aquí.
+  if [ -s "$DESTINO" ] && head -c2 "$DESTINO" | grep -q '^P6' \
+     && command -v convert >/dev/null 2>&1; then
+    convert "$DESTINO" png:"$DESTINO.tmp" 2>/dev/null && mv -f "$DESTINO.tmp" "$DESTINO"
+  fi
+  if [ -s "$DESTINO" ]; then
+    ok "foto: $DESTINO"
+    command -v identify >/dev/null 2>&1 && nota "$(identify -format '%wx%h  %m' "$DESTINO")"
+  else
+    mal "no salió la foto"
+  fi
+}
+
 case "${1:---lista}" in
   --lista|-l)   listar; exit 0 ;;
   --resultados) ver_resultados; exit 0 ;;
+  --foto)
+    [ -n "${2:-}" ] || { mal "di de cuál: --foto segura"; exit 1; }
+    foto "$2" "${3:-}"; exit $? ;;
   -h|--help)    sed -n '2,26p' "$0" | sed 's/^# \?//'; exit 0 ;;
   --instalado)
     revisar_equipo || exit 1

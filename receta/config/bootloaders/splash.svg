@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  La PRIMERA pantalla que ve nadie al arrancar RedHornoma.
+
+  EL PORQUÉ
+
+  Hasta el 18/08/2026 aquí salía el casco amarillo de Debian y el texto
+  «Debian GNU/Linux 13 (trixie) amd64», con la fecha de compilación y las
+  versiones de cinco paquetes. Nada de eso le dice nada a quien enciende
+  la computadora de un centro de salud, y lo primero que ve es el nombre
+  de otro sistema.
+
+  CÓMO FUNCIONA, para quien lo tenga que tocar
+
+  live-build dibuja ese texto encima SOLO cuando usa su propia imagen. En
+  cuanto existe este archivo —config/bootloaders/splash.svg— usa el
+  nuestro tal cual y no le añade nada. Está en el guion
+  /usr/lib/live/build/binary_bootloader_splash, línea 64.
+
+  Se dibuja dos veces, a dos tamaños: 800x600 para el menú de las máquinas
+  modernas y 640x480 para las antiguas. Por eso todo va centrado y en
+  proporciones, y no hay nada pegado a los bordes.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+
+  <!-- El fondo. Negro arriba para que el menú de arranque, que se pinta
+       encima con letras claras, se lea sin esfuerzo. -->
+  <defs>
+    <linearGradient id="fondo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#0d1f26"/>
+      <stop offset="55%"  stop-color="#12303b"/>
+      <stop offset="100%" stop-color="#1c4b5a"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#fondo)"/>
+
+  <!-- La marca, arriba a la izquierda: el menú de arranque ocupa el centro
+       y la parte baja, así que aquí no estorba. -->
+  <text x="60" y="82"
+        font-family="DejaVu Sans, Liberation Sans, sans-serif"
+        font-size="46" font-weight="bold" fill="#ffffff">RedHornoma</text>
+
+  <text x="62" y="112"
+        font-family="DejaVu Sans, Liberation Sans, sans-serif"
+        font-size="17" fill="#7fc4d6">el sistema de los centros de salud</text>
+
+  <!-- Una línea que separa la marca del menú, sin cargar la pantalla. -->
+  <rect x="60" y="132" width="300" height="2" fill="#2e7d8f"/>
+
+  <!-- A media altura baja, NO abajo del todo: el propio menú escribe ahí su
+       ayuda («enter: boot, `e`: options»), y se pisarían. Se vio comparando
+       con una foto del menú de verdad, no imaginándolo.
+       Lo único que de verdad hace falta saber aquí: que
+       se puede probar sin tocar el disco. Es la duda que frena a
+       cualquiera delante de una computadora que no es suya. -->
+  <text x="400" y="500" text-anchor="middle"
+        font-family="DejaVu Sans, Liberation Sans, sans-serif"
+        font-size="15" fill="#6f9aa8">Puedes probarlo sin instalar nada: no se toca el disco</text>
+
+</svg>
