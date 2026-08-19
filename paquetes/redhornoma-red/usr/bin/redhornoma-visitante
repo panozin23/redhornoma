@@ -77,13 +77,19 @@ NOMBRE=$(leer nombre "$CONF_CENTRO"); NOMBRE="${NOMBRE:-$(cat /proc/sys/kernel/h
 # La regla correcta no es «la primera»: es **la que está en la misma red
 # que este servidor**, porque esa es exactamente la red en la que estará
 # el visitante. Si ninguna lo está, se prefiere no adivinar y preguntar.
+WIN_VM=""; WIN_INTERNA=""
 buscar_windows(){
-  local vm ip
+  local vm todas ip
   for vm in $(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
-    ip=$(LC_ALL=C virsh -c qemu:///system domifaddr "$vm" --source agent 2>/dev/null \
-         | grep -oP 'ipv4\s+\K[\d.]+' | grep -v '^127\.' \
-         | grep "^${RED_LAN}\." | head -1)
-    [ -n "$ip" ] && { printf '%s' "$ip"; return 0; }
+    todas=$(LC_ALL=C virsh -c qemu:///system domifaddr "$vm" --source agent 2>/dev/null \
+            | grep -oP 'ipv4\s+\K[\d.]+' | grep -v '^127\.')
+    ip=$(printf '%s\n' "$todas" | grep "^${RED_LAN}\." | head -1)
+    [ -n "$ip" ] || continue
+    WIN_VM="$vm"
+    # La otra dirección, la de la red interna, se guarda porque es la ÚNICA
+    # por la que este servidor puede hablar con ese Windows. Ver más abajo.
+    WIN_INTERNA=$(printf '%s\n' "$todas" | grep -v "^${RED_LAN}\." | head -1)
+    printf '%s' "$ip"; return 0
   done
   return 1
 }
@@ -189,12 +195,49 @@ if ! en_la_red_del_centro "$WIN"; then
   exit 1
 fi
 ok "el Windows del centro está en $WIN"
-# Verlo no es lo mismo que llegar: se comprueba que contesta de verdad.
-if command -v nc >/dev/null 2>&1 && nc -z -w3 "$WIN" 445 2>/dev/null; then
-  ok "y contesta: sus carpetas están abiertas"
+
+# ── ¿Están sus carpetas abiertas? ─────────────────────────────────────
+#
+# 🔴 NO SE PREGUNTA POR LA DIRECCIÓN DEL CENTRO, Y TIENE SU MOTIVO.
+#
+# El Windows se asoma a la red del centro con una tarjeta PRESTADA de la
+# placa —lo que en libvirt se llama «macvtap»—. Esa clase de tarjeta tiene
+# una particularidad que despista a cualquiera:
+#
+#     el Windows se ve desde TODA la red del centro,
+#     menos desde el propio servidor que lo aloja.
+#
+# No es una avería: es como funciona. El 18/08/2026 la comprobación
+# llamaba al 192.168.1.50 desde el servidor, no contestaba nunca, y salía
+# un aviso alarmante sobre un Windows que estaba perfectamente.
+#
+# La pregunta se hace por la red interna, que sí es un camino real entre
+# los dos. Si SOAPS contesta por ahí, sus carpetas están servidas; lo que
+# falta comprobar —el camino de la red del centro— es el cable de la
+# placa, que se mira aparte.
+if [ -n "$WIN_INTERNA" ] && command -v nc >/dev/null 2>&1; then
+  if nc -z -w3 "$WIN_INTERNA" 445 2>/dev/null; then
+    ok "sus carpetas están abiertas y sirviendo"
+  else
+    avi "el Windows está encendido pero no sirve sus carpetas"
+    nota "sin eso, ningún puesto puede abrir SOAPS ni SALMI"
+  fi
 else
-  avi "no contestó al llamar a sus carpetas (puerto 445)"
-  nota "puede estar apagado ahora mismo; el instalador se prepara igual"
+  nota "no pude preguntarle si sirve sus carpetas — míralo desde un puesto"
+fi
+
+# El cable de la placa es el otro medio camino, y cuando se suelta el
+# Windows desaparece de la red entera sin que el servidor se entere.
+TARJETA=$(LC_ALL=C virsh -c qemu:///system dumpxml "${WIN_VM:-}" 2>/dev/null \
+          | grep -oP "source dev='\K[^']+" | head -1)
+if [ -n "$TARJETA" ] && [ -r "/sys/class/net/$TARJETA/carrier" ]; then
+  if [ "$(cat "/sys/class/net/$TARJETA/carrier" 2>/dev/null)" = "1" ]; then
+    ok "el cable por el que sale el Windows está conectado"
+  else
+    mal "EL CABLE DE LA PLACA ESTÁ SUELTO ($TARJETA)"
+    nota "mientras siga así, el Windows no existe para la red del centro"
+    nota "es el cable de la computadora, no el del router"
+  fi
 fi
 ok "este servidor está en $IP_LAN"
 
