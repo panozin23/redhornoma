@@ -1,0 +1,60 @@
+---
+# La cara del instalador de RedHornoma.
+#
+# EL PORQUÉ
+#
+# Hasta el 18/08/2026 el instalador decía «Debian GNU/Linux 13» en todas
+# sus pantallas, con el logo de Debian y enlaces de ayuda a debian.org, en
+# inglés. Quien instala esto en un centro de salud de Capinota no sabe qué
+# es Debian, y esos enlaces no le sirven de nada.
+#
+# No es un capricho de marca: es que la pantalla mienta menos. Se instala
+# RedHornoma, así que eso es lo que tiene que decir.
+
+componentName:   redhornoma
+
+welcomeStyleCalamares: true
+welcomeExpandingLogo:  true
+windowExpanding:       normal
+windowSize:            800px,580px
+windowPlacement:       center
+
+strings:
+    productName:         RedHornoma
+    shortProductName:    RedHornoma
+    version:             1.0
+    shortVersion:        1.0
+    versionedName:       RedHornoma 1.0
+    shortVersionedName:  RedHornoma
+    # 🔴 Este nombre acaba siendo la carpeta del arranque en el firmware
+    # (\EFI\<nombre>\shimx64.efi) y el título del menú de arranque. Se
+    # cambia a sabiendas: la prueba de Arranque Seguro hay que repetirla
+    # cada vez que se toque, porque cambia la ruta donde queda el gestor.
+    bootloaderEntryName: RedHornoma
+    productUrl:          https://panozin23.github.io/redhornoma
+    supportUrl:          https://panozin23.github.io/redhornoma
+    knownIssuesUrl:      https://panozin23.github.io/redhornoma
+    releaseNotesUrl:     https://panozin23.github.io/redhornoma
+    donateUrl:           https://panozin23.github.io/redhornoma
+
+sidebar:    widget
+navigation: widget
+
+images:
+    productLogo:    "logo.png"
+    productIcon:    "logo.png"
+    productWelcome: "bienvenida.png"
+
+slideshow: "show.qml"
+# 🔴 Sin esta línea el pase de diapositivas no se comporta igual: la «2»
+# es la forma moderna, en la que el QML se carga una vez y se mueve solo
+# con su propio reloj. Es la que usa Debian, y se copia a conciencia.
+# Faltaba, y se vio comparando clave por clave con el branding de Debian
+# —el que ya sabemos que funciona— en vez de leyendo el nuestro a solas.
+slideshowAPI: 2
+
+style:
+   SidebarBackground:    "#1c4b5a"
+   SidebarText:          "#FFFFFF"
+   SidebarTextCurrent:   "#FFFFFF"
+   SidebarBackgroundCurrent: "#2e7d8f"
