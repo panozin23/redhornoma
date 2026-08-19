@@ -77,7 +77,21 @@ NOMBRE=$(leer nombre "$CONF_CENTRO"); NOMBRE="${NOMBRE:-$(cat /proc/sys/kernel/h
 # La regla correcta no es «la primera»: es **la que está en la misma red
 # que este servidor**, porque esa es exactamente la red en la que estará
 # el visitante. Si ninguna lo está, se prefiere no adivinar y preguntar.
-WIN_VM=""; WIN_INTERNA=""
+WIN=""; WIN_VM=""; WIN_INTERNA=""
+# 🔴 Esta función DEJA PUESTAS tres variables y no imprime nada, y eso no
+# es un capricho de estilo.
+#
+# Antes imprimía la dirección y se llamaba así:
+#
+#     WIN=$(buscar_windows)
+#
+# Los «$( )» abren un proceso aparte. Lo que la función apunta ahí dentro
+# —la dirección interna, el nombre de la máquina— muere con ese proceso y
+# NUNCA llega aquí. El resultado: se recogía la dirección buena y se
+# perdían las otras dos, así que la comprobación de las carpetas decía
+# siempre «no pude preguntarle», sin que nada delatara por qué.
+#
+# Se llama «buscar_windows» a secas, sin comillas ni paréntesis.
 buscar_windows(){
   local vm todas ip
   for vm in $(LC_ALL=C virsh -c qemu:///system list --name 2>/dev/null | grep -v '^$'); do
@@ -85,11 +99,11 @@ buscar_windows(){
             | grep -oP 'ipv4\s+\K[\d.]+' | grep -v '^127\.')
     ip=$(printf '%s\n' "$todas" | grep "^${RED_LAN}\." | head -1)
     [ -n "$ip" ] || continue
-    WIN_VM="$vm"
+    WIN="$ip"; WIN_VM="$vm"
     # La otra dirección, la de la red interna, se guarda porque es la ÚNICA
     # por la que este servidor puede hablar con ese Windows. Ver más abajo.
     WIN_INTERNA=$(printf '%s\n' "$todas" | grep -v "^${RED_LAN}\." | head -1)
-    printf '%s' "$ip"; return 0
+    return 0
   done
   return 1
 }
@@ -172,7 +186,7 @@ if ! command -v smbd >/dev/null 2>&1 && [ ! -x /usr/sbin/smbd ]; then
 fi
 
 # ── La dirección del Windows del centro ──
-WIN=$(buscar_windows || true)
+buscar_windows || true
 if [ -z "$WIN" ]; then
   avi "no encontré al Windows del centro en la red $RED_LAN.0"
   nota "escríbela tú: es la que ponen los accesos directos de los puestos"
