@@ -1,0 +1,31 @@
+# 🔴 EL NOMBRE DE ESTE ARCHIVO NO ES LIBRE — 18/08/2026
+#
+# Se llama «calamares-install-debian.desktop» a propósito, aunque por
+# dentro diga RedHornoma, y aunque el nombre chirríe.
+#
+# Al escritorio le ponen el icono DOS programas distintos:
+#
+#   1 · este archivo, que viene de /etc/skel
+#   2 · «add-calamares-desktop-icon», de Debian, que al arrancar copia
+#       /usr/share/applications/calamares-install-debian.desktop al
+#       escritorio —y ese archivo también es nuestro, con nuestro texto—
+#
+# Con nombres distintos salían DOS iconos iguales, uno al lado del otro,
+# los dos buenos. Con el mismo nombre, el segundo pisa al primero y queda
+# uno solo, corra el que corra de los dos. Y si un día Debian quita su
+# programa, este sigue estando.
+#
+# Cambiarle el nombre a algo más bonito devuelve los dos iconos.
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Instalar RedHornoma
+GenericName=Instalador del sistema
+Comment=Instalar RedHornoma en el disco de esta computadora
+Exec=calamares-install-debian
+Icon=install-debian
+Terminal=false
+StartupNotify=true
+Categories=System;
+Keywords=instalar;instalador;sistema;redhornoma;calamares;disco;
+NoDisplay=false
