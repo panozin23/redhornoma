@@ -90,6 +90,56 @@ else
   exit 1
 fi
 
+# ── ¿Puede algún archivo SALIRSE de la ISO? ───────────────────────────
+#
+# 🔴 EL 18/08/2026 UNA CONSTRUCCIÓN LE CAMBIÓ EL FONDO DE ESCRITORIO AL
+#    PORTÁTIL DE QUIEN LA LANZÓ. Seis archivos de su sistema, sobrescritos.
+#
+# Se añadieron fondos propios en:
+#
+#     config/includes.chroot/usr/share/wallpapers/DebianTheme/…
+#
+# Y «DebianTheme» NO es una carpeta dentro del sistema construido: es un
+# atajo con dirección ABSOLUTA (/etc/alternatives/…). Al copiar, el atajo
+# se siguió, la dirección absoluta se resolvió CONTRA EL EQUIPO DE FUERA, y
+# los archivos aterrizaron en el sistema de verdad en vez de en la imagen.
+#
+# Lo peor no fue el daño —se devolvió en un minuto— sino que no avisó:
+# la ISO se construyó «bien», y el destrozo estaba fuera de ella.
+#
+# Aquí se recorre cada archivo que la receta va a aportar y se comprueba
+# que ninguna carpeta de su camino sea un atajo dentro del sistema
+# construido. Si lo es, no se construye.
+titulo "0 · ¿ALGÚN ARCHIVO SE SALE DE LA IMAGEN?"
+FUGAS=0
+if [ -d "$RECETA/config/includes.chroot" ] && [ -d "$RECETA/chroot" ]; then
+  while IFS= read -r REL; do
+    [ -n "$REL" ] || continue
+    CAMINO=""
+    # Se mira carpeta por carpeta, de la raíz hacia dentro: basta con que
+    # UNA sea un atajo para que todo lo de debajo se salga.
+    IFS='/' read -ra TROZOS <<< "$(dirname "$REL")"
+    for T in "${TROZOS[@]}"; do
+      [ -n "$T" ] && [ "$T" != "." ] || continue
+      CAMINO="$CAMINO/$T"
+      if [ -L "$RECETA/chroot$CAMINO" ]; then
+        printf "   ${RO}✖${V} %s\n" "$REL"
+        printf "       «%s» es un ATAJO a «%s»\n" "$CAMINO" \
+               "$(readlink "$RECETA/chroot$CAMINO")"
+        FUGAS=$((FUGAS+1)); break
+      fi
+    done
+  done <<< "$(cd "$RECETA/config/includes.chroot" && find . -type f -printf '%P\n' 2>/dev/null)"
+fi
+if [ "$FUGAS" = "0" ]; then
+  ok "ningún archivo se sale de la imagen"
+else
+  echo
+  printf "   ${AM}Escribe esos archivos en la carpeta DE VERDAD a la que apunta el\n"
+  printf "   atajo. Tal como está, la construcción tocaría ESTE equipo.${V}\n"
+  exit 1
+fi
+
 # ── Limpiar lo anterior ───────────────────────────────────────────────
 titulo "1 · LIMPIAR LA CONSTRUCCIÓN ANTERIOR"
 
