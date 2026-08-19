@@ -96,17 +96,13 @@ apaga, no la alcanza nadie.
 **Ya no hay obras: son remates.** Ninguno es difícil.
 
 ```
-1 · LOS PUESTOS DE LOS MEDICOS                       cierra el objetivo 2
-     documentacion/hornoma/instalar-puesto.ps1 YA FUNCIONA y esta probado.
-     Falta empaquetarlo para que lo lance LA PERSONA desde su sesion -el
-     agente no vale, las contraseñas de red no se comparten entre sesiones-
-     y añadirle:
-       · Set-NetIPInterface -InterfaceAlias "Wi-Fi" -InterfaceMetric 9000
-         para que el visitante use SU internet (Entel) y la red del centro
-         solo para llegar al servidor
-       · un "desinstalar" que limpie la cuenta al terminar la jornada
-     Idea de euflo: que el dentista y la Dra. del Bono lleguen con su
-     portatil Windows y en dos minutos sean puesto del centro.
+1 · LOS PUESTOS DE LOS MEDICOS                       98% EL 18/08
+     Empaquetado en redhornoma-red 1.1.10:
+        sudo redhornoma-visitante   en el servidor del centro
+     Publica una carpeta [INSTALAR] sin contraseña con Instalar.bat y
+     Quitar.bat dentro. Probado dentro de un Windows de verdad.
+     FALTA: probarlo con un portatil real, con un medico delante.
+     Ver la memoria [[puestos-para-visitantes]].
 
 2 · QUE HORNOMA SEPA AVISAR SOLA                     ✅ HECHO EL 18/08
      Resulto que el aviso NUNCA habia funcionado lanzado por el sistema:
