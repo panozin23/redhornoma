@@ -1,0 +1,69 @@
+# El aspecto del menú de arranque de RedHornoma.
+#
+# 🔴 POR QUÉ EXISTE ESTE ARCHIVO — 18/08/2026
+#
+# Solo cambia una línea del de live-build: «title-text», que traía
+# «Live Boot Menu with GRUB» y salía en inglés, encima del nombre de
+# RedHornoma, en la primera pantalla que ve nadie.
+#
+# Y es consecuencia directa de haber puesto nuestra propia imagen de
+# fondo: live-build vacía ese título SOLO cuando usa la suya
+# (/usr/lib/live/build/binary_bootloader_splash, línea 77). Al darle la
+# nuestra, dejó de vaciarlo.
+#
+# Es de los fallos que un cambio bueno arrastra detrás, y que no se ven
+# leyendo el código: se vieron ARRANCANDO la ISO y mirando la foto.
+#
+# Se deja vacío porque el nombre ya está dibujado en la imagen de fondo.
+
+desktop-image: "../splash.png"
+title-color: "#ffffff"
+title-font: "Unifont Regular 16"
+title-text: ""
+message-font: "Unifont Regular 16"
+terminal-font: "Unifont Regular 16"
+
+#help bar at the bottom
++ label {
+        top = 100%-50
+        left = 0
+        width = 100%
+        height = 20
+        text = "@KEYMAP_SHORT@"
+        align = "center"
+        color = "#ffffff"
+	font = "Unifont Regular 16"
+}
+
+#boot menu
++ boot_menu {
+        left = 10%
+        width = 80%
+        top = 52%
+        height = 48%-80
+        item_color = "#a8a8a8"
+	item_font = "Unifont Regular 16"
+        selected_item_color= "#ffffff"
+	selected_item_font = "Unifont Regular 16"
+        item_height = 16
+        item_padding = 0
+        item_spacing = 4
+	icon_width = 0
+	icon_heigh = 0
+	item_icon_space = 0
+}
+
+#progress bar
++ progress_bar {
+        id = "__timeout__"
+        left = 15%
+        top = 100%-80
+        height = 16
+        width = 70%
+        font = "Unifont Regular 16"
+        text_color = "#000000"
+        fg_color = "#ffffff"
+        bg_color = "#a8a8a8"
+        border_color = "#ffffff"
+        text = "@TIMEOUT_NOTIFICATION_LONG@"
+}
