@@ -280,3 +280,14 @@ no esté a mano.**
 | ¿hay algo que avisar? | «El vigía» | `redhornoma-vigia --siempre` |
 | preparar un puesto para un visitante | — | en el servidor: `sudo redhornoma-visitante` |
 | encender Hornoma | con el teléfono: Smart Life → apagar la toma, 10 s, encender | no se puede por red |
+
+---
+
+# 🖱️ «Los centros» está anclado en la barra de abajo
+
+Es el **último icono a la derecha**. Un clic y se abre — no hace falta
+buscarlo en el menú.
+
+Si algún día desaparece de ahí, se vuelve a poner con el ratón: abre el
+menú, busca «Los centros que atiendo», **botón derecho → Anclar a la barra
+de tareas**.
