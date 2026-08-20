@@ -271,6 +271,7 @@ case "$CODIGO" in
   3) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$DATOS" | awk -F'|' -v d="$SEL" '$6==d{print $2; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
+     [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
      if [ "$EST" != "despierto" ]; then
        yad --info --center --width=420 --title="Ya está apagada" \
          --text="<b>$NOM no contesta.</b>\n\nO ya está apagada, o no llega su internet. De cualquier forma, no hay nada que apagar." \
@@ -281,9 +282,26 @@ case "$CODIGO" in
   0) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$DATOS" | awk -F'|' -v d="$SEL" '$6==d{print $2; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
+     # 🔴 SE VUELVE A MIRAR ANTES DE DAR EL ERROR — 19/08/2026
+     #
+     # Lo que se ve en la lista es una FOTO del momento en que se abrió la
+     # ventana, y el enlace entre centros no está levantado hasta que
+     # alguien lo usa: el primer intento se pierde mientras las dos puntas
+     # se encuentran.
+     #
+     # El 19/08 euflo abrió la pantalla con Hornoma recién encendida, la
+     # lista dijo «no contesta», y al pulsar «Entrar» le salió que podía
+     # estar apagada. La máquina llevaba rato despierta. La foto era vieja,
+     # no la máquina.
+     #
+     # Antes de decirle a nadie que su centro no está, se pregunta otra
+     # vez. Cuesta unos segundos y ahorra un susto.
      if [ "$EST" != "despierto" ]; then
-       yad --error --center --width=420 --title="No se puede entrar" \
-         --text="<b>$NOM no contesta.</b>\n\nPuede estar apagada, o encendida pero sin internet: desde aquí las dos cosas se ven igual.\n\nPara encenderla desde lejos, con el enchufe inteligente: apaga su toma, espera 10 segundos y vuelve a encenderla." \
+       EST=$(mirar "$SEL" | cut -d'|' -f1)
+     fi
+     if [ "$EST" != "despierto" ]; then
+       yad --error --center --width=440 --title="No se puede entrar" \
+         --text="<b>$NOM no contesta.</b>\n\nSe ha comprobado dos veces.\n\nPuede estar apagada, o encendida pero sin internet: desde aquí las dos cosas se ven igual.\n\nPara encenderla desde lejos, con el enchufe inteligente: apaga su toma, espera 10 segundos y vuelve a encenderla." \
          --button="Entendido:0" 2>/dev/null
        exit 1
      fi
