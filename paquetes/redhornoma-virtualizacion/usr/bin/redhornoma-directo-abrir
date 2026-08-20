@@ -89,11 +89,51 @@ while true; do
               --hotkeys=release-cursor=shift+f12 "$VM" \
               2> >(grep -v "Gtk-WARNING" >&2)
 
-  # Si el visor se cierra —lo cerró alguien, o se apagó el Windows— NO se
-  # sale sin más: se pregunta. Salir en silencio deja un escritorio que la
-  # persona no sabe usar, que es justo lo que veníamos a evitar.
+  # ── Se cerró el visor. ¿Por qué? ───────────────────────────────────
+  #
+  # 🔴 Aquí está la otra mitad de la idea, y la pidió euflo el 20/08/2026:
+  #
+  #     «Si enciende directo a Windows, el apagado tiene que ser lo mismo:
+  #      la máquina se tiene que apagar toda, Windows y Linux.»
+  #
+  # Tiene razón. Quien usa esto no sabe que hay un Linux debajo, así que
+  # le da a «Apagar» dentro de Windows y se va a su casa. Si la
+  # computadora se queda encendida toda la noche con una pantalla rara,
+  # el sistema le ha mentido.
+  #
+  # Se distinguen los dos casos MIRANDO la máquina, no suponiendo:
+  #
+  #   el Windows está apagado  →  la persona lo apagó: se apaga todo
+  #   el Windows sigue vivo    →  se cerró el visor por accidente,
+  #                               o lo cerró el técnico: se pregunta
+  if ! encendida; then
+    # Quince segundos para arrepentirse. Si Windows se cerró por un fallo
+    # y no porque nadie lo pidiera, esto evita apagar la computadora de
+    # un centro sin que nadie lo haya decidido.
+    yad --center --width=520 --borders=20 --title="Apagando" \
+        --image=system-shutdown --timeout=15 --timeout-indicator=bottom \
+        --text="<span size='x-large'><b>Se apagó Windows</b></span>\n\nLa computadora se va a apagar entera.\n\n<i>Si no querías apagarla, pulsa «No apagar».</i>" \
+        --button="No apagar:1" --button="Apagar ahora:0" 2>/dev/null
+    RESPUESTA=$?
+    # 0 = pulsó «Apagar ahora»   ·   1 = «No apagar»   ·   70 = se agotó
+    # el tiempo, que es el caso NORMAL: la persona ya se fue.
+    if [ "$RESPUESTA" != "1" ]; then
+      # El «-n» es para que no se quede esperando una contraseña que nadie
+      # va a escribir: el permiso lo dio «redhornoma-directo --poner».
+      sudo -n /usr/bin/redhornoma-apagar >/dev/null 2>&1 && exit 0
+      yad --center --width=520 --borders=20 --title="No se pudo apagar" \
+        --image=dialog-warning \
+        --text="<b>No se pudo apagar la computadora sola.</b>\n\nApágala con su botón." \
+        --button="Entendido:0" 2>/dev/null
+      exit 0
+    fi
+    continue            # dijo que no: se vuelve a intentar abrir Windows
+  fi
+
+  # El Windows sigue vivo: alguien cerró la ventana. NO se sale en
+  # silencio, que dejaría un escritorio que la persona no sabe usar.
   yad --center --width=520 --borders=20 --title="El sistema del centro" \
     --image=dialog-question \
-    --text="<span size='x-large'><b>Se cerró la pantalla de Windows</b></span>\n\n¿Qué quieres hacer?" \
+    --text="<span size='x-large'><b>Se cerró la pantalla de Windows</b></span>\n\nWindows sigue funcionando por dentro.\n\n¿Qué quieres hacer?" \
     --button="Salir a Linux:1" --button="Volver a Windows:0" 2>/dev/null || exit 0
 done

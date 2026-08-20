@@ -33,6 +33,7 @@ set -u
 CONF=/etc/redhornoma/directo.conf
 SDDM=/etc/sddm.conf.d/redhornoma-directo.conf
 INICIO=/etc/xdg/autostart/redhornoma-directo.desktop
+PERMISO=/etc/sudoers.d/redhornoma-directo
 
 V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
 titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
@@ -79,7 +80,7 @@ fi
 if [ "$ACCION" = "quitar" ]; then
   titulo "VOLVER A ARRANCAR EN LINUX"
   N=0
-  for f in "$SDDM" "$INICIO" "$CONF"; do
+  for f in "$SDDM" "$INICIO" "$CONF" "$PERMISO"; do
     [ -f "$f" ] && { rm -f "$f" && N=$((N+1)); }
   done
   if [ "$N" = "0" ]; then
@@ -182,6 +183,40 @@ Terminal=false
 X-GNOME-Autostart-enabled=true
 CFG
 ok "y abrirá Windows en pantalla completa"
+
+# ── Y que pueda apagar la computadora entera ──────────────────────────
+#
+# 🔴 La otra mitad, pedida por euflo el 20/08/2026: «si enciende directo a
+# Windows, el apagado tiene que ser lo mismo». Quien usa esto le da a
+# «Apagar» dentro de Windows y se va; la computadora tiene que apagarse
+# entera, no quedarse encendida toda la noche con una pantalla rara.
+#
+# Para eso esa cuenta necesita poder apagar sin escribir una contraseña
+# que nadie le ha dado. Se le permite UNA orden y nada más — no es «sudo
+# para todo»: es «puede apagar esta computadora».
+cat > "$PERMISO" <<CFG
+# Puesto por «redhornoma-directo». Para quitarlo:
+#     sudo redhornoma-directo --quitar
+#
+# Solo esta orden, y solo esta cuenta. «redhornoma-apagar» cierra el
+# Windows con orden antes de apagar, así que no puede estropear nada.
+$USUARIO ALL=(root) NOPASSWD: /usr/bin/redhornoma-apagar
+CFG
+chmod 440 "$PERMISO"
+# 🔴 Un archivo de permisos mal escrito puede dejar a TODO EL MUNDO sin
+# sudo en esa computadora. Se comprueba antes de dejarlo puesto, y si no
+# pasa, se retira.
+# El camino completo, no «visudo» a secas: esto puede correr desde un
+# entorno donde /usr/sbin no esté en el camino, y entonces la
+# comprobación no fallaría — simplemente no existiría, que es peor.
+VISUDO=$(command -v visudo || echo /usr/sbin/visudo)
+if [ -x "$VISUDO" ] && "$VISUDO" -c -q -f "$PERMISO" 2>/dev/null; then
+  ok "podrá apagar la computadora entera desde Windows"
+else
+  rm -f "$PERMISO"
+  avi "no se pudo dar el permiso para apagar — se retiró por seguridad"
+  nota "el modo directo funciona igual, pero habrá que apagar a mano"
+fi
 
 printf 'usuario=%s\nmaquina=%s\nfecha=%s\n' "$USUARIO" "$VM" "$(date '+%Y-%m-%d %H:%M')" > "$CONF"
 
