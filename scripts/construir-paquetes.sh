@@ -93,6 +93,13 @@ for nombre in "${ORDEN[@]}"; do
   [ -d "$ARBOL/usr/bin"  ] && chmod 755 "$ARBOL"/usr/bin/*
   [ -d "$ARBOL/usr/sbin" ] && chmod 755 "$ARBOL"/usr/sbin/*
 
+  # Los filtros de CUPS son binarios ELF, sin «#!»: la regla de más abajo
+  # (que busca shebang) no los detecta y quedarían en 644, sin permiso de
+  # ejecución. CUPS no puede lanzar lo que no es ejecutable — el mismo
+  # fallo silencioso que tuvo roto pkexec el 09/08/2026, aquí con la
+  # impresora en vez del botón «Arreglar».
+  [ -d "$ARBOL/usr/lib/cups/filter" ] && chmod 755 "$ARBOL"/usr/lib/cups/filter/*
+
   # Y cualquier otro programa, esté donde esté. Se reconoce por su primera
   # línea: si empieza por «#!», es algo que se ejecuta.
   #

@@ -10,6 +10,15 @@ set -e
 
 case "$1" in
   configure)
+    # El driver oficial de Epson para la L380/L382 es un binario viejo (LSB
+    # 3.2) que espera encontrar el cargador dinámico en /lib64/ld-lsb-x86-64.so.3.
+    # Debian dejó de traer ese enlace hace años; sin él, el filtro de
+    # impresión ni siquiera arranca. El enlace apunta al cargador normal
+    # del sistema, así que no cambia nada más.
+    if [ ! -e /lib64/ld-lsb-x86-64.so.3 ] && [ -e /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 ]; then
+      ln -s /lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 /lib64/ld-lsb-x86-64.so.3
+    fi
+
     # /run/systemd/system solo existe en una máquina encendida de verdad.
     # Dentro del chroot de la ISO no está, y por eso ahí no se hace nada:
     # allí basta con el enlace, que systemd leerá al arrancar.
