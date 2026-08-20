@@ -71,4 +71,51 @@ if [ "${1:-}" = "configure" ] && [ -f "$RELOJ" ] && [ -f "$UNIDAD" ]; then
   fi
 fi
 
+# ── ¿El aviso a la nube apunta a una copia vieja? ─────────────────────
+#
+# 🔴 EL 19/08/2026 COCHABAMBA LLEVABA SEIS DÍAS SIN AVISAR, Y EL PAQUETE
+#    ESTABA AL DÍA.
+#
+# «redhornoma-desperte.service» lo escribió una versión antigua de
+# «redhornoma-horario», cuando el aviso todavía se copiaba a mano a
+# /usr/local/sbin. El paquete lo instala en /usr/bin y lo mantiene, pero
+# el servicio seguía llamando a la copia de /usr/local/sbin — la del 13 de
+# agosto, con el fallo del $HOME.
+#
+# Y hay una trampa añadida: /usr/local/sbin va ANTES que /usr/bin en el
+# camino del administrador. Así que la copia vieja ganaba también cuando
+# alguien escribía «redhornoma-aviso» a mano, y devolvía lo de siempre sin
+# que nada delatara que era otra.
+#
+# El apartado de arriba no lo cubría: solo rehace las cosas cuando el
+# centro tiene horario de noche, y Cochabamba no lo tiene a propósito.
+DESPERTE=/etc/systemd/system/redhornoma-desperte.service
+VIEJO=/usr/local/sbin/redhornoma-aviso
+
+if [ "${1:-}" = "configure" ] && [ -f "$DESPERTE" ]; then
+  DONDE=$(grep -oP '^ExecStart=\K\S+' "$DESPERTE" 2>/dev/null | head -1)
+  if [ -n "$DONDE" ] && [ "$DONDE" != "/usr/bin/redhornoma-aviso" ]; then
+    echo "   RedHornoma: el aviso a la nube apuntaba a «$DONDE»"
+    if command -v redhornoma-horario >/dev/null 2>&1; then
+      redhornoma-horario --solo-avisos >/dev/null 2>&1 || true
+    fi
+    # Se comprueba el RESULTADO, no el código de salida.
+    NUEVO=$(grep -oP '^ExecStart=\K\S+' "$DESPERTE" 2>/dev/null | head -1)
+    if [ "$NUEVO" = "/usr/bin/redhornoma-aviso" ]; then
+      echo "   RedHornoma: ahora usa el aviso del paquete, que está al día"
+      systemctl restart redhornoma-desperte.service >/dev/null 2>&1 || true
+    else
+      echo "   RedHornoma: no se pudo corregir — sigue apuntando a «$NUEVO»"
+    fi
+  fi
+fi
+
+# La copia suelta se APARTA, no se borra: no es nuestra para tirarla, y
+# quien la puso puede querer verla. Pero deja de estar en el camino, que
+# es lo que hacía daño.
+if [ "${1:-}" = "configure" ] && [ -f "$VIEJO" ]; then
+  mv -f "$VIEJO" "$VIEJO.reemplazado-por-el-paquete" 2>/dev/null \
+    && echo "   RedHornoma: apartada la copia suelta de $VIEJO"
+fi
+
 exit 0
