@@ -1,0 +1,185 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+<title>Encender y apagar — RedHornoma</title>
+<style>
+ body{max-width:44rem;margin:0 auto;padding:2.5rem 1.5rem 6rem;
+      font:17px/1.65 system-ui,'DejaVu Sans',sans-serif;color:#1a2226;background:#fbfbfa}
+ h1{font-size:2rem;color:#1c4b5a;border-bottom:3px solid #2e7d8f;padding-bottom:.4rem;margin-top:2.5rem}
+ h2{font-size:1.35rem;color:#1c4b5a;margin-top:2.2rem}
+ h3{font-size:1.1rem;color:#2e7d8f;margin-top:1.6rem}
+ pre{background:#12303b;color:#e8f2f5;padding:1rem 1.1rem;border-radius:7px;
+     overflow-x:auto;font:14.5px/1.55 'DejaVu Sans Mono',monospace}
+ code{background:#e6edf0;padding:.12em .4em;border-radius:4px;
+      font:.9em 'DejaVu Sans Mono',monospace;word-break:break-word}
+ pre code{background:none;padding:0;color:inherit;font-size:1em}
+ blockquote{border-left:5px solid #2e7d8f;background:#eef5f7;margin:1.3rem 0;
+            padding:.8rem 1.1rem;border-radius:0 6px 6px 0}
+ blockquote p{margin:.3rem 0}
+ table{border-collapse:collapse;width:100%;margin:1.3rem 0;font-size:.95rem}
+ th{background:#1c4b5a;color:#fff;text-align:left}
+ th,td{border:1px solid #cfdade;padding:.6rem .7rem;vertical-align:top}
+ tr:nth-child(even) td{background:#f2f6f7}
+ td code{font-size:.85em}
+ hr{border:0;border-top:1px solid #d5dfe2;margin:2.5rem 0}
+ /* Para imprimirlo y dejarlo al lado de la computadora. */
+ @media print{body{max-width:none;padding:0;font-size:11pt;background:#fff}
+              pre{background:#f0f0f0;color:#000;border:1px solid #bbb}
+              h1,h2{page-break-after:avoid} pre,table{page-break-inside:avoid}}
+</style></head><body>
+
+<h1>Encender y apagar, sin preguntarle a nadie</h1>
+<p><strong>Todo lo de aquí se escribe EN TU PORTÁTIL</strong>, estés donde estés. Comprobado el 19/08/2026.</p>
+<hr>
+<h2>⚠️ Antes de nada: dos nombres, UNA máquina</h2>
+<p>En tus notas aparecían como si fueran dos computadoras distintas. <strong>Son la misma:</strong></p>
+<pre><code>
+respaldo-hornoma   =   100.81.234.58   =   el servidor de Hornoma
+</code></pre>
+<p><code>respaldo-hornoma</code> es el nombre y <code>100.81.234.58</code> es su número. Da igual cuál uses. Por eso tenías dos apuntes que hacían exactamente lo mismo.</p>
+<p>Los tres nombres que existen:</p>
+<pre><code>
+respaldo-hornoma    el servidor de HORNOMA      (el principal)
+servidor-ciudad     el servidor de COCHABAMBA   (el de apoyo)
+portatil            el tuyo
+</code></pre>
+<hr>
+<h2>🥇 Lo primero: la pantalla que te ahorra casi todos los comandos</h2>
+<pre><code>
+redhornoma-centros
+</code></pre>
+<p>Te dice de un vistazo <strong>qué centros están despiertos</strong> y te deja entrar a la pantalla de su Windows con un botón. También está en el menú del escritorio, como <strong>«Los centros»</strong>.</p>
+<p>Si prefieres verlo escrito:</p>
+<pre><code>
+redhornoma-centros --texto
+</code></pre>
+<p>Y se ve así:</p>
+<pre><code>
+   CENTRO           ESTADO       SU WINDOWS         ENLACE
+   ○ CS Hornoma     no contesta  —                  —
+   ● Cochabamba     despierto    salud-servidor     85 ms
+</code></pre>
+<p><strong><code>○ no contesta</code> no siempre es un problema</strong>: a partir de las 8 de la mañana Hornoma se apaga sola. Mira el apartado siguiente.</p>
+<hr>
+<h1>🏥 HORNOMA — el servidor principal</h1>
+<h2>Se apaga y se enciende SOLA. No hay que hacer nada.</h2>
+<pre><code>
+se enciende    todos los días a la 01:00
+se apaga       de miércoles a domingo, a partir de las 08:00
+</code></pre>
+<p>A las 8 empieza a intentarlo, y <strong>reintenta cada media hora hasta las 12:30</strong> si hay alguien trabajando. En cuanto no queda nadie, se apaga.</p>
+<p><strong>No se apaga si:</strong> hay alguien conectado por red, hay un respaldo en marcha, o existe el archivo <code>/etc/redhornoma/no-apagar</code>.</p>
+<h2>Saber si está viva, y qué prometió</h2>
+<pre><code>
+redhornoma-centros --texto
+</code></pre>
+<p>Y para saber <strong>qué dijo la última vez</strong> —incluso estando apagada—:</p>
+<pre><code>
+rclone cat drive:ESTADO-REDHORNOMA/hornoma--respaldo-hornoma.txt
+</code></pre>
+<p>Contesta algo así, y esto es oro cuando no responde:</p>
+<pre><code>
+que=apagando
+vuelve=20/08 a las 01:00
+despertador=si
+Se apagó con orden, y dejó el despertador puesto y COMPROBADO.
+</code></pre>
+<blockquote><p><strong>Si prometió volver y no volvió, el problema es la placa o la corriente, no el programa.</strong> Si ni siquiera prometió, se apagó por otro camino.</p></blockquote>
+<h2>Apagarla ahora, a mano</h2>
+<pre><code>
+ssh -t hornoma@respaldo-hornoma &#x27;sudo /usr/local/sbin/redhornoma-apagar-noche --ahora&#x27;
+</code></pre>
+<p>Te pide la contraseña de esa máquina.</p>
+<p><strong>El <code>--ahora</code> es lo que dice «lo pido yo».</strong> Sin él, el guion mira si hay alguien conectado —y como tú entras por SSH, se vería a ti mismo y no se apagaría nunca.</p>
+<p>Esto hace tres cosas, y por eso es mejor que <code>poweroff</code> a secas:</p>
+<pre><code>
+1 · cierra el Windows con orden, sin perder nada
+2 · arma el despertador para la 01:00 y lo COMPRUEBA
+3 · deja dicho en la nube a qué hora vuelve
+</code></pre>
+<p>⚠️ <strong>Nunca la apagues con el enchufe inteligente.</strong> Cortarle la luz la deja sin despertador puesto: no volvería sola.</p>
+<h2>Encenderla desde lejos</h2>
+<p><strong>No se puede por red</strong>: una máquina apagada no escucha. Se hace con el <strong>enchufe inteligente</strong>, desde el teléfono, con la aplicación <strong>Smart Life</strong> — y funciona con datos móviles, sin estar en el centro.</p>
+<pre><code>
+1 · abre Smart Life y busca la toma donde está la PC
+2 · APÁGALA
+3 · espera 10 segundos
+4 · ENCIÉNDELA
+</code></pre>
+<p><strong>El apagar-y-encender es lo que la arranca.</strong> Si la toma ya estaba encendida y solo le das a «encender», no pasa nada: la placa necesita ver que vuelve la luz.</p>
+<p>⚠️ El <strong>botón pequeño azul</strong> del enchufe apaga las DOS tomas. No lo uses.</p>
+<p>Tarda un par de minutos en aparecer. Compruébalo con <code>redhornoma-centros</code>.</p>
+<h2>Entrar a la pantalla de su Windows</h2>
+<p>Lo cómodo:</p>
+<pre><code>
+redhornoma-centros --entrar hornoma
+</code></pre>
+<p>Lo mismo, escrito entero (por si la pantalla fallara):</p>
+<pre><code>
+redhornoma-entrar --en hornoma@respaldo-hornoma
+</code></pre>
+<p>Ahí dentro tienes SOAPS, SALMI y SNIS del centro, como si estuvieras sentado delante.</p>
+<hr>
+<h1>🏙️ COCHABAMBA — el servidor de apoyo</h1>
+<p><strong>No tiene horario, y es a propósito.</strong> Aquí estás tú: se enciende y se apaga a mano, con su botón.</p>
+<p>Para apagarlo desde el portátil:</p>
+<pre><code>
+ssh -t flora@servidor-ciudad &#x27;sudo systemctl poweroff&#x27;
+</code></pre>
+<blockquote><p>Va con <code>systemctl</code> y no con <code>poweroff</code> a secas por un detalle: en esa máquina <code>poweroff</code> vive en <code>/sbin</code>, que <strong>no está en el camino de tu usuario</strong>. Con <code>sudo</code> normalmente funcionaría igual, pero «normalmente» no basta para un comando que apaga un servidor. <code>systemctl</code> sí está en el camino, siempre.</p></blockquote>
+<p>Para entrar a su Windows:</p>
+<pre><code>
+redhornoma-entrar --en flora@servidor-ciudad
+</code></pre>
+<p>⚠️ <strong>Este no tiene despertador.</strong> Si lo apagas y te vas, hay que ir a encenderlo con el botón.</p>
+<hr>
+<h1>💻 LOS PUESTOS (las computadoras de los consultorios)</h1>
+<p>Se encienden y se apagan <strong>con su botón, como siempre</strong>. No tienen horario ni hace falta.</p>
+<p>Lo único que importa: <strong>para que funcionen, el servidor tiene que estar despierto.</strong> Si alguien dice «no abre el SOAPS» a las 9 de la mañana, casi siempre es que el servidor ya se apagó.</p>
+<h2>El portátil de un médico que viene de visita</h2>
+<p>En el servidor del centro, una sola vez:</p>
+<pre><code>
+sudo redhornoma-visitante
+</code></pre>
+<p>Y te dice exactamente qué decirle. Resumido:</p>
+<pre><code>
+1 · que se conecte al wifi del centro
+2 · que abra:  \\192.168.1.110\INSTALAR
+3 · doble clic en «Instalar.bat»  (le pides tú la cuenta de las carpetas)
+4 · al terminar la jornada, doble clic en «Quitar.bat»
+</code></pre>
+<hr>
+<h1>🔧 CUANDO ALGO NO VA</h1>
+<h2>El orden en el que mirar</h2>
+<pre><code>
+1 · redhornoma-centros --texto        ¿está despierto el centro?
+2 · redhornoma-vigia --siempre        ¿hay algo que avisar?
+3 · rclone cat drive:ESTADO-…         ¿qué dijo antes de callarse?
+</code></pre>
+<h2>«El acceso directo de SOAPS no está disponible»</h2>
+<p>Casi siempre es <strong>el cable de la placa del servidor</strong>, por donde se asoma el Windows. Si se suelta, el Windows desaparece de la red <strong>aunque el servidor siga funcionando</strong>. Se comprueba así:</p>
+<pre><code>
+ssh hornoma@respaldo-hornoma &#x27;cat /sys/class/net/enp2s0/carrier&#x27;
+</code></pre>
+<pre><code>
+1 = hay cable      0 = está suelto
+</code></pre>
+<h2>El vigía</h2>
+<pre><code>
+redhornoma-vigia
+</code></pre>
+<p><strong>Si no dice nada, es que todo está bien.</strong> Es a propósito: un aviso que sale todos los días se ignora a la semana. Para que hable igualmente:</p>
+<pre><code>
+redhornoma-vigia --siempre
+</code></pre>
+<hr>
+<h1>📋 LA CHULETA</h1>
+<table><tr><th>Quiero…</th><th>Escribo en mi portátil</th></tr>
+<tr><td>ver cómo está todo</td><td><code>redhornoma-centros</code></td></tr>
+<tr><td>entrar al Windows de Hornoma</td><td><code>redhornoma-centros --entrar hornoma</code></td></tr>
+<tr><td>apagar Hornoma ahora</td><td><code>ssh -t hornoma@respaldo-hornoma &#x27;sudo /usr/local/sbin/redhornoma-apagar-noche --ahora&#x27;</code></td></tr>
+<tr><td>encender Hornoma</td><td>con el teléfono: Smart Life → apagar la toma, 10 s, encender</td></tr>
+<tr><td>entrar al Windows de Cochabamba</td><td><code>redhornoma-entrar --en flora@servidor-ciudad</code></td></tr>
+<tr><td>apagar Cochabamba</td><td><code>ssh -t flora@servidor-ciudad &#x27;sudo systemctl poweroff&#x27;</code></td></tr>
+<tr><td>¿hay algo que avisar?</td><td><code>redhornoma-vigia --siempre</code></td></tr>
+<tr><td>preparar un puesto para un visitante</td><td>en el servidor: <code>sudo redhornoma-visitante</code></td></tr>
+</table>
+</body></html>
