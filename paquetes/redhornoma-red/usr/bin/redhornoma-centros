@@ -459,12 +459,32 @@ ERRYAD=$(mktemp)
 # volver: la tabla desaparece y no pasa nada más.
 #
 # Una ventana que vuelve donde no se ve no ha vuelto.
+# 🔴 LOS NÚMEROS DE LOS BOTONES SON PARES A PROPÓSITO — 20/08/2026
+#
+# Está en el manual de yad, en «EXIT STATUS», y cuesta media hora de
+# trabajo perdido no haberlo leído antes:
+#
+#     «Even exit code mean to print result, odd just return exit code»
+#     (código PAR devuelve lo seleccionado; IMPAR no devuelve nada)
+#
+# Los números se habían elegido a ojo: 5 para «Poner al día» y 3 para
+# «Apagar». Los dos IMPARES. Resultado: esos dos botones recibían la
+# selección VACÍA aunque euflo hubiera marcado el centro, y contestaban
+# «primero marca un centro». Y como después reabrían la tabla, veía dos
+# ventanas seguidas y ningún efecto.
+#
+# «Entrar a su Windows» (0) y «Encender» (4) son pares, y por eso esos dos
+# sí funcionaban. Esa diferencia era la pista, y tardé en verla.
+#
+# ⚠️ Si alguien añade un botón que necesite saber QUÉ centro está marcado,
+# tiene que llevar número PAR. Los impares valen solo para botones que no
+# miran la selección, como «Cerrar».
 SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
   --width=900 --height=330 --center --on-top \
   --text="<b>1 · Haz clic en un centro para marcarlo.   2 · Pulsa un botón de abajo.</b>\n<small>Los botones no hacen nada si no hay un centro marcado. En «Entrar a su Windows» puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
   --column=" " --column="Centro" --column="Cómo está" --column="Su Windows" --column="Enlace" --column="destino:HD" \
   --print-column=2 --separator="" \
-  --button="Volver a mirar:2" --button="Cerrar:1" --button="Poner al día:5" --button="Apagar este centro:3" --button="Encender:4" --button="Entrar a su Windows:0" 2>"$ERRYAD")
+  --button="Volver a mirar:2" --button="Cerrar:1" --button="Poner al día:6" --button="Apagar este centro:8" --button="Encender:4" --button="Entrar a su Windows:0" 2>"$ERRYAD")
 CODIGO=$?
 
 # 🔴 SE PIDE EL NOMBRE DEL CENTRO, NO UNA COLUMNA OCULTA — 20/08/2026
@@ -501,7 +521,7 @@ rm -f "$ERRYAD"
 
 case "$CODIGO" in
   2) exec "$0" ;;                      # actualizar: mirarlo todo otra vez
-  5) [ -n "$SEL" ] || nadie_marcado
+  6) [ -n "$SEL" ] || nadie_marcado
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
@@ -526,7 +546,7 @@ case "$CODIGO" in
      [ "$EST" = "despierto" ] || { R=$(mirar "$SEL"); EST=${R%%|*}; WIN=$(printf '%s' "$R" | cut -d'|' -f2); }
      encender "$SEL" "${NOM:-ese centro}" "$EST" "$WIN"
      exec "$0" ;;
-  3) [ -n "$SEL" ] || nadie_marcado
+  8) [ -n "$SEL" ] || nadie_marcado
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
