@@ -431,8 +431,15 @@ done < <(printf '%s' "$FILAS")
 # lista escrita y se dice por qué. Una herramienta muda es lo peor que le
 # puede pasar a quien no sabe si está rota o si se equivocó él.
 ERRYAD=$(mktemp)
+# 🔴 El «--on-top» es de euflo, 20/08/2026: «no vuelve».
+#
+# Sí volvía — pero DETRÁS de la terminal que se acababa de abrir para
+# actualizar el centro. Desde su lado eso es exactamente igual que no
+# volver: la tabla desaparece y no pasa nada más.
+#
+# Una ventana que vuelve donde no se ve no ha vuelto.
 SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
-  --width=900 --height=330 --center \
+  --width=900 --height=330 --center --on-top \
   --text="<b>Elige un centro y pulsa «Entrar a su Windows».</b>\n<small>Ahí puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
   --column=" " --column="Centro" --column="Cómo está" --column="Su Windows" --column="Enlace" --column="destino:HD" \
   --print-column=6 --separator="" \
