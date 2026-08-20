@@ -213,6 +213,82 @@ apagar(){
   esac
 }
 
+
+# ── Encender, que son DOS escalones ───────────────────────────────────
+#
+# EL PORQUÉ — lo vio euflo el 20/08/2026 mirando la pantalla:
+#
+#   «En el caso de Hornoma debería ver dos cosas: encender la distro y
+#    después encender Windows. Porque Windows está DENTRO de RedHornoma:
+#    si RedHornoma está apagada, va a ser difícil entrar a su Windows.»
+#
+# Tenía razón, y era un botón que mentía: con el centro apagado, «Entrar a
+# su Windows» no podía funcionar de ninguna manera.
+#
+# Son dos escalones, y hay que subirlos en orden:
+#
+#     1 · la computadora del centro (RedHornoma)
+#     2 · el Windows que vive dentro
+#
+# El 2 se puede hacer desde aquí. El 1 NO: una máquina apagada no escucha
+# por la red, y en el centro no queda nadie despierto que le pueda avisar.
+# Para ese se dan los pasos del enchufe inteligente, que es lo único que
+# funciona de verdad — y se dice claro que hay que hacerlo con el teléfono,
+# en vez de fingir un botón que no puede hacer nada.
+encender(){
+  local destino="$1" nombre="$2" estado="$3" windows="$4"
+
+  # ── Escalón 1: la computadora está apagada ──
+  if [ "$estado" != "despierto" ]; then
+    yad --center --width=560 --borders=20 --title="Encender $nombre" \
+      --image=system-shutdown \
+      --text="<span size='x-large'><b>$nombre está apagada</b></span>\n\nNo se puede encender por la red: una computadora apagada no escucha.\n\n<b>Se hace con el teléfono</b>, en la aplicación <b>Smart Life</b>, y funciona con datos móviles:\n\n   1 · busca la toma donde está esa computadora\n   2 · <b>apágala</b>\n   3 · espera 10 segundos\n   4 · <b>enciéndela</b>\n\n<i>El apagar-y-encender es lo que la arranca. Si la toma ya estaba encendida, darle a «encender» no hace nada.</i>\n\nTarda un par de minutos. Después pulsa «Actualizar»." \
+      --button="Entendido:0" 2>/dev/null
+    return 0
+  fi
+
+  # ── Escalón 2: la computadora está viva; ¿y su Windows? ──
+  if [ "$windows" != "ninguno" ] && [ -n "$windows" ] && [ "$windows" != "—" ]; then
+    yad --info --center --width=460 --borders=20 --title="$nombre" \
+      --text="<b>Ya está todo encendido.</b>\n\nSu Windows «$windows» está en marcha.\n\nPulsa «Entrar a su Windows»." \
+      --button="Entendido:0" 2>/dev/null
+    return 0
+  fi
+
+  yad --question --center --width=480 --borders=20 --title="Encender el Windows de $nombre" \
+    --text="<span size='x-large'><b>$nombre está encendida</b></span>\n\nPero su Windows no está en marcha, y es ahí donde están SOAPS, SALMI y SNIS.\n\n¿Lo enciendo?" \
+    --button="Ahora no:1" --button="Sí, encenderlo:0" 2>/dev/null || return 0
+
+  # Se arranca la primera máquina que ese centro tenga definida. Y se
+  # COMPRUEBA que arrancó, en vez de dar por hecho que la orden bastó.
+  ( yad --progress --pulsate --auto-close --no-buttons --undecorated --center \
+        --width=460 --title="Encendiendo" \
+        --text="\n<b>Encendiendo el Windows de $nombre…</b>\n\n<i>Tarda entre medio minuto y un minuto.</i>\n" 2>/dev/null ) &
+  local ESP=$!
+  timeout 60 ssh -n -o BatchMode=yes -o ConnectTimeout=15 "$destino" \
+    'V=$(LC_ALL=C virsh -c qemu:///system list --all --name 2>/dev/null | grep -v "^$" | head -1)
+     [ -n "$V" ] && virsh -c qemu:///system start "$V" >/dev/null 2>&1' >/dev/null 2>&1
+
+  local T=0 VIVO=""
+  while [ "$T" -lt 75 ]; do
+    VIVO=$(timeout 20 ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$destino" \
+             'LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v "^$" | head -1' 2>/dev/null)
+    [ -n "$VIVO" ] && break
+    sleep 5; T=$((T+5))
+  done
+  kill "$ESP" 2>/dev/null
+
+  if [ -n "$VIVO" ]; then
+    yad --info --center --width=460 --borders=20 --title="$nombre" \
+      --text="<span size='large'><b>Listo: «$VIVO» está en marcha.</b></span>\n\nDale un minuto a Windows para terminar de arrancar y pulsa «Entrar a su Windows»." \
+      --button="Entendido:0" 2>/dev/null
+  else
+    yad --error --center --width=500 --borders=20 --title="$nombre" \
+      --text="<b>No se pudo encender su Windows.</b>\n\nLa computadora del centro sí responde, así que se puede entrar a ella para mirar qué pasa." \
+      --button="Entendido:0" 2>/dev/null
+  fi
+}
+
 # ── Modo entrar directo ───────────────────────────────────────────────
 if [ "$MODO" = "entrar" ]; then
   D=$(listar_centros | awk -F'|' -v c="$CUAL" 'tolower($1) ~ tolower(c) || $2 ~ c {print $2; exit}')
@@ -298,7 +374,7 @@ SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
   --text="<b>Elige un centro y pulsa «Entrar a su Windows».</b>\n<small>Ahí puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
   --column=" " --column="Centro" --column="Cómo está" --column="Su Windows" --column="Enlace" --column="destino:HD" \
   --print-column=6 --separator="" \
-  --button="Actualizar:2" --button="Cerrar:1" --button="Apagar este centro:3" --button="Entrar a su Windows:0" 2>"$ERRYAD")
+  --button="Actualizar:2" --button="Cerrar:1" --button="Apagar este centro:3" --button="Encender:4" --button="Entrar a su Windows:0" 2>"$ERRYAD")
 CODIGO=$?
 
 # 🔴 De lo que devuelva la ventana se saca SOLO la dirección, con su forma.
@@ -324,6 +400,14 @@ rm -f "$ERRYAD"
 
 case "$CODIGO" in
   2) exec "$0" ;;                      # actualizar: mirarlo todo otra vez
+  4) [ -n "$SEL" ] || exit 0
+     NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
+     EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
+     WIN=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $4; exit}')
+     # Igual que en los otros botones: la foto envejece, así que antes de
+     # decirle a nadie que su centro está apagado, se vuelve a mirar.
+     [ "$EST" = "despierto" ] || { R=$(mirar "$SEL"); EST=${R%%|*}; WIN=$(printf '%s' "$R" | cut -d'|' -f2); }
+     encender "$SEL" "${NOM:-ese centro}" "$EST" "$WIN" ;;
   3) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
@@ -361,6 +445,19 @@ case "$CODIGO" in
          --button="Entendido:0" 2>/dev/null
        exit 1
      fi
+     # 🔴 El centro responde, pero ¿está su Windows en marcha? Sin él no
+     # hay pantalla que abrir, y el visor se quedaría esperando sin
+     # explicar nada. Se manda al mismo sitio que el botón «Encender»,
+     # que sí sabe qué hacer.
+     WIN=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $4; exit}')
+     case "${WIN:-ninguno}" in
+       ninguno|""|—)
+         encender "$SEL" "$NOM" "$EST" "ninguno"
+         # Después de encenderlo, se vuelve a mirar: si ya está en marcha,
+         # se entra sin obligar a dar otra vuelta por la pantalla.
+         WIN=$(mirar "$SEL" | cut -d'|' -f2)
+         case "${WIN:-ninguno}" in ninguno|""|—) exit 0 ;; esac ;;
+     esac
      entrar "$SEL" "$NOM" ;;
 esac
 exit 0

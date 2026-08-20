@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Las computadoras del centro
+Comment=Ver cómo está cada computadora del centro y actuar sobre ellas
+Exec=redhornoma-equipos
+Icon=redhornoma-equipos
+Terminal=false
+Categories=System;Network;
+Keywords=equipos;computadoras;puestos;red;respaldo;
