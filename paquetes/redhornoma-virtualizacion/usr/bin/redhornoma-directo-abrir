@@ -1,0 +1,99 @@
+#!/bin/bash
+# redhornoma-directo-abrir — Lo que se ejecuta al encender, cuando la
+#                            computadora entra directa a Windows.
+#
+# Lo lanza /etc/xdg/autostart, que lo pone «redhornoma-directo --poner».
+#
+# EL PORQUÉ DE CADA COSA QUE HACE
+#
+# Abrir el visor a secas no basta. Windows tarda entre 30 segundos y un
+# minuto en estar listo, y en ese rato la persona ve un escritorio vacío o
+# una ventana en negro. Si además el Windows no arranca —porque se apagó
+# mal, porque falta espacio— se queda mirando la nada, sin saber si está
+# roto, si tiene que esperar, o si hizo algo mal.
+#
+# 🔴 Esa es la diferencia entre una prueba piloto que sale bien y un
+# susto. Una pantalla que no explica nada es peor que la pantalla de
+# contraseña que quitamos.
+#
+# Así que aquí:
+#   · se espera a que el Windows esté de verdad en marcha
+#   · mientras tanto se dice qué está pasando
+#   · si no arranca, se dice qué hacer, con botones grandes
+#   · y siempre hay una salida hacia Linux
+set -u
+
+CONF=/etc/redhornoma/directo.conf
+ESPERA_MAX=180          # 3 minutos: un disco de platos con Windows tarda
+
+# Solo para la cuenta que se configuró. En /etc/xdg/autostart esto se
+# lanza para CUALQUIERA que entre, y si el técnico inicia sesión para
+# arreglar algo no queremos secuestrarle la pantalla.
+CUENTA=$(grep -oP '^usuario=\K.*' "$CONF" 2>/dev/null)
+[ -n "$CUENTA" ] || exit 0
+[ "$(id -un)" = "$CUENTA" ] || exit 0
+
+VM=$(grep -oP '^maquina=\K.*' "$CONF" 2>/dev/null)
+[ -n "$VM" ] || VM=$(LC_ALL=C virsh -c qemu:///system list --all --name 2>/dev/null | grep -v '^$' | head -1)
+
+encendida(){ LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -qx "$VM"; }
+
+# ── Mientras arranca ──────────────────────────────────────────────────
+# Una ventana sin botones, en el centro, que se cierra sola cuando el
+# Windows está listo. No dice «cargando»: dice qué es y para qué.
+espera_abierta(){
+  yad --progress --pulsate --auto-close --no-buttons --undecorated \
+      --center --width=520 --skip-taskbar \
+      --title="RedHornoma" \
+      --text="\n<span size='xx-large'><b>RedHornoma</b></span>\n\n<span size='large'>Preparando el sistema del centro…</span>\n\n<i>Esto tarda menos de un minuto. No hay que hacer nada.</i>\n" \
+      2>/dev/null &
+  ESPERA_PID=$!
+}
+espera_cerrada(){ [ -n "${ESPERA_PID:-}" ] && kill "$ESPERA_PID" 2>/dev/null; ESPERA_PID=""; }
+
+# ── Si no hay forma ───────────────────────────────────────────────────
+# Con botones, grandes, y sin una sola palabra de informático.
+no_arranco(){
+  yad --center --width=560 --borders=20 --title="El sistema del centro" \
+    --image=dialog-warning \
+    --text="<span size='x-large'><b>Windows no ha arrancado</b></span>\n\nEl centro no puede trabajar hasta que arranque.\n\nPrueba a <b>volver a intentarlo</b>. Si sigue igual, apaga la computadora del botón, espera diez segundos y vuelve a encenderla.\n\n<i>Si tampoco así, avisa a quien lleva el sistema.</i>" \
+    --button="Salir a Linux:1" --button="Volver a intentar:0" 2>/dev/null
+}
+
+# ── El bucle ──────────────────────────────────────────────────────────
+while true; do
+  if ! encendida; then
+    espera_abierta
+    # Se intenta encenderla: puede que la computadora acabe de arrancar y
+    # libvirt todavía no haya llegado a hacerlo.
+    virsh -c qemu:///system start "$VM" >/dev/null 2>&1
+    T=0
+    while ! encendida && [ "$T" -lt "$ESPERA_MAX" ]; do sleep 3; T=$((T+3)); done
+    espera_cerrada
+  fi
+
+  if ! encendida; then
+    no_arranco || exit 0        # «Salir a Linux» → se queda el escritorio
+    continue
+  fi
+
+  # Ya está en marcha. Aun así hay que esperar un poco: la máquina existe
+  # antes de que su pantalla acepte visitas.
+  espera_abierta
+  sleep 12
+  espera_cerrada
+
+  # --reconnect hace que, si el Windows se reinicia, la pantalla vuelva
+  # sola en vez de dejar a la persona colgada.
+  virt-viewer --connect qemu:///system --full-screen --reconnect \
+              --hotkeys=release-cursor=shift+f12 "$VM" \
+              2> >(grep -v "Gtk-WARNING" >&2)
+
+  # Si el visor se cierra —lo cerró alguien, o se apagó el Windows— NO se
+  # sale sin más: se pregunta. Salir en silencio deja un escritorio que la
+  # persona no sabe usar, que es justo lo que veníamos a evitar.
+  yad --center --width=520 --borders=20 --title="El sistema del centro" \
+    --image=dialog-question \
+    --text="<span size='x-large'><b>Se cerró la pantalla de Windows</b></span>\n\n¿Qué quieres hacer?" \
+    --button="Salir a Linux:1" --button="Volver a Windows:0" 2>/dev/null || exit 0
+done

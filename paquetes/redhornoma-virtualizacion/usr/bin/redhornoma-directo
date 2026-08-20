@@ -1,0 +1,206 @@
+#!/bin/bash
+# redhornoma-directo — Que la computadora entre DIRECTAMENTE a Windows.
+#
+# EL PORQUÉ — 19/08/2026, en palabras de euflo
+#
+#   «Mucha gente no puede usar Linux y no quiere aprender. La gente de
+#   ahora ya no quiere usar código ni terminales: quiere apretar el botón
+#   y entrar a trabajar.»
+#
+# Tiene razón, y no hay nada que discutir ahí. Una persona que atiende
+# pacientes no tiene por qué saber qué sistema hay debajo.
+#
+# 🔴 NO SE QUITA NADA. Debian sigue. La virtualización sigue. Los
+# respaldos, la nube, el vigía y las carpetas compartidas siguen haciendo
+# su trabajo exactamente igual, sin que nadie los vea.
+#
+# Lo único que cambia es LO QUE APARECE EN LA PANTALLA al encender:
+#
+#     antes   pantalla de contraseña de Linux → escritorio → buscar el
+#             icono del Windows → abrirlo → esperar
+#     ahora   se enciende y sale Windows
+#
+# Cómo salir a Linux estando delante:  Ctrl + Alt + F2
+# Eso lleva a una pantalla de texto. No se encuentra por casualidad, y
+# funciona aunque el Windows esté colgado.
+#
+# Uso:
+#   sudo redhornoma-directo --poner        preguntando lo que haga falta
+#   sudo redhornoma-directo --quitar       volver a como estaba
+#   redhornoma-directo --ver               cómo está, sin tocar nada
+set -u
+
+CONF=/etc/redhornoma/directo.conf
+SDDM=/etc/sddm.conf.d/redhornoma-directo.conf
+INICIO=/etc/xdg/autostart/redhornoma-directo.desktop
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "      ${GR}%s${V}\n" "$1"; }
+
+ACCION=ver
+case "${1:-}" in
+  --poner)  ACCION=poner ;;
+  --quitar) ACCION=quitar ;;
+  --ver|"") ACCION=ver ;;
+  *) echo "Uso: redhornoma-directo [--poner|--quitar|--ver]"; exit 1 ;;
+esac
+
+# ══ VER ═══════════════════════════════════════════════════════════════
+if [ "$ACCION" = "ver" ]; then
+  titulo "ENTRAR DIRECTO A WINDOWS"
+  if [ -f "$CONF" ] && [ -f "$SDDM" ] && [ -f "$INICIO" ]; then
+    U=$(grep -oP '^usuario=\K.*' "$CONF" 2>/dev/null)
+    ok "está puesto — esta computadora entra directa a Windows"
+    nota "entra sola con la cuenta «$U»"
+    nota "para salir a Linux estando delante:  Ctrl + Alt + F2"
+    nota "para deshacerlo:  sudo redhornoma-directo --quitar"
+  else
+    # Se dice qué falta EXACTAMENTE, y no un «no está puesto» a secas: si
+    # alguien borró una de las tres piezas, hay que poder verlo.
+    nota "no está puesto: esta computadora arranca en Linux, como siempre"
+    [ -f "$CONF" ]   && nota "· la configuración SÍ está"
+    [ -f "$SDDM" ]   && nota "· el arranque sin contraseña SÍ está"
+    [ -f "$INICIO" ] && nota "· la apertura automática SÍ está"
+    echo
+    nota "se pone con:  sudo redhornoma-directo --poner"
+  fi
+  echo
+  exit 0
+fi
+
+[ "$(id -u)" = "0" ] || { titulo "ENTRAR DIRECTO A WINDOWS"
+  mal "hace falta sudo"; nota "sudo redhornoma-directo --$ACCION"; exit 1; }
+
+# ══ QUITAR ════════════════════════════════════════════════════════════
+if [ "$ACCION" = "quitar" ]; then
+  titulo "VOLVER A ARRANCAR EN LINUX"
+  N=0
+  for f in "$SDDM" "$INICIO" "$CONF"; do
+    [ -f "$f" ] && { rm -f "$f" && N=$((N+1)); }
+  done
+  if [ "$N" = "0" ]; then
+    nota "no estaba puesto — no había nada que quitar"
+  else
+    ok "quitado ($N archivos)"
+    nota "la próxima vez que se encienda, pedirá la contraseña de Linux"
+    nota "y saldrá el escritorio de siempre"
+  fi
+  echo
+  exit 0
+fi
+
+# ══ PONER ═════════════════════════════════════════════════════════════
+titulo "ENTRAR DIRECTO A WINDOWS"
+
+# ── ¿Hay un Windows al que entrar? ──
+# Se comprueba ANTES de tocar nada. Dejar una computadora entrando sola a
+# una máquina que no existe es dejarla mirando una pantalla vacía.
+VM=$(LC_ALL=C virsh -c qemu:///system list --all --name 2>/dev/null | grep -v '^$' | head -1)
+[ -n "$VM" ] || { mal "esta computadora no tiene ninguna máquina Windows"
+  nota "no tiene sentido entrar directo a algo que no existe"; exit 1; }
+ok "el Windows es «$VM»"
+
+# Y que arranque sola con la computadora: si no, al encender no habría
+# nada que enseñar.
+if LC_ALL=C virsh -c qemu:///system dominfo "$VM" 2>/dev/null | grep -qi 'autostart:.*enable'; then
+  ok "arranca sola al encender la computadora"
+else
+  virsh -c qemu:///system autostart "$VM" >/dev/null 2>&1
+  if LC_ALL=C virsh -c qemu:///system dominfo "$VM" 2>/dev/null | grep -qi 'autostart:.*enable'; then
+    ok "ahora arranca sola al encender la computadora"
+  else
+    mal "no conseguí que «$VM» arranque sola — sin eso no funcionaría"; exit 1
+  fi
+fi
+
+# ── ¿Con qué cuenta entra? ──
+# La de quien lo está poniendo, que es la que ya usa esa computadora. Se
+# pregunta igualmente: en un centro puede haber más de una.
+USUARIO="${SUDO_USER:-}"
+if [ -z "$USUARIO" ] || [ "$USUARIO" = "root" ]; then
+  # 🔴 No vale «la primera cuenta con número mayor que 1000»: entre esas
+  # hay cuentas del sistema —«libvirt-qemu» salió la primera en la
+  # prueba— y proponer una de esas es proponer que la computadora entre
+  # con una cuenta que no tiene escritorio. Se exige que sea una persona:
+  # carpeta en /home y un intérprete de verdad.
+  USUARIO=$(awk -F: '$3>=1000 && $3<65000 && $6 ~ /^\/home\// \
+                     && $7 !~ /(nologin|false)$/ {print $1}' /etc/passwd | head -1)
+fi
+printf "   ¿Con qué cuenta entra? [%s]: " "$USUARIO"
+read -r R; USUARIO="${R:-$USUARIO}"
+id "$USUARIO" >/dev/null 2>&1 || { mal "no existe la cuenta «$USUARIO»"; exit 1; }
+ok "entrará con «$USUARIO»"
+
+# 🔴 Sin el grupo «libvirt» esa cuenta no puede abrir la pantalla del
+# Windows, y la computadora entraría directa… a nada. Se comprueba aquí,
+# que es cuando se puede arreglar, y no al encender delante de la gente.
+if id -nG "$USUARIO" | tr ' ' '\n' | grep -qx libvirt; then
+  ok "«$USUARIO» puede abrir la pantalla del Windows"
+else
+  usermod -aG libvirt "$USUARIO" 2>/dev/null
+  if id -nG "$USUARIO" | tr ' ' '\n' | grep -qx libvirt; then
+    ok "«$USUARIO» ya puede abrir la pantalla del Windows"
+  else
+    mal "no pude darle permiso a «$USUARIO» para abrir el Windows"; exit 1
+  fi
+fi
+
+# ── La sesión que se abre sola ──
+# Se usa la que ya tiene puesta esa computadora, no una elegida por
+# nosotros: si el centro usa Wayland y le forzamos X11, cambian cosas que
+# nadie pidió.
+SESION=plasma
+[ -f /usr/share/wayland-sessions/plasma.desktop ] || SESION=plasmax11
+mkdir -p "$(dirname "$SDDM")"
+cat > "$SDDM" <<CFG
+# Puesto por «redhornoma-directo». Para deshacerlo:
+#     sudo redhornoma-directo --quitar
+[Autologin]
+User=$USUARIO
+Session=$SESION
+# «Relogin=false» a propósito: si la persona cierra la sesión a mano, que
+# salga la pantalla de contraseña en vez de volver a entrar sola. Es la
+# única forma de que alguien pueda usar la computadora como Linux normal
+# sin tener que deshacer nada.
+Relogin=false
+CFG
+ok "al encender entrará solo, sin pedir contraseña de Linux"
+
+# ── Y que abra el Windows en cuanto entre ──
+cat > "$INICIO" <<CFG
+[Desktop Entry]
+Type=Application
+Name=Entrar a Windows
+Comment=Abre la pantalla del Windows del centro nada más encender
+Exec=/usr/bin/redhornoma-directo-abrir
+Icon=redhornoma-centros
+Terminal=false
+X-GNOME-Autostart-enabled=true
+CFG
+ok "y abrirá Windows en pantalla completa"
+
+printf 'usuario=%s\nmaquina=%s\nfecha=%s\n' "$USUARIO" "$VM" "$(date '+%Y-%m-%d %H:%M')" > "$CONF"
+
+titulo "LISTO — QUÉ VA A PASAR AHORA"
+cat <<TEXTO
+
+   La próxima vez que enciendas esta computadora:
+
+      1 · no pedirá ninguna contraseña de Linux
+      2 · saldrá Windows en pantalla completa
+      3 · quien se siente delante solo verá Windows
+
+   Por debajo NO cambia nada: los respaldos, la nube y el vigía siguen
+   funcionando igual.
+
+TEXTO
+avi "PARA SALIR A LINUX ESTANDO DELANTE:   Ctrl + Alt + F2"
+nota "lleva a una pantalla de texto de Linux; se vuelve con Ctrl + Alt + F1"
+nota "desde lejos, por SSH, se entra como siempre"
+echo
+nota "para deshacerlo:  sudo redhornoma-directo --quitar"
+echo

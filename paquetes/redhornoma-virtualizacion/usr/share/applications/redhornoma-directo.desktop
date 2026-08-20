@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Entrar directo a Windows
+Comment=Que esta computadora arranque mostrando Windows, sin ver Linux
+Exec=x-terminal-emulator -e bash -c "sudo redhornoma-directo --poner; echo; read -p 'Pulsa Intro para cerrar'"
+Icon=redhornoma-centros
+Terminal=false
+Categories=System;
+Keywords=windows;directo;kiosco;arranque;
