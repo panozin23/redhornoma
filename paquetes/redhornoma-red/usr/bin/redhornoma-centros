@@ -289,6 +289,68 @@ encender(){
   fi
 }
 
+
+# ── Poner un centro al día, desde aquí ────────────────────────────────
+#
+# EL PORQUÉ — 20/08/2026
+#
+# Es el objetivo 11 —atender varios centros desde un solo sitio— y era el
+# hueco más evidente, porque saltaba a la vista en cada sesión de trabajo:
+# cada vez que salía una mejora, había que escribir a mano
+#
+#     ssh -t hornoma 'sudo apt update && sudo apt install -y redhornoma-…'
+#
+# y acordarse de QUÉ paquetes nombrar. En dos días eso se escribió más de
+# diez veces. Una herramienta que existe para no ir de una máquina a otra
+# no puede obligar a escribir un comando por máquina.
+#
+# 🔴 Se actualiza SOLO lo de RedHornoma, y no todo el sistema.
+#
+# Un «full-upgrade» en el servidor de un centro puede traerse por delante
+# el núcleo o los programas de virtualización, y eso pide reiniciar en un
+# sitio donde reiniciar cuesta un viaje de 100 km. Aquí se pregunta a la
+# propia máquina qué paquetes de RedHornoma tiene puestos y se actualizan
+# esos. Lo demás se deja como está, a propósito.
+#
+# Y va en una terminal por lo mismo que el apagado: la contraseña la
+# escribe la persona donde va, y de paso VE lo que dice cada paquete al
+# instalarse — que es donde aparecen los avisos que importan.
+al_dia(){
+  local destino="$1" nombre="$2" estado="$3"
+
+  if [ "$estado" != "despierto" ]; then
+    yad --info --center --width=440 --borders=20 --title="$nombre" \
+      --text="<b>$nombre no contesta.</b>\n\nPara ponerla al día tiene que estar encendida." \
+      --button="Entendido:0" 2>/dev/null
+    return 0
+  fi
+
+  yad --question --center --width=500 --borders=20 --title="Poner al día $nombre" \
+    --text="<span size='x-large'><b>Poner al día $nombre</b></span>\n\nSe actualizarán <b>solo los programas de RedHornoma</b>. El resto del sistema se queda como está.\n\n<small>Se abrirá una terminal para que escribas la contraseña de esa máquina.</small>" \
+    --button="Ahora no:1" --button="Sí, ponerla al día:0" 2>/dev/null || return 0
+
+  # Los paquetes se los pregunta a ELLA, no se escriben aquí: cada centro
+  # puede tener puestos unos u otros, y una lista escrita a mano envejece.
+  local ORDEN='P=$(dpkg-query -W -f="\${Package} " "redhornoma-*" 2>/dev/null)
+               if [ -z "$P" ]; then echo "   Esta maquina no tiene programas de RedHornoma."; exit 1; fi
+               echo "   Poniendo al dia: $P"; echo
+               sudo apt update -qq && sudo apt install -y --only-upgrade $P'
+
+  local TERM_
+  for t in x-terminal-emulator konsole gnome-terminal xfce4-terminal; do
+    command -v "$t" >/dev/null 2>&1 && { TERM_="$t"; break; }
+  done
+  [ -n "${TERM_:-}" ] || { yad --error --center --width=440 \
+      --text="No encuentro con qué abrir una terminal." --button="Entendido:0" 2>/dev/null; return 1; }
+
+  case "$TERM_" in
+    konsole|x-terminal-emulator)
+      "$TERM_" --hold -e bash -c "ssh -t '$destino' '$ORDEN'" 2>/dev/null & ;;
+    *)
+      "$TERM_" -- bash -c "ssh -t '$destino' '$ORDEN'; echo; read -p 'Pulsa Intro para cerrar'" 2>/dev/null & ;;
+  esac
+}
+
 # ── Modo entrar directo ───────────────────────────────────────────────
 if [ "$MODO" = "entrar" ]; then
   D=$(listar_centros | awk -F'|' -v c="$CUAL" 'tolower($1) ~ tolower(c) || $2 ~ c {print $2; exit}')
@@ -370,11 +432,11 @@ done < <(printf '%s' "$FILAS")
 # puede pasar a quien no sabe si está rota o si se equivocó él.
 ERRYAD=$(mktemp)
 SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
-  --width=760 --height=320 --center \
+  --width=900 --height=330 --center \
   --text="<b>Elige un centro y pulsa «Entrar a su Windows».</b>\n<small>Ahí puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
   --column=" " --column="Centro" --column="Cómo está" --column="Su Windows" --column="Enlace" --column="destino:HD" \
   --print-column=6 --separator="" \
-  --button="Actualizar:2" --button="Cerrar:1" --button="Apagar este centro:3" --button="Encender:4" --button="Entrar a su Windows:0" 2>"$ERRYAD")
+  --button="Volver a mirar:2" --button="Cerrar:1" --button="Poner al día:5" --button="Apagar este centro:3" --button="Encender:4" --button="Entrar a su Windows:0" 2>"$ERRYAD")
 CODIGO=$?
 
 # 🔴 De lo que devuelva la ventana se saca SOLO la dirección, con su forma.
@@ -400,6 +462,11 @@ rm -f "$ERRYAD"
 
 case "$CODIGO" in
   2) exec "$0" ;;                      # actualizar: mirarlo todo otra vez
+  5) [ -n "$SEL" ] || exit 0
+     NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
+     EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
+     [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
+     al_dia "$SEL" "${NOM:-ese centro}" "$EST" ;;
   4) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
