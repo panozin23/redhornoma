@@ -466,7 +466,18 @@ case "$CODIGO" in
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
-     al_dia "$SEL" "${NOM:-ese centro}" "$EST" ;;
+     al_dia "$SEL" "${NOM:-ese centro}" "$EST"
+     # 🔴 La pantalla VUELVE, y no es un capricho — 20/08/2026.
+     #
+     # Esta clase de ventana se cierra en cuanto se pulsa cualquier botón.
+     # euflo lo dijo enseguida: «cuando hago clic en poner al día, la
+     # tabla se elimina». Y tiene razón en que molesta: acaba de mandar
+     # una orden a UN centro y se queda sin la lista de los demás, justo
+     # cuando lo normal es seguir con el siguiente.
+     #
+     # Poner al día un centro no termina el trabajo: lo empieza. Así que
+     # la pantalla se vuelve a abrir, ya con el estado de ahora.
+     exec "$0" ;;
   4) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
@@ -474,7 +485,8 @@ case "$CODIGO" in
      # Igual que en los otros botones: la foto envejece, así que antes de
      # decirle a nadie que su centro está apagado, se vuelve a mirar.
      [ "$EST" = "despierto" ] || { R=$(mirar "$SEL"); EST=${R%%|*}; WIN=$(printf '%s' "$R" | cut -d'|' -f2); }
-     encender "$SEL" "${NOM:-ese centro}" "$EST" "$WIN" ;;
+     encender "$SEL" "${NOM:-ese centro}" "$EST" "$WIN"
+     exec "$0" ;;
   3) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
@@ -485,7 +497,8 @@ case "$CODIGO" in
          --button="Entendido:0" 2>/dev/null
        exit 0
      fi
-     apagar "$SEL" "$NOM" ;;
+     apagar "$SEL" "$NOM"
+     exec "$0" ;;
   0) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
