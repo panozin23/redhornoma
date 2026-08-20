@@ -475,6 +475,37 @@ if hay redhornoma-vigia; then
   fi
 fi
 
+# ── 10 · Entrar directo a Windows ─────────────────────────────────────
+#
+# Es el objetivo 12, y nació el 20/08/2026 de una frase de euflo: «la gente
+# quiere apretar el botón y entrar a trabajar».
+#
+# 🔴 NO SE PINTA DE ROJO NUNCA, y esa decisión importa.
+#
+# Todas las demás filas de esta pantalla dicen si algo está BIEN o MAL.
+# Esta no: no tenerlo puesto no es una avería. Hay computadoras donde tiene
+# todo el sentido —la del consultorio, donde solo se usa Windows— y otras
+# donde sería un estorbo, como el equipo desde el que se administra todo.
+#
+# Un rojo aquí presionaría a ponerlo en máquinas donde no toca, y esta
+# pantalla perdería lo que la hace útil: que cuando algo está rojo, está
+# roto de verdad.
+if [ "${MAQUINAS:-0}" -gt 0 ] && hay redhornoma-directo; then
+  if [ -f /etc/redhornoma/directo.conf ] \
+     && [ -f /etc/sddm.conf.d/redhornoma-directo.conf ] \
+     && [ -f /etc/xdg/autostart/redhornoma-directo.desktop ]; then
+    CUENTA_D=$(grep -oP '^usuario=\K.*' /etc/redhornoma/directo.conf 2>/dev/null)
+    fila "🟢" "Entrar directo a Windows" "puesto — enciende y sale Windows (cuenta «${CUENTA_D:-?}»)"
+    fila "  " "  para salir a Linux" "Ctrl + Alt + F2"
+    accion "Volver a arrancar en Linux" "$(icono system-log-out application-exit)" \
+           "TERMINAL:sudo redhornoma-directo --quitar"
+  else
+    fila "⚪" "Entrar directo a Windows" "sin poner — al encender sale el escritorio de Linux"
+    accion "Que encienda directo a Windows" "$(icono computer video-display)" \
+           "TERMINAL:sudo redhornoma-directo --poner"
+  fi
+fi
+
 # ── Siempre disponibles, aunque todo esté verde ───────────────────────
 hay redhornoma-windows-agil && [ "${MAQUINAS:-0}" -gt 0 ] && \
   accion "Agilizar el Windows" "$(icono preferences-system-performance speedometer)" "TERMINAL:sudo redhornoma-windows-agil --aplicar"
