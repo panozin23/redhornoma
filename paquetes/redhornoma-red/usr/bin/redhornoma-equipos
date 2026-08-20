@@ -77,7 +77,25 @@ pregunta(){ yad --class=rhequipos $GTKRC --borders=14 --title="Equipos en Red" \
 # El tiempo máximo va DENTRO de la función. «timeout» ejecuta programas,
 # no funciones del propio guion: escribir «timeout 8 ssh_a …» falla con
 # «no such file or directory» y el guion lo toma por «no se puede entrar».
-ssh_a(){ timeout "${ESPERA:-20}" ssh -o BatchMode=yes -o ConnectTimeout=6 \
+# 🔴 El «-n» se pone SOLO, y evita un fallo que cuesta mucho ver.
+#
+# Si a ssh no se le dice nada, LEE DE LA ENTRADA. Cuando se le llama
+# dentro de un bucle «while read» —que es lo normal aquí: recorrer los
+# equipos— se traga de un bocado todo lo que el bucle aún tenía por leer,
+# y el bucle termina creyendo que ya no hay más equipos. Solo se mira el
+# primero, y los demás desaparecen sin ningún error.
+#
+# Pasó el 19/08/2026 en «redhornoma-centros»: Cochabamba dejó de salir en
+# la pantalla y parecía borrada. Y se disfrazaba de lo peor: mientras el
+# primer equipo estaba APAGADO no se llegaba a ejecutar ssh, no se comía
+# nada, y todo salía bien. El fallo aparecía justo cuando todo iba bien.
+#
+# No se pone cuando hay «-t»: ahí se pide una terminal a propósito, y las
+# dos cosas juntas no se llevan.
+ssh_a(){
+  local sin_entrada=(-n) a
+  for a in "$@"; do [ "$a" = "-t" ] && sin_entrada=() && break; done
+  timeout "${ESPERA:-20}" ssh "${sin_entrada[@]}" -o BatchMode=yes -o ConnectTimeout=6 \
            -o StrictHostKeyChecking=accept-new "$@"; }
 
 # ═════════════════════════════════════════════════════════════════════

@@ -66,8 +66,19 @@ listar_centros(){
   command -v tailscale >/dev/null 2>&1 || return
   # El propio equipo no es un centro al que entrar.
   MI=$(tailscale status --json 2>/dev/null | grep -oP '"HostName":\s*"\K[^"]+' | head -1)
+  # 🔴 SOLO LAS LÍNEAS QUE EMPIEZAN POR UNA DIRECCIÓN.
+  #
+  # «tailscale status» no solo lista máquinas: al final suelta sus avisos
+  # de salud, y esas líneas también tienen dos palabras. Con la regla
+  # anterior —«dos campos o más»— entraban en la lista y aparecían dos
+  # centros fantasma llamados «Health» y «-», que por supuesto no
+  # contestaban nunca.
+  #
+  # Se exige que el primer campo sea una dirección de verdad. Un aviso no
+  # tiene forma de dirección; una máquina, siempre.
   tailscale status 2>/dev/null | awk -v mi="$MI" '
-    NF>=2 && $2 != mi && $2 != "" {print $2 "|" $1}' | while IFS='|' read -r nom ip; do
+    $1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $2 != mi && $2 != "" {print $2 "|" $1}' \
+  | while IFS='|' read -r nom ip; do
     case "$nom" in ""|"$MI") continue ;; esac
     # El usuario se adivina del nombre; se puede fijar en centros.conf.
     case "$nom" in
@@ -110,7 +121,23 @@ mirar(){
 
   # Una sola conexión que lo pregunta todo: ir y venir cuesta caro.
   local r
-  r=$(timeout 20 ssh -o BatchMode=yes -o ConnectTimeout=10 "$destino" \
+  # 🔴 EL «-n» NO SOBRA, Y SIN ÉL SE PIERDEN CENTROS — 19/08/2026
+  #
+  # A esta función la llama un bucle «while read» que va recorriendo la
+  # lista de centros. Y ssh, si nadie se lo impide, LEE DE LA MISMA
+  # ENTRADA que ese bucle: se traga de un bocado todo lo que quedaba por
+  # leer, y el bucle termina creyendo que ya no hay más centros.
+  #
+  # Resultado: solo se miraba el PRIMERO. Cochabamba desapareció de la
+  # pantalla y parecía que se había borrado.
+  #
+  # Y lo peor es cómo se disfrazaba: mientras Hornoma estuvo apagada, esta
+  # función volvía antes de llegar al ssh, no se comía nada, y los dos
+  # centros salían bien. El fallo aparecía SOLO cuando el primer centro
+  # estaba encendido. Un fallo que se esconde justo cuando todo va bien.
+  #
+  # El «-n» le dice a ssh que no lea nada de la entrada.
+  r=$(timeout 20 ssh -n -o BatchMode=yes -o ConnectTimeout=10 "$destino" \
         'V=$(LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v "^$" | head -1)
          echo "${V:-ninguno}|$(uptime -p 2>/dev/null | sed "s/^up //")"' 2>/dev/null)
   [ -n "$r" ] || { echo "sin entrada|—|${ms} ms"; return; }
