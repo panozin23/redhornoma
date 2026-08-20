@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  El icono de «Los centros que atiendo».
+
+  EL PORQUÉ — 19/08/2026
+
+  Usaba «network-workgroup», el icono genérico de red del escritorio, que
+  es azul y con forma de carpeta. En la barra quedaba pegado al de
+  Dolphin y euflo los confundía: dos iconos azules parecidos, uno al lado
+  del otro, y hay que pararse a mirar cuál es cuál.
+
+  Un icono que hay que mirar dos veces no sirve en una barra.
+
+  Se elige VERDE —el mismo de los visto bueno del proyecto— porque es el
+  único color que no repite ningún otro icono de esa barra, y una CRUZ,
+  que en un proyecto de centros de salud no se confunde con nada.
+
+  Va en SVG para que se vea nítido a cualquier tamaño: la barra lo pinta a
+  22 píxeles y el menú a 48.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <!-- El cuadrado, con las esquinas bien redondeadas para que se
+       distinga de un vistazo de los iconos cuadrados de al lado. -->
+  <rect x="3" y="3" width="42" height="42" rx="11" fill="#27AE60"/>
+  <!-- Un brillo muy suave arriba: sin él se ve plano al lado de los
+       iconos del escritorio, que llevan degradado. -->
+  <rect x="3" y="3" width="42" height="42" rx="11" fill="#ffffff" opacity="0.10"/>
+  <rect x="3" y="24" width="42" height="21" rx="11" fill="#000000" opacity="0.07"/>
+  <!-- La cruz. Gruesa a propósito: a 22 píxeles, una cruz fina
+       desaparece. -->
+  <path d="M20.5 11 h7 v9.5 h9.5 v7 h-9.5 v9.5 h-7 v-9.5 h-9.5 v-7 h9.5 z"
+        fill="#ffffff"/>
+</svg>

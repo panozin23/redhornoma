@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  El icono de «Puesto para un visitante».
+  Misma familia que el de «Los centros» —cuadrado redondeado, dibujo
+  blanco grueso— para que se vean como hermanos, pero de otro color y con
+  otro dibujo: una persona. Así se distinguen de un vistazo aunque estén
+  juntos en el menú.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <rect x="3" y="3" width="42" height="42" rx="11" fill="#E67E22"/>
+  <rect x="3" y="3" width="42" height="42" rx="11" fill="#ffffff" opacity="0.10"/>
+  <rect x="3" y="24" width="42" height="21" rx="11" fill="#000000" opacity="0.07"/>
+  <circle cx="24" cy="18" r="7" fill="#ffffff"/>
+  <path d="M11 39 c0-7.5 5.8-12 13-12 s13 4.5 13 12 z" fill="#ffffff"/>
+</svg>
