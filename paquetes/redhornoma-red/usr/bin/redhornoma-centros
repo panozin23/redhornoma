@@ -127,6 +127,65 @@ entrar(){
   redhornoma-entrar --en "$destino"
 }
 
+
+# ── Apagar un centro desde aquí ───────────────────────────────────────
+#
+# EL PORQUÉ — 19/08/2026
+#
+# El objetivo 6 dice «sin usar código, todo en un entorno gráfico». Y ese
+# día hubo que escribirle a euflo un manual entero de comandos de terminal
+# para algo tan corriente como apagar un servidor. Ese manual era la
+# prueba de que a esta pantalla le faltaba un botón.
+#
+# 🔴 SE ABRE UNA TERMINAL A PROPÓSITO, y no es pereza.
+#
+# Apagar pide la contraseña de la otra máquina. Se podría pedir en una
+# ventana y mandársela al otro lado, pero entonces la contraseña pasa por
+# nuestras manos y por la lista de procesos. Abriendo una terminal, la
+# escribe la persona directamente donde va, y además VE lo que contesta el
+# servidor — que dice a qué hora volverá. Eso último vale por sí solo.
+apagar(){
+  local destino="$1" nombre="$2"
+
+  # Se pregunta con lo que va a pasar de verdad, no con un «¿seguro?».
+  yad --question --center --width=460 --title="Apagar $nombre" \
+    --text="<b>¿Apagar $nombre?</b>\n\nSe hará con orden:\n  · se cierra su Windows sin perder nada\n  · se arma el despertador y se COMPRUEBA\n  · deja dicho en la nube a qué hora vuelve\n\n<small>Se abrirá una terminal para que escribas la contraseña de esa máquina.</small>" \
+    --button="No, dejarla:1" --button="Sí, apagar:0" 2>/dev/null || return 1
+
+  # El centro de apoyo no tiene horario ni guion de apagado, así que se
+  # mira ALLÁ cuál de los dos caminos existe, en vez de suponerlo desde
+  # aquí. Suponerlo es como se apagó mal un servidor la primera vez.
+  local ORDEN='if [ -x /usr/local/sbin/redhornoma-apagar-noche ]; then
+                  sudo /usr/local/sbin/redhornoma-apagar-noche --ahora
+                else
+                  echo "   Esta maquina no tiene horario de noche."
+                  echo "   Se apaga sin despertador: habra que encenderla a mano."
+                  echo
+                  sudo systemctl poweroff
+                fi'
+
+  local TERM_
+  for t in x-terminal-emulator konsole gnome-terminal xfce4-terminal; do
+    command -v "$t" >/dev/null 2>&1 && { TERM_="$t"; break; }
+  done
+  if [ -z "${TERM_:-}" ]; then
+    yad --error --center --width=420 --title="Falta la terminal" \
+      --text="No encuentro con qué abrir una terminal.\n\nHazlo a mano:\n<tt>ssh -t $destino 'sudo /usr/local/sbin/redhornoma-apagar-noche --ahora'</tt>" \
+      --button="Entendido:0" 2>/dev/null
+    return 1
+  fi
+
+  # El «--hold»/«-hold» mantiene la ventana abierta al terminar: si se
+  # cerrara sola, el mensaje con la hora de vuelta se perdería justo
+  # cuando más falta hace leerlo.
+  case "$TERM_" in
+    konsole|x-terminal-emulator)
+      "$TERM_" --hold -e bash -c "ssh -t '$destino' '$ORDEN'" 2>/dev/null & ;;
+    *)
+      "$TERM_" -- bash -c "ssh -t '$destino' '$ORDEN'; echo; read -p 'Pulsa Intro para cerrar'" 2>/dev/null & ;;
+  esac
+}
+
 # ── Modo entrar directo ───────────────────────────────────────────────
 if [ "$MODO" = "entrar" ]; then
   D=$(listar_centros | awk -F'|' -v c="$CUAL" 'tolower($1) ~ tolower(c) || $2 ~ c {print $2; exit}')
@@ -195,7 +254,7 @@ SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
   --text="<b>Elige un centro y pulsa «Entrar a su Windows».</b>\n<small>Ahí puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
   --column=" " --column="Centro" --column="Cómo está" --column="Su Windows" --column="Enlace" --column="destino:HD" \
   --print-column=6 --separator="" \
-  --button="Actualizar:2" --button="Cerrar:1" --button="Entrar a su Windows:0" 2>"$ERRYAD")
+  --button="Actualizar:2" --button="Cerrar:1" --button="Apagar este centro:3" --button="Entrar a su Windows:0" 2>"$ERRYAD")
 CODIGO=$?
 
 if [ "$CODIGO" -ge 250 ] && [ -s "$ERRYAD" ]; then
@@ -209,12 +268,22 @@ rm -f "$ERRYAD"
 
 case "$CODIGO" in
   2) exec "$0" ;;                      # actualizar: mirarlo todo otra vez
+  3) [ -n "$SEL" ] || exit 0
+     NOM=$(printf '%s' "$DATOS" | awk -F'|' -v d="$SEL" '$6==d{print $2; exit}')
+     EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
+     if [ "$EST" != "despierto" ]; then
+       yad --info --center --width=420 --title="Ya está apagada" \
+         --text="<b>$NOM no contesta.</b>\n\nO ya está apagada, o no llega su internet. De cualquier forma, no hay nada que apagar." \
+         --button="Entendido:0" 2>/dev/null
+       exit 0
+     fi
+     apagar "$SEL" "$NOM" ;;
   0) [ -n "$SEL" ] || exit 0
      NOM=$(printf '%s' "$DATOS" | awk -F'|' -v d="$SEL" '$6==d{print $2; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      if [ "$EST" != "despierto" ]; then
        yad --error --center --width=420 --title="No se puede entrar" \
-         --text="<b>$NOM no contesta.</b>\n\nPuede estar apagada, o encendida pero sin internet: desde aquí las dos cosas se ven igual.\n\nLo que sí es seguro: no se puede encender desde fuera." \
+         --text="<b>$NOM no contesta.</b>\n\nPuede estar apagada, o encendida pero sin internet: desde aquí las dos cosas se ven igual.\n\nPara encenderla desde lejos, con el enchufe inteligente: apaga su toma, espera 10 segundos y vuelve a encenderla." \
          --button="Entendido:0" 2>/dev/null
        exit 1
      fi

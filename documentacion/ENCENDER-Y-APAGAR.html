@@ -34,13 +34,14 @@
 <pre><code>
 respaldo-hornoma   =   100.81.234.58   =   el servidor de Hornoma
 </code></pre>
-<p><code>respaldo-hornoma</code> es el nombre y <code>100.81.234.58</code> es su número. Da igual cuál uses. Por eso tenías dos apuntes que hacían exactamente lo mismo.</p>
-<p>Los tres nombres que existen:</p>
+<p>Por eso tenías dos apuntes que hacían exactamente lo mismo.</p>
+<h2>Desde el 19/08 se llaman más corto</h2>
 <pre><code>
-respaldo-hornoma    el servidor de HORNOMA      (el principal)
-servidor-ciudad     el servidor de COCHABAMBA   (el de apoyo)
-portatil            el tuyo
+hornoma        el servidor de HORNOMA      (el principal)
+cochabamba     el servidor de COCHABAMBA   (el de apoyo)
 </code></pre>
+<p>Basta con <code>ssh hornoma</code>. Los nombres largos siguen valiendo, <strong>pero solo mientras el sistema no reescriba su configuración de nombres</strong> — y la reescribe él solo cada vez que se reconecta la red. Pasó ese mismo día a las 21:15, y a partir de ahí <code>ssh respaldo-hornoma</code> decía «no se conoce ese nombre» sin más pistas.</p>
+<p>Los cortos van atados a su número y no dependen de nadie.</p>
 <hr>
 <h2>🥇 Lo primero: la pantalla que te ahorra casi todos los comandos</h2>
 <pre><code>
@@ -83,9 +84,11 @@ despertador=si
 Se apagó con orden, y dejó el despertador puesto y COMPROBADO.
 </code></pre>
 <blockquote><p><strong>Si prometió volver y no volvió, el problema es la placa o la corriente, no el programa.</strong> Si ni siquiera prometió, se apagó por otro camino.</p></blockquote>
-<h2>Apagarla ahora, a mano</h2>
+<h2>Apagarla ahora — con un botón</h2>
+<p>En <code>redhornoma-centros</code>: eliges el centro y pulsas <strong>«Apagar este centro»</strong>. Te pregunta antes, y abre una terminal para que escribas la contraseña de esa máquina. Ahí verás <strong>a qué hora prometió volver</strong>.</p>
+<h2>O escribiéndolo, si prefieres</h2>
 <pre><code>
-ssh -t hornoma@respaldo-hornoma &#x27;sudo /usr/local/sbin/redhornoma-apagar-noche --ahora&#x27;
+ssh -t hornoma &#x27;sudo /usr/local/sbin/redhornoma-apagar-noche --ahora&#x27;
 </code></pre>
 <p>Te pide la contraseña de esa máquina.</p>
 <p><strong>El <code>--ahora</code> es lo que dice «lo pido yo».</strong> Sin él, el guion mira si hay alguien conectado —y como tú entras por SSH, se vería a ti mismo y no se apagaría nunca.</p>
@@ -114,7 +117,7 @@ redhornoma-centros --entrar hornoma
 </code></pre>
 <p>Lo mismo, escrito entero (por si la pantalla fallara):</p>
 <pre><code>
-redhornoma-entrar --en hornoma@respaldo-hornoma
+redhornoma-entrar --en hornoma
 </code></pre>
 <p>Ahí dentro tienes SOAPS, SALMI y SNIS del centro, como si estuvieras sentado delante.</p>
 <hr>
@@ -122,12 +125,12 @@ redhornoma-entrar --en hornoma@respaldo-hornoma
 <p><strong>No tiene horario, y es a propósito.</strong> Aquí estás tú: se enciende y se apaga a mano, con su botón.</p>
 <p>Para apagarlo desde el portátil:</p>
 <pre><code>
-ssh -t flora@servidor-ciudad &#x27;sudo systemctl poweroff&#x27;
+ssh -t cochabamba &#x27;sudo systemctl poweroff&#x27;
 </code></pre>
 <blockquote><p>Va con <code>systemctl</code> y no con <code>poweroff</code> a secas por un detalle: en esa máquina <code>poweroff</code> vive en <code>/sbin</code>, que <strong>no está en el camino de tu usuario</strong>. Con <code>sudo</code> normalmente funcionaría igual, pero «normalmente» no basta para un comando que apaga un servidor. <code>systemctl</code> sí está en el camino, siempre.</p></blockquote>
 <p>Para entrar a su Windows:</p>
 <pre><code>
-redhornoma-entrar --en flora@servidor-ciudad
+redhornoma-entrar --en cochabamba
 </code></pre>
 <p>⚠️ <strong>Este no tiene despertador.</strong> Si lo apagas y te vas, hay que ir a encenderlo con el botón.</p>
 <hr>
@@ -157,7 +160,7 @@ sudo redhornoma-visitante
 <h2>«El acceso directo de SOAPS no está disponible»</h2>
 <p>Casi siempre es <strong>el cable de la placa del servidor</strong>, por donde se asoma el Windows. Si se suelta, el Windows desaparece de la red <strong>aunque el servidor siga funcionando</strong>. Se comprueba así:</p>
 <pre><code>
-ssh hornoma@respaldo-hornoma &#x27;cat /sys/class/net/enp2s0/carrier&#x27;
+ssh hornoma &#x27;cat /sys/class/net/enp2s0/carrier&#x27;
 </code></pre>
 <pre><code>
 1 = hay cable      0 = está suelto
@@ -172,14 +175,13 @@ redhornoma-vigia --siempre
 </code></pre>
 <hr>
 <h1>📋 LA CHULETA</h1>
-<table><tr><th>Quiero…</th><th>Escribo en mi portátil</th></tr>
-<tr><td>ver cómo está todo</td><td><code>redhornoma-centros</code></td></tr>
-<tr><td>entrar al Windows de Hornoma</td><td><code>redhornoma-centros --entrar hornoma</code></td></tr>
-<tr><td>apagar Hornoma ahora</td><td><code>ssh -t hornoma@respaldo-hornoma &#x27;sudo /usr/local/sbin/redhornoma-apagar-noche --ahora&#x27;</code></td></tr>
-<tr><td>encender Hornoma</td><td>con el teléfono: Smart Life → apagar la toma, 10 s, encender</td></tr>
-<tr><td>entrar al Windows de Cochabamba</td><td><code>redhornoma-entrar --en flora@servidor-ciudad</code></td></tr>
-<tr><td>apagar Cochabamba</td><td><code>ssh -t flora@servidor-ciudad &#x27;sudo systemctl poweroff&#x27;</code></td></tr>
-<tr><td>¿hay algo que avisar?</td><td><code>redhornoma-vigia --siempre</code></td></tr>
-<tr><td>preparar un puesto para un visitante</td><td>en el servidor: <code>sudo redhornoma-visitante</code></td></tr>
+<p><strong>Casi todo se hace desde una sola pantalla — <code>redhornoma-centros</code>, o «Los centros» en el menú. Lo de escribir es solo para cuando esa pantalla no esté a mano.</strong></p>
+<table><tr><th>Quiero…</th><th>Con el ratón</th><th>Escribiéndolo</th></tr>
+<tr><td>ver cómo está todo</td><td>«Los centros»</td><td><code>redhornoma-centros --texto</code></td></tr>
+<tr><td>entrar al Windows de un centro</td><td>botón <strong>Entrar a su Windows</strong></td><td><code>redhornoma-centros --entrar hornoma</code></td></tr>
+<tr><td>apagar un centro</td><td>botón <strong>Apagar este centro</strong></td><td><code>ssh -t hornoma &#x27;sudo …apagar-noche --ahora&#x27;</code></td></tr>
+<tr><td>¿hay algo que avisar?</td><td>«El vigía»</td><td><code>redhornoma-vigia --siempre</code></td></tr>
+<tr><td>preparar un puesto para un visitante</td><td>—</td><td>en el servidor: <code>sudo redhornoma-visitante</code></td></tr>
+<tr><td>encender Hornoma</td><td>con el teléfono: Smart Life → apagar la toma, 10 s, encender</td><td>no se puede por red</td></tr>
 </table>
 </body></html>
