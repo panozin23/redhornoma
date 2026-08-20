@@ -242,7 +242,24 @@ while IFS='|' read -r N D E W T; do
     *)         ICO="🟡"; DET="responde, pero no deja entrar" ;;
   esac
   [ "$W" = "ninguno" ] && [ "$E" = "despierto" ] && DET="encendido, pero su Windows está apagado"
-  DATOS="$DATOS$ICO|$N|$DET|$W|$T|$D"$'\n'
+  # 🔴 UN DATO POR LÍNEA, no una fila por línea — 19/08/2026
+  #
+  # yad --list lee la lista de la entrada A RAZÓN DE UN DATO POR LÍNEA, y
+  # va llenando las columnas de izquierda a derecha. No entiende filas
+  # separadas por «|», y tampoco sirve «--item-separator», que es para
+  # otra cosa.
+  #
+  # Aquí se le pasaba una fila entera por línea. Resultado: TODA la fila
+  # caía en la primera casilla, y la fila siguiente en la segunda. La
+  # ventana se abría, tenía sus columnas y sus botones, y era mentira.
+  #
+  # Y encima el fallo no se veía como un fallo: al pulsar «Entrar», el
+  # programa recibía un texto que no era ninguna dirección, no encontraba
+  # el centro, y contestaba «$NOM no contesta» —con el nombre vacío—
+  # sobre una máquina que estaba perfectamente despierta.
+  #
+  # Se descubrió fotografiando la ventana. Leyendo el código no se ve.
+  DATOS="$DATOS$ICO"$'\n'"$N"$'\n'"$DET"$'\n'"$W"$'\n'"$T"$'\n'"$D"$'\n'
 done < <(printf '%s' "$FILAS")
 
 # Si la ventana no llega a abrirse, NO se sale en silencio: se enseña la
@@ -257,6 +274,18 @@ SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
   --button="Actualizar:2" --button="Cerrar:1" --button="Apagar este centro:3" --button="Entrar a su Windows:0" 2>"$ERRYAD")
 CODIGO=$?
 
+# 🔴 De lo que devuelva la ventana se saca SOLO la dirección, con su forma.
+#
+# Se pide la columna 6 y debería venir limpia, pero el 19/08 se aprendió a
+# base de fotos que lo que devuelve una ventana no siempre es lo que uno
+# cree. Si algún día trae de más —un separador, la fila entera—, esto
+# sigue encontrando la dirección en vez de fallar con un mensaje sin
+# sentido sobre un centro que está perfectamente.
+if [ -n "${SEL:-}" ]; then
+  LIMPIO=$(printf '%s' "$SEL" | grep -oE '[A-Za-z_][A-Za-z0-9_-]*@[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+  [ -n "$LIMPIO" ] && SEL="$LIMPIO"
+fi
+
 if [ "$CODIGO" -ge 250 ] && [ -s "$ERRYAD" ]; then
   printf "\n   ${AM}No se pudo abrir la ventana. Lo que dijo el sistema:${V}\n"
   head -3 "$ERRYAD" | sed 's/^/      /'
@@ -269,7 +298,7 @@ rm -f "$ERRYAD"
 case "$CODIGO" in
   2) exec "$0" ;;                      # actualizar: mirarlo todo otra vez
   3) [ -n "$SEL" ] || exit 0
-     NOM=$(printf '%s' "$DATOS" | awk -F'|' -v d="$SEL" '$6==d{print $2; exit}')
+     NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
      if [ "$EST" != "despierto" ]; then
@@ -280,7 +309,7 @@ case "$CODIGO" in
      fi
      apagar "$SEL" "$NOM" ;;
   0) [ -n "$SEL" ] || exit 0
-     NOM=$(printf '%s' "$DATOS" | awk -F'|' -v d="$SEL" '$6==d{print $2; exit}')
+     NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      # 🔴 SE VUELVE A MIRAR ANTES DE DAR EL ERROR — 19/08/2026
      #
