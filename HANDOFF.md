@@ -1,3 +1,23 @@
+## 📊 EL MARCADOR — 20/08/2026, madrugada
+
+```
+  5 · Canal Windows-Linux            100%  ✅
+  8 · Que no se pierda               100%  ✅
+  7 · Distro en español               99%   Calamares no tiene boliviano
+  1 · Compatibilidad                  98%   falta hierro prestado de verdad
+  2 · Meter info desde la red         98%   falta un medico con su portatil
+  3 · Servidor con los programas      98%
+  9 · Que se arregle solo             95%
+ 10 · Rehacer desde cero              95%
+  4 · Virtualizacion                  95%   falta imprimir la hoja de la llave
+  6 · Todo grafico                    93%   ↑ apagar es un boton
+ 11 · Varios centros                  92%   ↑ la pantalla funciona por fin
+ 12 · Apretar el boton y trabajar     40%   NUEVO: probado en Cochabamba
+```
+
+**Con los once de antes: 97%. Con los doce: 92%.** El numero bajo porque la
+meta crecio, no porque algo se rompiera.
+
 # TRASPASO — RedHornoma
 
 > **Para quien llegue nuevo a este proyecto**, sea una persona o una sesión de
