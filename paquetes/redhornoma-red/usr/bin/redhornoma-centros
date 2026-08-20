@@ -214,6 +214,27 @@ apagar(){
 }
 
 
+nadie_marcado(){
+  # 🔴 EL 20/08/2026, ESTO LE HIZO PERDER MEDIA HORA A euflo.
+  #
+  # Pulsó «Poner al día», la tabla se cerró, y no volvió nunca. Estuvimos
+  # buscando el fallo en el código que reabre la pantalla —que funcionaba
+  # perfectamente— cuando la causa era otra: había pulsado el botón SIN
+  # MARCAR UN CENTRO ANTES, y el programa se cerraba en silencio.
+  #
+  # Con seis botones y una fila que no salta a la vista al marcarla, eso
+  # va a pasar muchas veces. Y cerrarse sin decir nada es lo peor que
+  # puede hacer: quien lo ve no sabe si el programa está roto, si no ha
+  # entendido, o si se equivocó él.
+  #
+  # Ahora lo dice y vuelve a abrir la tabla.
+  yad --info --center --width=440 --borders=20 --title="Elige un centro" \
+    --image=dialog-information \
+    --text="<span size='x-large'><b>Primero marca un centro</b></span>\n\nHaz clic en la fila del centro —que se quede resaltada— y después pulsa el botón." \
+    --button="Entendido:0" 2>/dev/null
+  exec "$0"
+}
+
 # ── Encender, que son DOS escalones ───────────────────────────────────
 #
 # EL PORQUÉ — lo vio euflo el 20/08/2026 mirando la pantalla:
@@ -440,7 +461,7 @@ ERRYAD=$(mktemp)
 # Una ventana que vuelve donde no se ve no ha vuelto.
 SEL=$(printf '%s' "$DATOS" | yad --list --title="Los centros que atiendes" \
   --width=900 --height=330 --center --on-top \
-  --text="<b>Elige un centro y pulsa «Entrar a su Windows».</b>\n<small>Ahí puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
+  --text="<b>1 · Haz clic en un centro para marcarlo.   2 · Pulsa un botón de abajo.</b>\n<small>Los botones no hacen nada si no hay un centro marcado. En «Entrar a su Windows» puedes usar SALMI y SOAPS como si estuvieras sentado allá: los datos no viajan, solo la pantalla.</small>" \
   --column=" " --column="Centro" --column="Cómo está" --column="Su Windows" --column="Enlace" --column="destino:HD" \
   --print-column=6 --separator="" \
   --button="Volver a mirar:2" --button="Cerrar:1" --button="Poner al día:5" --button="Apagar este centro:3" --button="Encender:4" --button="Entrar a su Windows:0" 2>"$ERRYAD")
@@ -469,7 +490,7 @@ rm -f "$ERRYAD"
 
 case "$CODIGO" in
   2) exec "$0" ;;                      # actualizar: mirarlo todo otra vez
-  5) [ -n "$SEL" ] || exit 0
+  5) [ -n "$SEL" ] || nadie_marcado
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
@@ -485,7 +506,7 @@ case "$CODIGO" in
      # Poner al día un centro no termina el trabajo: lo empieza. Así que
      # la pantalla se vuelve a abrir, ya con el estado de ahora.
      exec "$0" ;;
-  4) [ -n "$SEL" ] || exit 0
+  4) [ -n "$SEL" ] || nadie_marcado
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      WIN=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $4; exit}')
@@ -494,7 +515,7 @@ case "$CODIGO" in
      [ "$EST" = "despierto" ] || { R=$(mirar "$SEL"); EST=${R%%|*}; WIN=$(printf '%s' "$R" | cut -d'|' -f2); }
      encender "$SEL" "${NOM:-ese centro}" "$EST" "$WIN"
      exec "$0" ;;
-  3) [ -n "$SEL" ] || exit 0
+  3) [ -n "$SEL" ] || nadie_marcado
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      [ "$EST" = "despierto" ] || EST=$(mirar "$SEL" | cut -d'|' -f1)
@@ -506,7 +527,7 @@ case "$CODIGO" in
      fi
      apagar "$SEL" "$NOM"
      exec "$0" ;;
-  0) [ -n "$SEL" ] || exit 0
+  0) [ -n "$SEL" ] || nadie_marcado
      NOM=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $1; exit}')
      EST=$(printf '%s' "$FILAS" | awk -F'|' -v d="$SEL" '$2==d{print $3; exit}')
      # 🔴 SE VUELVE A MIRAR ANTES DE DAR EL ERROR — 19/08/2026
