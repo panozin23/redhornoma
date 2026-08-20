@@ -83,11 +83,30 @@ while true; do
   sleep 12
   espera_cerrada
 
-  # --reconnect hace que, si el Windows se reinicia, la pantalla vuelva
-  # sola en vez de dejar a la persona colgada.
-  virt-viewer --connect qemu:///system --full-screen --reconnect \
+  # 🔴 SIN «--reconnect», Y ESO COSTÓ UNA PANTALLA BLANCA — 20/08/2026
+  #
+  # Con «--reconnect», el visor NO SE CIERRA cuando el Windows se apaga:
+  # se queda esperando a que vuelva. euflo apagó Windows desde su menú,
+  # vio «apagando equipo»… y la pantalla se quedó EN BLANCO, congelada.
+  #
+  # Y no era solo feo: mientras el visor sigue abierto, el guion se queda
+  # parado en esta línea y nunca llega a la parte que apaga la
+  # computadora. La mitad del trabajo de hoy no se ejecutaba jamás.
+  #
+  # Sin «--reconnect» el visor se cierra cuando el Windows se va, que es
+  # justo la señal que necesitamos. Volver a abrirlo lo hace el bucle de
+  # aquí abajo, que además puede DECIDIR — y esa decisión es lo que
+  # convierte «se apagó Windows» en «se apaga la computadora».
+  #
+  # Un reinicio de Windows por dentro no cierra el visor: la máquina
+  # virtual sigue existiendo y la pantalla se mantiene.
+  virt-viewer --connect qemu:///system --full-screen \
               --hotkeys=release-cursor=shift+f12 "$VM" \
               2> >(grep -v "Gtk-WARNING" >&2)
+
+  # Un respiro: la máquina tarda un segundo en pasar de «apagándose» a
+  # «apagada», y preguntar demasiado pronto daría la respuesta de antes.
+  sleep 4
 
   # ── Se cerró el visor. ¿Por qué? ───────────────────────────────────
   #
