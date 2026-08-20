@@ -1,0 +1,100 @@
+#!/bin/bash
+# redhornoma-apagar — Apagar o reiniciar el servidor sin dejarlo colgado.
+#
+# 🔴 EL PORQUÉ — LA MADRUGADA DEL 20/08/2026
+#
+# Se reinició el servidor de Cochabamba con «systemctl reboot» y se quedó
+# clavado varios minutos en:
+#
+#     «esperando a que el dominio de huéspedes reinicie»
+#
+# No estaba roto: es «libvirt-guests», que al apagar le pide al Windows
+# que se cierre y ESPERA HASTA CINCO MINUTOS a que termine. Ese es el
+# valor de fábrica de Debian, y en un disco de platos con SQL Server
+# dentro, Windows se toma su tiempo.
+#
+# Hornoma nunca lo ha sufrido, y no por suerte: su guion de la noche
+# cierra el Windows ANTES de apagar. Cochabamba no tiene horario de noche
+# —a propósito— así que se quedó sin esa cortesía.
+#
+# Esto se la da a cualquier máquina, tenga horario o no: cierra el Windows
+# con orden, comprueba que se cerró, y solo entonces apaga. Cuando
+# libvirt-guests llega, ya no hay nada que esperar.
+#
+# Uso:
+#   sudo redhornoma-apagar               apagar
+#   sudo redhornoma-apagar --reiniciar
+set -u
+
+ESPERA=120     # segundos que se le dan a Windows para cerrarse con orden
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "      %s\n" "$1"; }
+
+QUE=apagar
+case "${1:-}" in
+  --reiniciar) QUE=reiniciar ;;
+  ""|--apagar) QUE=apagar ;;
+  *) echo "Uso: redhornoma-apagar [--reiniciar]"; exit 1 ;;
+esac
+
+[ "$(id -u)" = "0" ] || { titulo "APAGAR EL SERVIDOR"
+  mal "hace falta sudo"; nota "sudo redhornoma-apagar${1:+ $1}"; exit 1; }
+
+titulo "$([ "$QUE" = reiniciar ] && echo REINICIAR || echo APAGAR) EL SERVIDOR"
+
+# ── Si hay horario de noche, manda él ─────────────────────────────────
+# Ese guion además arma el despertador y avisa a la nube. Sería una
+# tontería hacer aquí la mitad del trabajo y perder la otra mitad.
+if [ "$QUE" = apagar ] && [ -x /usr/local/sbin/redhornoma-apagar-noche ]; then
+  ok "esta máquina tiene horario de noche — se usa su apagado"
+  nota "así arma el despertador y deja dicho a qué hora vuelve"
+  echo
+  exec /usr/local/sbin/redhornoma-apagar-noche --ahora
+fi
+
+# ── Cerrar los Windows, con orden ─────────────────────────────────────
+VMS=$(LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v '^$')
+if [ -z "$VMS" ]; then
+  ok "no hay ningún Windows encendido"
+else
+  for vm in $VMS; do
+    printf "   cerrando «%s»…\n" "$vm"
+    virsh -c qemu:///system shutdown "$vm" >/dev/null 2>&1
+  done
+  T=0
+  while [ "$T" -lt "$ESPERA" ]; do
+    QUEDAN=$(LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v '^$')
+    [ -z "$QUEDAN" ] && break
+    sleep 5; T=$((T+5))
+  done
+
+  QUEDAN=$(LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v '^$')
+  if [ -z "$QUEDAN" ]; then
+    ok "los Windows se cerraron solos, sin perder nada (${T}s)"
+  else
+    # 🔴 Aquí NO se fuerza el apagado del Windows, y es a conciencia:
+    # dentro hay un SQL Server con la información del centro, y matarlo
+    # es la forma de corromper una base de datos. Antes se deja la
+    # máquina encendida y se dice qué pasa.
+    avi "«$QUEDAN» no se cerró en $ESPERA segundos"
+    nota "NO se apaga nada: dentro hay una base de datos abierta y"
+    nota "matarla es la forma de estropearla."
+    echo
+    nota "Mira su pantalla: puede tener una ventana esperando respuesta."
+    nota "Ciérralo desde dentro y vuelve a intentarlo."
+    exit 1
+  fi
+fi
+
+# ── Y ahora sí ────────────────────────────────────────────────────────
+# Cuando libvirt-guests llegue, no encontrará nada que esperar.
+if [ "$QUE" = reiniciar ]; then
+  ok "reiniciando"; sleep 2; exec systemctl reboot
+else
+  ok "apagando"; sleep 2; exec systemctl poweroff
+fi

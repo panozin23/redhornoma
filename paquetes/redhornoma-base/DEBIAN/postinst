@@ -118,4 +118,39 @@ if [ "${1:-}" = "configure" ] && [ -f "$VIEJO" ]; then
     && echo "   RedHornoma: apartada la copia suelta de $VIEJO"
 fi
 
+# ── Que apagar no se quede clavado cinco minutos ──────────────────────
+#
+# 🔴 LA MADRUGADA DEL 20/08/2026 Cochabamba se quedó parada varios minutos
+# en «esperando a que el dominio de huéspedes reinicie». No estaba rota:
+# «libvirt-guests» le pide al Windows que se cierre y espera hasta CINCO
+# MINUTOS, que es el valor de fábrica de Debian.
+#
+# Lo normal es apagar con «redhornoma-apagar», que cierra el Windows con
+# orden y deja a libvirt-guests sin trabajo. Esto es la red de seguridad
+# para cuando se apaga por otro camino: el botón, «systemctl poweroff», o
+# un corte de luz con batería.
+#
+# 🔴 SE ESCRIBE EN UN ARCHIVO DE DEBIAN, y hay que hacerlo con cuidado:
+# se AÑADE al final, con una marca, y solo si nadie ha puesto ya ese
+# valor. Nunca se reescribe el archivo entero.
+#
+# Y va aquí y no en un ajuste de systemd porque el programa fija los 300
+# A SECAS y DESPUÉS lee este archivo: cualquier variable de entorno se
+# pierde. Se comprobó leyendo su código, línea 36.
+CFGG=/etc/default/libvirt-guests
+if [ "${1:-}" = "configure" ] && [ -f "$CFGG" ] \
+   && ! grep -qE '^\s*SHUTDOWN_TIMEOUT=' "$CFGG"; then
+  {
+    echo ""
+    echo "# --- puesto por RedHornoma ---"
+    echo "# Dos minutos, no cinco. Suficiente para un Windows que se cierra"
+    echo "# bien, y poco para quedarse mirando una pantalla parada."
+    echo "# No se baja más: SQL Server necesita cerrar sus archivos."
+    echo "SHUTDOWN_TIMEOUT=120"
+  } >> "$CFGG"
+  if grep -qE '^SHUTDOWN_TIMEOUT=120' "$CFGG"; then
+    echo "   RedHornoma: apagar ya no esperará cinco minutos, sino dos"
+  fi
+fi
+
 exit 0
