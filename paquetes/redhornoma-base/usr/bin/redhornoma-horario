@@ -319,6 +319,32 @@ else
   if [ "$(ss -tnH state established '( sport = :22 )' 2>/dev/null | grep -c .)" -gt 0 ]; then
     anota "NO se apaga: hay alguien trabajando por red (conexión activa)"; exit 0
   fi
+
+  # 2b · Y TAMBIÉN si alguien estuvo hace poco, aunque ahora no esté.
+  #
+  # 🔴 EL 20/08/2026 ESTO LE APAGÓ LA MÁQUINA A euflo MIENTRAS TRABAJABA.
+  #
+  # La encendió a las 09:00 desde Cochabamba para poner el centro al día, y
+  # a las 10:00:30 el horario la apagó. Los frenos de arriba hicieron
+  # exactamente lo que se les pidió: en ese instante no había nadie
+  # conectado.
+  #
+  # Y es que trabajar desde lejos NO es estar conectado todo el rato: se
+  # abre la pantalla de los centros, se mira, se cierra; se lanza una
+  # actualización, termina, se corta la conexión. Entre una cosa y otra hay
+  # minutos de silencio, y el horario cayó justo en uno de ellos.
+  #
+  # Media hora de memoria es lo justo: coincide con cada cuánto se
+  # reintenta, así que si de verdad se fue, se apaga en la ronda siguiente.
+  # Como mucho se queda encendida media hora de más — infinitamente mejor
+  # que apagarse mientras alguien la usa desde 100 km.
+  RECIENTE=$(journalctl -u ssh -u sshd --since '-30min' --no-pager 2>/dev/null | grep -c 'Accepted')
+  case "${RECIENTE:-0}" in ''|*[!0-9]*) RECIENTE=0 ;; esac
+  if [ "$RECIENTE" -gt 0 ]; then
+    anota "NO se apaga: alguien entró por red hace menos de media hora"
+    diga "NO se apaga: alguien estuvo trabajando hace un rato."
+    exit 0
+  fi
 fi
 
 # 3 · Si un respaldo está corriendo, se le deja terminar. Cortar una copia a
