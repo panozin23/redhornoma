@@ -15,11 +15,16 @@ ESPERA = int(sys.argv[4]) if len(sys.argv) > 4 else 90
 
 def agente(payload):
     j = json.dumps(payload)
-    r = subprocess.run(
-        ["ssh", "-o", "BatchMode=yes", HOST,
-         "virsh -c qemu:///system qemu-agent-command %s %s" %
-         (VM, "'" + j.replace("'", "'\\''") + "'")],
-        capture_output=True, text=True, timeout=60)
+    # «local» = la máquina donde se está ejecutando esto, sin dar el rodeo
+    # por ssh. Hacía falta para mirar el Windows del propio portátil.
+    if HOST in ("local", "localhost", "-"):
+        orden = ["virsh", "-c", "qemu:///system",
+                 "qemu-agent-command", VM, j]
+    else:
+        orden = ["ssh", "-o", "BatchMode=yes", HOST,
+                 "virsh -c qemu:///system qemu-agent-command %s %s" %
+                 (VM, "'" + j.replace("'", "'\\''") + "'")]
+    r = subprocess.run(orden, capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         raise SystemExit("❌ el agente no contestó:\n" + r.stderr.strip())
     return json.loads(r.stdout)["return"]

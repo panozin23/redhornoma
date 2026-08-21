@@ -1,0 +1,171 @@
+#!/bin/bash
+# redhornoma-puente — Que el Windows del servidor se vea desde OTRO centro.
+#
+# EL PORQUÉ — 21/08/2026, y costó media mañana entenderlo
+#
+# euflo quería que dos personas trabajaran a la vez en el SOAPS de Hornoma:
+# una desde Cochabamba y otra desde su portátil. Se abrió la red interna de
+# Hornoma por Tailscale y funcionó… para todo menos para la máquina que
+# hacía falta.
+#
+#   192.168.1.110  el servidor Debian      ✅ se alcanza
+#   192.168.1.1    el router del centro    ✅ se alcanza
+#   192.168.1.50   su Windows              ❌ NO
+#
+# 🔴 LA CAUSA: el Windows del servidor está enganchado a la red con
+# «macvtap». Eso hace que lo vea TODO EL CENTRO… menos su propia máquina.
+# Y como su propia máquina es la que hace de puente hacia el otro centro,
+# el puente no tiene forma de entregarle nada.
+#
+# LA SALIDA: ese Windows tiene una segunda puerta, la interna de libvirt
+# (192.168.122.x), y por esa sí se le llega. Así que lo que venga del otro
+# centro con destino a su dirección del centro se desvía por la interna.
+#
+# Para quien lo usa no cambia nada: la dirección sigue siendo la de
+# siempre. Los puestos de otros centros no se enteran.
+#
+# ⚠️ La forma «limpia» sería cambiar el macvtap por un puente de verdad.
+# No se hace: eso toca la red del servidor, y si sale mal el centro se
+# queda incomunicado a 100 km. Esto es reversible con un comando.
+#
+# Uso:
+#   sudo redhornoma-puente --poner      (lo hace solo al arrancar)
+#   sudo redhornoma-puente --quitar
+#        redhornoma-puente --ver
+set -u
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "      ${GR}%s${V}\n" "$1"; }
+
+ESPERA=${ESPERA:-120}     # el Windows tarda en arrancar tras encender
+
+ACCION=ver
+case "${1:-}" in
+  --poner)  ACCION=poner ;;
+  --quitar) ACCION=quitar ;;
+  --ver|"") ACCION=ver ;;
+  *) echo "Uso: redhornoma-puente [--poner|--quitar|--ver]"; exit 1 ;;
+esac
+
+# ── Averiguar las dos direcciones del Windows ─────────────────────────
+# Se PREGUNTAN, no se escriben a mano: cambian de centro a centro, y una
+# dirección escrita a mano es una avería esperando al día que alguien
+# cambie el router.
+direcciones(){
+  VM=$(LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v '^$' | head -1)
+  [ -n "$VM" ] || return 1
+  # La del centro: la que está en la misma red que el propio servidor.
+  MIRED=$(ip -4 -o addr show scope global 2>/dev/null | grep -v ' virbr' \
+          | grep -v ' tailscale' | awk '{print $4}' | head -1)
+  [ -n "$MIRED" ] || return 1
+  PREFIJO=$(printf '%s' "$MIRED" | cut -d. -f1-3)
+  TODAS=$(LC_ALL=C virsh -c qemu:///system domifaddr "$VM" --source agent 2>/dev/null \
+          | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+')
+  LAN=$(printf '%s\n' "$TODAS" | grep "^${PREFIJO}\." | head -1)
+  DENTRO=$(printf '%s\n' "$TODAS" | grep '^192\.168\.122\.' | head -1)
+  [ -n "$LAN" ] && [ -n "$DENTRO" ]
+}
+
+reglas_puestas(){
+  iptables -t nat -C PREROUTING -i tailscale0 -d "$LAN" -j DNAT --to-destination "$DENTRO" 2>/dev/null \
+  && iptables -t nat -C POSTROUTING -o virbr0 -d "$DENTRO" -j MASQUERADE 2>/dev/null
+}
+
+# ══ VER ═══════════════════════════════════════════════════════════════
+if [ "$ACCION" = "ver" ]; then
+  titulo "EL WINDOWS DEL SERVIDOR, VISTO DESDE OTRO CENTRO"
+  if ! direcciones; then
+    nota "no puedo preguntarle al Windows sus direcciones"
+    nota "¿está encendido? ¿tiene el agente puesto?"
+    echo; exit 0
+  fi
+  nota "el Windows es «$VM»"
+  nota "en el centro:  $LAN"
+  nota "puerta interna: $DENTRO"
+  echo
+  if reglas_puestas; then ok "el puente está puesto — se le llega desde otros centros"
+  else nota "el puente NO está puesto: desde otro centro no se le llega"
+       nota "se pone con:  sudo redhornoma-puente --poner"; fi
+  echo; exit 0
+fi
+
+[ "$(id -u)" = "0" ] || { titulo "EL PUENTE AL WINDOWS"; mal "hace falta sudo"; exit 1; }
+
+# ══ QUITAR ════════════════════════════════════════════════════════════
+if [ "$ACCION" = "quitar" ]; then
+  titulo "QUITAR EL PUENTE"
+  N=0
+  while iptables -t nat -S PREROUTING 2>/dev/null | grep -q 'to-destination 192.168.122'; do
+    R=$(iptables -t nat -S PREROUTING | grep 'to-destination 192.168.122' | head -1 | sed 's/^-A //')
+    # shellcheck disable=SC2086
+    iptables -t nat -D $R 2>/dev/null || break
+    N=$((N+1))
+  done
+  while iptables -t nat -S POSTROUTING 2>/dev/null | grep -q -- '-o virbr0 -d 192.168.122.*MASQUERADE'; do
+    R=$(iptables -t nat -S POSTROUTING | grep -- '-o virbr0 -d 192.168.122.*MASQUERADE' | head -1 | sed 's/^-A //')
+    # shellcheck disable=SC2086
+    iptables -t nat -D $R 2>/dev/null || break
+    N=$((N+1))
+  done
+  [ "$N" -gt 0 ] && ok "quitado ($N reglas)" || nota "no había nada puesto"
+  echo; exit 0
+fi
+
+# ══ PONER ═════════════════════════════════════════════════════════════
+titulo "EL WINDOWS DEL SERVIDOR, VISIBLE DESDE OTROS CENTROS"
+
+# Al arrancar la computadora, el Windows tarda. Se espera, en vez de
+# fallar y dejar el centro incomunicado hasta que alguien se dé cuenta.
+# 🔴 Aquí importa distinguir DOS cosas que se parecen, y que el sistema
+# tiene que tratar al revés la una de la otra:
+#
+#   esta máquina no tiene ningún Windows   →  no hay nada que hacer, y
+#                                             está BIEN: se sale contento
+#   sí lo tiene pero no contesta           →  algo va mal: se reintenta
+#
+# Sin esa distinción, un portátil cualquiera se pasaría el día
+# reintentando algo que nunca va a poder hacer, y llenaría el registro de
+# fallos que no lo son. Los avisos que gritan sin motivo acaban ignorados,
+# y el día que griten de verdad nadie mirará.
+HAY_VM=$(LC_ALL=C virsh -c qemu:///system list --all --name 2>/dev/null | grep -cv '^$')
+if [ "${HAY_VM:-0}" = "0" ]; then
+  nota "esta máquina no tiene ningún Windows — no hay puente que poner"
+  echo; exit 0
+fi
+
+T=0
+while ! direcciones && [ "$T" -lt "$ESPERA" ]; do sleep 5; T=$((T+5)); done
+if ! direcciones; then
+  mal "no consigo las direcciones del Windows"
+  nota "¿está encendido? ¿tiene el agente de QEMU puesto?"
+  exit 1
+fi
+ok "el Windows «$VM» está en $LAN, y por dentro en $DENTRO"
+
+# 🔴 Si el propio servidor YA alcanza a su Windows, no hace falta puente
+# ninguno — y ponerlo sería añadir una regla que nadie entendería el día
+# que algo falle. Se comprueba antes.
+if ping -c1 -W2 "$LAN" >/dev/null 2>&1; then
+  ok "este servidor ya alcanza a su Windows — no hace falta puente"
+  nota "eso pasa cuando la máquina no usa macvtap"
+  echo; exit 0
+fi
+nota "este servidor NO alcanza a su Windows (macvtap): hace falta el puente"
+
+iptables -t nat -C PREROUTING -i tailscale0 -d "$LAN" -j DNAT --to-destination "$DENTRO" 2>/dev/null \
+  || iptables -t nat -A PREROUTING -i tailscale0 -d "$LAN" -j DNAT --to-destination "$DENTRO"
+iptables -t nat -C POSTROUTING -o virbr0 -d "$DENTRO" -j MASQUERADE 2>/dev/null \
+  || iptables -t nat -A POSTROUTING -o virbr0 -d "$DENTRO" -j MASQUERADE
+
+# El resultado, no el código de salida.
+if reglas_puestas; then
+  ok "puente puesto"
+  nota "desde otro centro, ese Windows se alcanza en $LAN, como siempre"
+else
+  mal "las reglas no quedaron puestas"; exit 1
+fi
+echo

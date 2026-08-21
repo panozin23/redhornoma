@@ -1,10 +1,10 @@
 Package: redhornoma-red
-Version: 1.1.24
+Version: 1.1.25
 Section: admin
 Priority: optional
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
-Depends: redhornoma-base (>= 1.0.1), avahi-daemon, avahi-utils,
+Depends: iptables, redhornoma-base (>= 1.0.1), avahi-daemon, avahi-utils,
  openssh-client, openssh-server, libvirt-clients, iproute2
 Recommends: yad, virt-viewer, samba-common-bin,
  redhornoma-virtualizacion (>= 1.0.11)

@@ -1,0 +1,23 @@
+[Unit]
+Description=Que el Windows del servidor se vea desde otros centros
+Documentation=man:redhornoma-puente
+# El Windows lo arranca libvirt; el camino hacia los otros centros lo pone
+# Tailscale. Sin las dos cosas, esto no tiene a qué agarrarse.
+After=libvirtd.service tailscaled.service network-online.target
+Wants=libvirtd.service tailscaled.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Hasta 4 minutos esperando a que el Windows termine de arrancar: en un
+# disco de platos, tras un apagón, tarda.
+Environment=ESPERA=240
+ExecStart=/usr/bin/redhornoma-puente --poner
+ExecStop=/usr/bin/redhornoma-puente --quitar
+# Si el Windows tardó más de la cuenta, se vuelve a intentar en vez de
+# dejar el centro incomunicado hasta que alguien lo note.
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

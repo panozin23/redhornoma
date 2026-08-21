@@ -1,0 +1,25 @@
+#!/bin/bash
+# Deja el puente al Windows funcionando desde el primer arranque.
+#
+# Se enciende en TODAS las máquinas a propósito: el propio guion decide si
+# hace falta o no. En un portátil sin Windows dice «no hay nada que hacer»
+# y se calla; en un servidor con macvtap pone el puente. Así no hay que
+# acordarse de encenderlo justo en las máquinas donde importa —y esa clase
+# de olvido es la que dejó el aviso de la nube roto durante días—.
+set -e
+
+if [ "$1" = "configure" ]; then
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  systemctl enable redhornoma-puente.service >/dev/null 2>&1 || true
+  # No se arranca aquí: al instalar, el Windows puede estar a medio
+  # levantar, y bloquear la instalación cuatro minutos sería peor. Lo hará
+  # el propio servicio en el siguiente arranque, y se puede adelantar con
+  # «sudo redhornoma-puente --poner».
+  if systemctl is-enabled redhornoma-puente.service >/dev/null 2>&1; then
+    echo "   ● el puente al Windows quedará puesto al arrancar"
+  else
+    echo "   ⚠️  no se pudo dejar puesto el puente al Windows"
+  fi
+fi
+
+exit 0
