@@ -1,12 +1,12 @@
 Package: redhornoma-perifericos
-Version: 1.3.4
+Version: 1.3.6
 Section: admin
 Priority: optional
 Architecture: all
 Maintainer: euflo <dpto.salud10@gmail.com>
 Depends: redhornoma-base (>= 1.0.1), samba, samba-common-bin, pkexec,
- util-linux, coreutils
-Recommends: cups, sane-utils
+ util-linux, coreutils, cups, cups-client, cups-filters
+Recommends: sane-utils
 Description: Una carpeta que ven Linux y Windows a la vez
  Pasar un archivo al Windows virtual no debería obligar a grabar un CD ni
  a buscar un pendrive. Esta carpeta aparece en Windows como una unidad de
@@ -23,3 +23,8 @@ Description: Una carpeta que ven Linux y Windows a la vez
  También trae listo el driver de la impresora Epson L380/L382: al entrar a
  «Añadir impresora» ya aparece en la lista, sin tener que buscar ni
  instalar nada aparte.
+ .
+ Y «redhornoma-impresora», que pone una sola impresora al servicio de todo
+ el centro: se enchufa a una máquina, se comparte con un comando, y las
+ demás se enganchan con otro. Los Windows incluidos —tanto el que va por
+ dentro del servidor como los puestos—, sin instalarles ningún driver.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Recibir impresiones de Windows (puerto 9100)
+Documentation=file:///usr/lib/redhornoma/recibir-de-windows
+
+[Socket]
+ListenStream=9100
+Accept=yes
+# Un trabajo a la vez, que es como se porta una impresora de verdad.
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

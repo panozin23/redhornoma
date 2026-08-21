@@ -1,0 +1,14 @@
+[Unit]
+Description=Trabajo de impresión llegado de Windows
+After=cups.service
+Requires=cups.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/redhornoma/recibir-de-windows
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+# Sin privilegios: solo tiene que poder hablar con CUPS.
+User=lp
+Group=lp

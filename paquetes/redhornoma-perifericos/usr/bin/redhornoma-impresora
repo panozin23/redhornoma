@@ -1,0 +1,274 @@
+#!/bin/bash
+# redhornoma-impresora — La impresora del centro, para todas las máquinas.
+#
+# EL PORQUÉ — 20/08/2026, preguntando euflo:
+#
+#   «La impresora no tiene wifi, pero podemos conectarla a la red para que
+#    desde aquí se pueda imprimir. Podría estar conectada al servidor
+#    secundario, pero que sirva para imprimir desde cualquiera de las PC
+#    que está en la red interna.»
+#
+# Eso es exactamente lo que hace esto. Hay DOS papeles distintos:
+#
+#   --compartir   en la máquina donde está ENCHUFADA la impresora.
+#                 Pone el driver, crea la cola y la ofrece a la red.
+#
+#   --usar        en las demás máquinas del centro. Se enganchan a la
+#                 que la comparte. NO necesitan el driver de Epson: la
+#                 máquina que comparte se encarga de traducir.
+#
+# 🔴 POR QUÉ LOS CLIENTES NO LLEVAN DRIVER
+#
+# Se probó el 20/08: la máquina que comparte anuncia la impresora por IPP
+# con todo lo que hace falta, así que los demás la usan con «everywhere»,
+# el modo estándar. Eso significa que el día que se cambie de impresora
+# solo hay que tocar UNA máquina, no todas. Y que un cliente puede ser un
+# portátil prestado sin nada instalado.
+#
+# Uso:
+#   sudo redhornoma-impresora --compartir
+#   sudo redhornoma-impresora --usar 192.168.0.110
+#        redhornoma-impresora --ver
+set -u
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "      ${GR}%s${V}\n" "$1"; }
+
+PPD_DIR=/usr/share/ppd/epson-inkjet-printer
+
+ACCION=ver; SERVIDOR=""
+case "${1:-}" in
+  --compartir) ACCION=compartir ;;
+  --usar)      ACCION=usar; SERVIDOR="${2:-}" ;;
+  --ver|"")    ACCION=ver ;;
+  *) echo "Uso: redhornoma-impresora [--compartir | --usar DIRECCION | --ver]"; exit 1 ;;
+esac
+
+# ══ VER ═══════════════════════════════════════════════════════════════
+if [ "$ACCION" = "ver" ]; then
+  titulo "LA IMPRESORA DEL CENTRO"
+  N=$(LC_ALL=C lpstat -v 2>/dev/null | wc -l)
+  if [ "$N" = "0" ]; then
+    nota "esta máquina no tiene ninguna impresora puesta"
+    echo
+    nota "si la impresora está enchufada AQUÍ:   sudo redhornoma-impresora --compartir"
+    nota "si está enchufada en otra máquina:     sudo redhornoma-impresora --usar SU-DIRECCION"
+    echo; exit 0
+  fi
+  LC_ALL=C lpstat -v 2>/dev/null | while read -r L; do
+    NOM=$(printf '%s' "$L" | sed 's/^.*device for \([^:]*\):.*$/\1/')
+    URI=$(printf '%s' "$L" | sed 's/^.*: //')
+    case "$URI" in
+      usb:*|ipp://localhost*) ok "«$NOM» está ENCHUFADA a esta máquina" ;;
+      ipp:*|ipps:*|http:*)    ok "«$NOM» está en otra máquina de la red"
+                              nota "en: $(printf '%s' "$URI" | sed 's|^[a-z]*://||;s|/.*$||')" ;;
+      *)                      ok "«$NOM»"; nota "$URI" ;;
+    esac
+    printf '      %s\n' "estado: $(lpstat -p "$NOM" 2>/dev/null | head -1)"
+  done
+  echo; exit 0
+fi
+
+[ "$(id -u)" = "0" ] || { titulo "LA IMPRESORA DEL CENTRO"
+  mal "hace falta sudo"; nota "sudo redhornoma-impresora --$ACCION $SERVIDOR"; exit 1; }
+
+systemctl is-active cups >/dev/null 2>&1 || systemctl start cups 2>/dev/null
+
+# ══ COMPARTIR ═════════════════════════════════════════════════════════
+if [ "$ACCION" = "compartir" ]; then
+  titulo "COMPARTIR LA IMPRESORA CON TODO EL CENTRO"
+
+  # ── ¿Está enchufada? ──
+  #
+  # 🔴 DOS SITIOS DONDE MIRAR, Y EL ORDEN IMPORTA — 20/08/2026
+  #
+  # Primero se mira si YA HAY una cola de USB puesta. Falló en flora por
+  # no hacerlo: la impresora estaba enchufada y funcionando, la cola
+  # existía, y el guion dijo «no hay ninguna impresora enchufada» porque
+  # solo sabía preguntar por impresoras nuevas.
+  #
+  # Una herramienta que solo funciona la primera vez no sirve: esto se va
+  # a volver a ejecutar cada vez que se actualice o se mueva algo.
+  URI=""; COLA_VIEJA=""
+  while read -r L; do
+    U=$(printf '%s' "$L" | sed 's/^.*: //')
+    case "$U" in usb:*) URI="$U"
+      COLA_VIEJA=$(printf '%s' "$L" | sed 's/^.*device for \([^:]*\):.*$/\1/'); break ;;
+    esac
+  done <<EOF
+$(LC_ALL=C lpstat -v 2>/dev/null)
+EOF
+  if [ -n "$URI" ]; then
+    ok "ya había una cola puesta: «$COLA_VIEJA»"
+    nota "se aprovecha y se deja bien compartida"
+  else
+    # No había cola: entonces sí hay que descubrir la impresora.
+    URI=$(lpinfo -v 2>/dev/null | grep -io 'usb://[^ ]*' | head -1)
+  fi
+  if [ -z "$URI" ]; then
+    mal "no hay ninguna impresora enchufada por USB a esta máquina"
+    nota "enchufa el cable y enciéndela"
+    echo; exit 1
+  fi
+  MODELO=$(printf '%s' "$URI" | sed 's|^usb://||;s|?.*$||;s|%20| |g')
+  ok "enchufada: $MODELO"
+
+  # ── ¿Tenemos su driver? ──
+  # 🔴 El driver ABIERTO de Debian conoce 586 modelos y NO trae las L de
+  # Epson que usan los centros (L220, L222, L380). Comprobado el
+  # 20/08/2026. Por eso el paquete lleva el de Epson de verdad.
+  CORTO=$(printf '%s' "$MODELO" | grep -oiE 'L[0-9]{3}' | head -1 | tr a-z A-Z)
+  PPD=""
+  [ -n "$CORTO" ] && PPD=$(ls "$PPD_DIR"/Epson-"$CORTO"_Series-*.ppd 2>/dev/null | head -1)
+  if [ -n "$PPD" ]; then
+    ok "driver de Epson para la $CORTO"
+  else
+    # Se sigue igualmente con el driver abierto: puede que ese modelo sí
+    # esté. Pero se DICE, para que nadie crea que quedó perfecto.
+    avi "no tengo el driver propio de Epson para la ${CORTO:-esta impresora}"
+    nota "se intentará con el que trae Debian; si imprime raro, hay que buscarlo"
+    PPD=$(lpinfo -m 2>/dev/null | grep -i "${CORTO:-zzz}" | head -1 | awk '{print $1}')
+    [ -n "$PPD" ] || { mal "y tampoco lo tiene Debian — no puedo crear la cola"; exit 1; }
+  fi
+
+  COLA="EPSON_${CORTO:-IMPRESORA}"
+  # Si ya tenía nombre, se respeta: cambiárselo dejaría colgadas a
+  # todas las máquinas que ya la tienen puesta.
+  [ -n "$COLA_VIEJA" ] && COLA="$COLA_VIEJA"
+
+  cp -n /etc/cups/cupsd.conf /etc/cups/cupsd.conf.antes-de-compartir 2>/dev/null
+
+  case "$PPD" in
+    /*) lpadmin -p "$COLA" -E -v "$URI" -P "$PPD" -o printer-is-shared=true ;;
+    *)  lpadmin -p "$COLA" -E -v "$URI" -m "$PPD" -o printer-is-shared=true ;;
+  esac || { mal "no se pudo crear la cola"; exit 1; }
+  lpadmin -d "$COLA"; cupsenable "$COLA"; cupsaccept "$COLA" 2>/dev/null
+  [ -n "$COLA_VIEJA" ] && ok "cola «$COLA» puesta al día" || ok "cola «$COLA» creada"
+
+  cupsctl --share-printers --remote-any
+  systemctl restart cups; sleep 3
+  if ! systemctl is-active cups >/dev/null 2>&1; then
+    mal "CUPS no arrancó — se devuelve la configuración de antes"
+    cp -f /etc/cups/cupsd.conf.antes-de-compartir /etc/cups/cupsd.conf
+    systemctl restart cups; exit 1
+  fi
+
+  # 🔴 COMPROBAR EL RESULTADO, NO EL CÓDIGO DE SALIDA
+  # «cupsctl» no falla aunque no consiga compartir nada. La única prueba
+  # que vale es preguntarle a CUPS si la impresora se ofrece de verdad.
+  COMPARTIDA=$(lpoptions -p "$COLA" 2>/dev/null | tr ' ' '\n' | grep -c '^printer-is-shared=true$')
+  ESCUCHA=$(ss -lnt 2>/dev/null | grep -c '0.0.0.0:631')
+  if [ "$COMPARTIDA" = "1" ] && [ "$ESCUCHA" -ge 1 ]; then
+    ok "se ofrece a toda la red del centro"
+  else
+    mal "la cola existe pero NO se está ofreciendo a la red"
+    nota "compartida=$COMPARTIDA  escuchando=$ESCUCHA"
+    exit 1
+  fi
+
+  # ── Y para los Windows ────────────────────────────────────────────
+  # Ver el porqué largo en /usr/lib/redhornoma/recibir-de-windows. En
+  # corto: Windows no sabe usar una impresora compartida de Linux para
+  # toda la máquina, pero sí sabe usar el puerto 9100 de toda la vida.
+  mkdir -p /etc/redhornoma
+  printf 'cola=%s\nfecha=%s\n' "$COLA" "$(date '+%Y-%m-%d %H:%M')" > /etc/redhornoma/impresora.conf
+  systemctl enable --now redhornoma-impresora-windows.socket >/dev/null 2>&1
+  if ss -lnt 2>/dev/null | grep -q ':9100'; then
+    ok "los Windows del centro también pueden imprimir"
+  else
+    avi "no quedó escuchando el puerto 9100 — los Windows no podrán"
+    nota "los Linux sí; esto se puede arreglar después"
+  fi
+
+  titulo "LISTO — CÓMO LA USAN LAS DEMÁS MÁQUINAS"
+  ip -4 -o addr show scope global 2>/dev/null | grep -v ' virbr' | while read -r _ IF _ DIR _; do
+    printf "\n   desde una máquina de la red (%s):\n" "$IF"
+    printf "      ${VE}sudo redhornoma-impresora --usar %s${V}\n" "${DIR%/*}"
+  done
+  echo
+  nota "lo del Windows de dentro es aparte: ver documentacion/IMPRIMIR.md"
+  echo
+  exit 0
+fi
+
+# ══ USAR ══════════════════════════════════════════════════════════════
+titulo "USAR LA IMPRESORA DEL CENTRO"
+[ -n "$SERVIDOR" ] || { mal "falta decir en qué máquina está la impresora"
+  nota "sudo redhornoma-impresora --usar 192.168.0.110"; exit 1; }
+
+# ── ¿Contesta esa máquina? ──
+COLA=$(timeout 15 env LC_ALL=C lpstat -h "$SERVIDOR:631" -p 2>/dev/null \
+       | awk '$1=="printer"{print $2; exit}')
+if [ -z "$COLA" ]; then
+  mal "«$SERVIDOR» no ofrece ninguna impresora"
+  nota "comprueba que esa máquina esté encendida"
+  nota "y que allí se haya hecho:  sudo redhornoma-impresora --compartir"
+  echo; exit 1
+fi
+ok "«$SERVIDOR» ofrece la impresora «$COLA»"
+
+# ── Colas muertas ─────────────────────────────────────────────────────
+#
+# 🔴 Encontrado el 20/08/2026 en el portátil de euflo: al mover la
+# impresora de una máquina a otra, la cola de USB SE QUEDA. Y no se queda
+# quieta: sigue aceptando trabajos y diciendo «imprimiendo» para siempre,
+# porque espera a un cable que ya no está. Su portátil llevaba el trabajo
+# número 37 colgado.
+#
+# Eso es peor que no tener impresora: la persona imprime, ve que «está
+# imprimiendo», y no sale nada. Así que se retiran — pero solo las que
+# apuntan a un USB que NO está enchufado ahora mismo.
+# 🔴 Y con un freno: si «lpinfo» no contesta —pasa cuando no hay permiso—
+# NO se toca ninguna cola. Un cero que en realidad significa «no pude
+# mirar» borraría la impresora buena de una máquina que sí la tiene.
+LPINFO=$(lpinfo -v 2>/dev/null)
+if [ -n "$LPINFO" ]; then
+  HAY_USB=$(printf '%s\n' "$LPINFO" | grep -c 'usb://')
+else
+  HAY_USB="no-se-pudo-mirar"
+fi
+LC_ALL=C lpstat -v 2>/dev/null | while read -r L; do
+  NOM=$(printf '%s' "$L" | sed 's/^.*device for \([^:]*\):.*$/\1/')
+  URI=$(printf '%s' "$L" | sed 's/^.*: //')
+  case "$URI" in usb:*) ;; *) continue ;; esac
+  [ "$HAY_USB" = "0" ] || continue      # sí hay impresora enchufada: se respeta
+  P=$(lpstat -o "$NOM" 2>/dev/null | wc -l)
+  cancel -a "$NOM" 2>/dev/null
+  lpadmin -x "$NOM" 2>/dev/null && {
+    avi "retirada la cola vieja «$NOM» — apuntaba a un USB que ya no está"
+    [ "$P" -gt 0 ] && nota "tenía $P trabajo(s) colgados desde hacía tiempo"
+  }
+done
+
+# Se le da el mismo nombre que allá, para que la gente vea siempre lo
+# mismo esté donde esté.
+lpadmin -p "$COLA" -E -v "ipp://$SERVIDOR/printers/$COLA" -m everywhere \
+        -o printer-is-shared=false 2>/dev/null \
+  || { mal "no se pudo enganchar a esa impresora"; exit 1; }
+lpadmin -d "$COLA"; cupsenable "$COLA"; cupsaccept "$COLA" 2>/dev/null
+
+# 🔴 De nuevo: el resultado, no el código. «lpadmin» acepta direcciones
+# que no llevan a ninguna parte sin quejarse.
+LISTA=$(LC_ALL=C lpstat -v "$COLA" 2>/dev/null | grep -c "$SERVIDOR")
+if [ "$LISTA" -ge 1 ]; then
+  ok "esta máquina ya puede imprimir en «$COLA»"
+else
+  mal "la cola no quedó apuntando a «$SERVIDOR»"; exit 1
+fi
+
+titulo "LISTO"
+cat <<TEXTO
+
+   Desde ahora, en cualquier programa de esta máquina, al imprimir sale
+   «$COLA» y el papel aparece en la impresora del centro.
+
+   No hace falta instalar nada más: la máquina donde está enchufada se
+   encarga de todo.
+
+TEXTO
+nota "para verla:  redhornoma-impresora --ver"
+echo

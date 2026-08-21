@@ -1,0 +1,26 @@
+#!/bin/bash
+# Recibe un trabajo de impresión que llega por el puerto 9100 y se lo
+# entrega a CUPS.
+#
+# EL PORQUÉ — 20/08/2026
+#
+# Windows NO sabe imprimir en una impresora compartida de Linux sin pelea:
+# no deja crear un puerto «http://…» a mano, y lo que sí deja hacer queda
+# guardado para UNA sola cuenta de usuario. En un centro de salud eso no
+# vale: la impresora tiene que estar para quien se siente.
+#
+# El puerto 9100 es lo que habla cualquier impresora de red del mundo.
+# Windows lo sabe hacer desde siempre, con un puerto normal y corriente, y
+# la impresora queda puesta PARA TODA LA MÁQUINA.
+#
+# Windows manda PostScript —usa el driver «Microsoft PS Class Driver», que
+# ya viene dentro—, y CUPS lo traduce a lo que entiende la Epson. Por eso
+# NO hace falta instalar ningún driver de Epson dentro del Windows.
+set -u
+COLA=$(grep -oP '^cola=\K.*' /etc/redhornoma/impresora.conf 2>/dev/null)
+[ -n "$COLA" ] || COLA=$(LC_ALL=C lpstat -d 2>/dev/null | sed 's/^.*: //')
+[ -n "$COLA" ] || { echo "sin impresora configurada" >&2; exit 1; }
+
+# El trabajo entra por la entrada estándar, que es el propio socket. «-»
+# es «lee de ahí». No se pone «-o raw»: queremos que CUPS traduzca.
+exec /usr/bin/lp -d "$COLA" -t "desde Windows" - >/dev/null
