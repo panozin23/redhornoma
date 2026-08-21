@@ -110,12 +110,65 @@ def texto(estado, clave):
     if not estado.get(clave):
         return ""
     crudo = base64.b64decode(estado[clave])
-    for cod in ("cp850", "cp1252", "utf-8"):
+    # 🔴 UTF-8 PRIMERO, y no es indiferente. «cp850» acepta CUALQUIER byte
+    # sin quejarse, así que si se prueba antes SIEMPRE gana… y devuelve
+    # basura: los acentos y los símbolos salen como «Ô£à». UTF-8 sí sabe
+    # decir «esto no es mío», así que probándolo primero acierta siempre.
+    for cod in ("utf-8", "cp850", "cp1252"):
         try:
             return crudo.decode(cod)
         except UnicodeDecodeError:
             continue
     return crudo.decode("utf-8", "replace")
+
+
+# 🔴 UN GUION DE VERDAD NO CABE EN UNA ORDEN — 21/08/2026
+#
+# Los guiones se mandaban dentro de la propia orden, en base64. Con cuatro
+# líneas va bien. Con 156 —el guion que aligera el Windows del servidor— el
+# agente contesta:
+#
+#     Failed to execute helper program (Permission denied)
+#
+# Y ese mensaje MIENTE: no es un problema de permisos, es que la orden no
+# cabe. Se pierde media hora buscando permisos que están bien.
+#
+# Lo correcto es dejar el archivo DENTRO de Windows y ejecutarlo desde ahí.
+# Además queda guardado, y si algo falla se puede mirar.
+TOPE_EN_LA_ORDEN = 4096
+
+
+def subir(vm, ruta_windows, contenido):
+    """Escribe un archivo dentro de Windows, a trozos."""
+    h = agente(vm, {"execute": "guest-file-open",
+                    "arguments": {"path": ruta_windows, "mode": "wb"}})
+    try:
+        # 🔴 La marca del principio no es un adorno: sin ella PowerShell lee
+        # el archivo con la codificación vieja de Windows, y el primer
+        # acento o recuadro lo rompe con un error de sintaxis que no dice
+        # una palabra de codificaciones.
+        datos = b"\xef\xbb\xbf" + contenido.encode("utf-8")
+        TROZO = 48 * 1024
+        for i in range(0, len(datos), TROZO):
+            agente(vm, {"execute": "guest-file-write", "arguments": {
+                "handle": h,
+                "buf-b64": base64.b64encode(datos[i:i + TROZO]).decode("ascii")}})
+    finally:
+        agente(vm, {"execute": "guest-file-close", "arguments": {"handle": h}})
+    return ruta_windows
+
+
+def por_guion(vm, ruta_local, argumentos=""):
+    """Sube el guion a Windows y lo ejecuta allí."""
+    import os as _os
+    contenido = open(ruta_local, encoding="utf-8").read()
+    destino = "C:\\Windows\\Temp\\" + _os.path.basename(ruta_local)
+    subir(vm, destino, contenido)
+    # El permiso se da solo a ESTE proceso: la política del sistema es una
+    # protección de verdad y no es nuestra para cambiarla.
+    orden = ("Set-ExecutionPolicy Bypass -Scope Process -Force; & '"
+             + destino + "' " + argumentos)
+    return por_powershell(orden)
 
 
 def por_powershell(guion):
@@ -266,8 +319,15 @@ def main():
         print(f"{AZ} EL WINDOWS DE «{vm}», POR DENTRO{V}")
         print(f"{AZ}══════════════════════════════════════════════════════{V}")
     elif a.guion:
-        contenido = sys.stdin.read() if a.guion == "-" else open(a.guion, encoding="utf-8").read()
-        programa, argumentos = por_powershell(contenido)
+        contenido = (sys.stdin.read() if a.guion == "-"
+                     else open(a.guion, encoding="utf-8").read())
+        # Los cortos van dentro de la orden, que es más rápido. Los largos
+        # se suben a Windows: dentro de la orden NO CABEN, y el agente lo
+        # dice con un mensaje que despista (ver TOPE_EN_LA_ORDEN).
+        if a.guion != "-" and len(contenido) > TOPE_EN_LA_ORDEN:
+            programa, argumentos = por_guion(vm, a.guion, " ".join(a.orden))
+        else:
+            programa, argumentos = por_powershell(contenido)
     elif a.powershell:
         programa, argumentos = por_powershell(" ".join(a.orden))
     else:

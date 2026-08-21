@@ -1,0 +1,113 @@
+#!/bin/bash
+# redhornoma-aligerar — Quitarle peso al Windows del servidor.
+#
+# EL PORQUÉ — 21/08/2026, de euflo:
+#
+#   «Me doy cuenta de que todo este proyecto es para máquinas poderosas, ya
+#    que tiene dentro dos sistemas operativos que lo hacen pesado. Lo que
+#    queremos es que sea liviano, para usar en cualquier máquina.»
+#
+# Se midió antes de tocar nada, y el diagnóstico salió distinto de lo que
+# parecía: el Linux de un servidor gasta MENOS DE 1 GB. Lo pesado es el
+# Windows —y ahí viven SOAPS, SALMI y SNIS, así que no se puede quitar—.
+#
+# Pero de los 2,5 GB que gastaba, casi la mitad se los comían programas que
+# en un centro de salud NO USA NADIE. Medido en Cochabamba:
+#
+#   el Windows ocupaba   6.330 MB
+#   después                3.302 MB      → 3 GB devueltos al servidor
+#   sus procesos         2.718 → 1.529 MB
+#   paginando                    0 MB    → no le falta memoria
+#
+# Con eso, un servidor RedHornoma entero cabe en 4 GB.
+#
+# Uso:
+#   sudo redhornoma-aligerar                  limpiar y ajustar memoria
+#   sudo redhornoma-aligerar --memoria 4G     otra cantidad
+#   sudo redhornoma-aligerar --solo-limpiar   sin tocar la memoria
+#   sudo redhornoma-aligerar --deshacer
+set -u
+
+V=$'\033[0m'; AZ=$'\033[1;34m'; VE=$'\033[1;32m'; RO=$'\033[1;31m'; AM=$'\033[1;33m'; GR=$'\033[0;90m'
+titulo(){ printf "\n${AZ}══════════════════════════════════════════════════════${V}\n${AZ} %s${V}\n${AZ}══════════════════════════════════════════════════════${V}\n" "$1"; }
+ok(){   printf "   ${VE}✅${V} %s\n" "$1"; }
+mal(){  printf "   ${RO}❌${V} %s\n" "$1"; }
+avi(){  printf "   ${AM}⚠️ ${V} %s\n" "$1"; }
+nota(){ printf "      ${GR}%s${V}\n" "$1"; }
+
+GUION=/usr/share/redhornoma/windows/aligerar.ps1
+MEMORIA=3145728          # 3 GB, en KiB — lo medido como cómodo
+LIMPIAR=sí; AJUSTAR=sí; DESHACER=no; VM=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --memoria) case "${2:-}" in
+        *G|*g) MEMORIA=$(( ${2%[Gg]} * 1048576 )) ;;
+        *)     MEMORIA="${2:-}" ;; esac; shift 2 ;;
+    --solo-limpiar) AJUSTAR=no; shift ;;
+    --solo-memoria) LIMPIAR=no; shift ;;
+    --deshacer) DESHACER=sí; AJUSTAR=no; shift ;;
+    --maquina) VM="${2:-}"; shift 2 ;;
+    *) echo "Uso: redhornoma-aligerar [--memoria 3G|--solo-limpiar|--deshacer]"; exit 1 ;;
+  esac
+done
+
+titulo "ALIGERAR EL WINDOWS DEL SERVIDOR"
+[ -n "$VM" ] || VM=$(LC_ALL=C virsh -c qemu:///system list --name --state-running 2>/dev/null | grep -v '^$' | head -1)
+[ -n "$VM" ] || { mal "no hay ningún Windows encendido"; exit 1; }
+ok "el Windows es «$VM»"
+
+ANTES=$(ps -eo rss,comm 2>/dev/null | grep -E 'qemu' | awk '{s+=$1} END{printf "%.0f", s/1024}')
+nota "ahora ocupa ${ANTES} MB en esta máquina"
+
+# ── La limpieza, dentro de Windows ────────────────────────────────────
+if [ "$LIMPIAR" = "sí" ] || [ "$DESHACER" = "sí" ]; then
+  [ -f "$GUION" ] || { mal "falta $GUION"; exit 1; }
+  echo
+  if [ "$DESHACER" = "sí" ]; then
+    redhornoma-en-windows --maquina "$VM" --guion "$GUION" --espera 300 -- -Deshacer
+  else
+    redhornoma-en-windows --maquina "$VM" --guion "$GUION" --espera 300
+  fi
+fi
+
+# ── La memoria ────────────────────────────────────────────────────────
+# 🔴 Se hace DESPUÉS de limpiar, nunca antes: apretarle la memoria a un
+# Windows que todavía carga con lo que no usa lo pone a paginar, y
+# entonces el servidor va PEOR que al empezar. El orden importa.
+if [ "$AJUSTAR" = "sí" ]; then
+  echo
+  MAX=$(LC_ALL=C virsh -c qemu:///system dominfo "$VM" 2>/dev/null | awk '/Max memory/{print $3}')
+  if [ -n "$MAX" ] && [ "$MEMORIA" -gt "$MAX" ]; then
+    avi "no se puede subir de $(( MAX / 1048576 )) GB en caliente — se deja como está"
+  else
+    virsh -c qemu:///system setmem "$VM" "$MEMORIA" --live --config >/dev/null 2>&1
+    T=0
+    while [ "$T" -lt 90 ]; do
+      U=$(LC_ALL=C virsh -c qemu:///system dominfo "$VM" 2>/dev/null | awk '/Used memory/{print $3}')
+      [ "${U:-9999999}" -le "$(( MEMORIA + 102400 ))" ] 2>/dev/null && break
+      sleep 5; T=$((T+5))
+    done
+    # El resultado, no el código de salida.
+    if [ "${U:-9999999}" -le "$(( MEMORIA + 102400 ))" ] 2>/dev/null; then
+      ok "memoria del Windows: $(( MEMORIA / 1048576 )) GB"
+    else
+      avi "la memoria bajó a $(( ${U:-0} / 1048576 )) GB, no a $(( MEMORIA / 1048576 ))"
+      nota "el globo de memoria tarda; vuelve a mirarlo en un rato"
+    fi
+  fi
+fi
+
+sleep 3
+DESPUES=$(ps -eo rss,comm 2>/dev/null | grep -E 'qemu' | awk '{s+=$1} END{printf "%.0f", s/1024}')
+titulo "RESULTADO"
+printf "   %-28s %s MB\n" "ocupaba" "$ANTES"
+printf "   %-28s %s MB\n" "ocupa ahora" "$DESPUES"
+printf "   %-28s %s MB\n" "devuelto a esta máquina" "$(( ANTES - DESPUES ))"
+echo
+nota "libre en el servidor: $(free -m | awk '/^Mem/{print $7}') MB"
+echo
+avi "LO QUE MÁS SE NOTA LLEGA AL REINICIAR EL WINDOWS"
+nota "el buscador y las tareas de fondo ya no volverán a arrancar"
+nota "para reiniciarlo:  virsh -c qemu:///system reboot $VM"
+echo
