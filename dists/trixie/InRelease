@@ -8,36 +8,36 @@ Codename: trixie
 Architectures: all amd64
 Components: main
 Description: Paquetes de RedHornoma para centros de salud
-Date: Fri, 21 Aug 2026 01:00:17 +0000
+Date: Fri, 21 Aug 2026 01:11:03 +0000
 MD5Sum:
- 8b4cf1940ce408cfd085e53d543cf2b1              206 Release
- b975e25d7e1187ef3d77af60b75bf26c             9725 main/binary-all/Packages
- f47dee5d55a49f3cc21ed49c9ea51a73             4178 main/binary-all/Packages.gz
+ 3fdecda32a7e714c6eba0daa4a7126da              206 Release
+ 258e8e60253abd486cdcbad807efa58e             9725 main/binary-all/Packages
+ 4b8d6d2f1eca890fdb2a4ebdf4111bce             4174 main/binary-all/Packages.gz
 SHA1:
- 8f9443446d03e977dfc8ff69146d4f38c5584c01              206 Release
- 92f82d6d448ad8c38bed63f0cf5af19caaac7ad0             9725 main/binary-all/Packages
- c2780dabccc34703f31dcfe9c3e94b77723519e3             4178 main/binary-all/Packages.gz
+ efb4fe7558ee92a2b7956eedd4f88d4f5cb8d67f              206 Release
+ 7e12f28271bfea316064932cd79aa7d524f24081             9725 main/binary-all/Packages
+ 3e40a75c9a0fb0a4ca53ce876549c3689826c8ed             4174 main/binary-all/Packages.gz
 SHA256:
- a1854c0d568b32f4e897b91ccc2cb54cb95bd7bf1a9b490b5425c4829a7c309f              206 Release
- 94e2967000ec5a670a5d4e5a82d22c649de1820f0f2245705c78beacf3db41f3             9725 main/binary-all/Packages
- 6df150edb5b99fd9a8f30d52c332cd0f412143d7498fa82e1e471881fd0cb194             4178 main/binary-all/Packages.gz
+ c511b73019ba5cacbaef35cb398969bb4201fa15d653dfcf961317a8a68792c2              206 Release
+ 84623f4620bcd43c3684b8e5d0ca8583dfe4a01c52742c0e424a4d22c96e2907             9725 main/binary-all/Packages
+ 25b9eacabb7ee1f11901ac36e1ce6a078a761372fd6771da9a86c043cfee08e4             4174 main/binary-all/Packages.gz
 SHA512:
- e4d112d81d83295517a3780ca5c7f1cf23c9ce52daac4bf433c32f4a236403133089efbfd0daa5a6087898179c18ec866cd42aa9f49118a070d5c346efaf3fe5              206 Release
- bb541ea3f6cb3dc30fe13f3278f5b0afadff46c8647098b32ac253163f76e71f8245da84594c562b8a846807e596aaeed2d5fb88e91b0d4376f82d6a5d23181a             9725 main/binary-all/Packages
- 265259843ec9b2ce67266e53d5a57e7cadf475951675ffac51507b021073d5b04ce25cdfb27046967eb2319df159ef1aa162fe69363af3239bc4bfb45ae06413             4178 main/binary-all/Packages.gz
+ f92e777244b7ef746664f0c89765b2b17fe2e3c96b8613120f078366168ae294635d43fa4c79433a495c01cc306de42c5207418aaab8249406840021a7521b54              206 Release
+ d202484f82147218a203a84e0b67e5b31f58019b5e4b61456cf5001b5a5cda6976d4b4c89b5b151650c52ba020f53de90c26eafef8018a1f5ec7e328ef8517d7             9725 main/binary-all/Packages
+ cfc693db3ba4ad27e3c8ad6cfd03264923c5a6a39902bf649390dbbfac6396c7910e84fdf4e3b780d222230dc3ef8685e9b61f3ea14321471e9ebbf7e5790b02             4174 main/binary-all/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iQIzBAEBCgAdFiEENpjMQSqg3ZTBT1xu2GeUioIqu0wFAmqHoyEACgkQ2GeUioIq
-u0xKaw//aMNwoifCWAkWwgVY+Jdki89tqoKK3HvDYw0LQMmRTX2f8N8rBA6X5BIf
-JOWoDXBzNv4SX5AvzsyHloQlHOq4dLnhl/fo9dyWdDZhKgsDK/5p4clGTZiMAbZQ
-o95YIn7fITikfYxX6RL8ftd8ywBI8fVO3dZcTfxmD17p/PuANIBS2Fn7PFjdzGz0
-dZt9simCzNkT6MfN9ZEE9ZHAWO4er5VbAaE0Sy+FC1wTTmp2820Wf1BfK4BqjUGz
-CYYgPZLDlJFDbgsEH+pk/cL7lRBjH1Kqc8585H1ahpT0jGfU7u7axW6yUOu+j7rQ
-R3d1mOGmYLf+GV1k/yS854cf3SiecCmaty1F883a+lCn2NPAyBHJNJJNl3uQ4Lyp
-nHlKpKexPJSgm1VqSOrMGRSJ8pg8+HpWl23qi8Y82feMmf7sPXiNYt9s2Ei16SVv
-2dKpsbbBdd59+Byp/h/adfSYytcFAn7ITAFVLI7NM39JbzRdq1qxAMgJOB1f2oGq
-d2WN/sHumuz6EgaqtM+QT65ZtoLyPrci7L0+vS200X55gqm17gwZemK1z3g/0Ni+
-+5c8EOBVbeooooexj5oYIQx6jwiTk8hDCS8LOne/xtY21EXca8qqq9CCKv2FZ6FT
-EkpZIep//lJnWduTlE8pLkmiGWp1vZxMm2NSiD66jLYT7zGKvwg=
-=Qcp/
+iQIzBAEBCgAdFiEENpjMQSqg3ZTBT1xu2GeUioIqu0wFAmqHpacACgkQ2GeUioIq
+u0zxvg//SdJyvjvAu+hs/54nYpf8Rw64aO66z+5w/wtgRv0Ze24ZCEJRwNHOEK6X
+YOCaBkmvLgDhLpSSOD2Ea1qoc4vekbUzjFV80BowG2UHKYsWTXHASHyRYSaBTYS4
+N4uRC4K9PyFlZudUj8sjQhC1pkNCpMTEwtvJYUIr1twhDVMb4mFMFDuqbBC9SHTy
+p4vmRYieAKsgrlOmY3TtdDC6JOFGsWSBi1dfqJ5ap2PjYji/7p6QzaH79JFcMLnR
+nJQkT4eULR6HItrqtMfi1pbyQ05qX33CNpdOMXZRDzwuTriBSnSPz29EM0M6nuGU
+83kuENNcDgmiYdkquA3aDjTX6s+P9bdzvWGCSaxjFaqf/ZQqxRGCvgO51HTzjjIU
+9Z66buE6+RJ5NdY8+jLmFwlXk9LdzyLhAGrFk4buqjD6LADxCqQigi64d77UZ2hY
+uISRWropoMMou3m6znMu0mLD+o7m/vzy8U7BHZ0ulR2lZpyMYemcwRMUSv7o06S5
+wFnkJGmByij1Vcb5n5iBX5WX2pmfMWEPmqQSJX461lXmSnPkbOagU3jq+AzhjViF
+byDGU2JCSsCXdr6jfmxliEtqIae68L4+R71YAO04/fWp/rvUZb5/L5a3/6yv5e3K
+fDfVqJu/WmO/Vb5g2gE6IXhjMGVQ9jkGAiR08aYdXhmhxperzts=
+=Q3CU
 -----END PGP SIGNATURE-----
