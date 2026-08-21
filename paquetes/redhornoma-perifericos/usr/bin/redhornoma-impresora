@@ -246,18 +246,68 @@ done
 
 # Se le da el mismo nombre que allá, para que la gente vea siempre lo
 # mismo esté donde esté.
-lpadmin -p "$COLA" -E -v "ipp://$SERVIDOR/printers/$COLA" -m everywhere \
-        -o printer-is-shared=false 2>/dev/null \
-  || { mal "no se pudo enganchar a esa impresora"; exit 1; }
-lpadmin -d "$COLA"; cupsenable "$COLA"; cupsaccept "$COLA" 2>/dev/null
+#
+# 🔴 DOS FALLOS MÍOS AQUÍ, LOS DOS EL 20/08/2026 — rosi
+#
+# Al ejecutarlo POR SEGUNDA VEZ salía «no se pudo enganchar» aunque la
+# impresora estuviera perfectamente puesta. Dos cosas mal, y las dos son
+# la misma regla que este proyecto tiene escrita en la pared:
+#
+#   1 · el error de «lpadmin» iba a /dev/null, así que no había forma de
+#       saber POR QUÉ falló. Un fallo sin motivo no se puede arreglar.
+#   2 · se daba por perdido por el CÓDIGO DE SALIDA, sin mirar si la cola
+#       había quedado bien igualmente. «lpadmin» puede quejarse de volver
+#       a poner algo que ya está y dejarlo funcionando.
+#
+# Ahora: se guarda lo que dijo, y se decide MIRANDO LA COLA.
+QUEJA=$(lpadmin -p "$COLA" -E -v "ipp://$SERVIDOR/printers/$COLA" -m everywhere \
+        -o printer-is-shared=false 2>&1)
+lpadmin -d "$COLA" 2>/dev/null; cupsenable "$COLA" 2>/dev/null
+cupsaccept "$COLA" 2>/dev/null
 
-# 🔴 De nuevo: el resultado, no el código. «lpadmin» acepta direcciones
-# que no llevan a ninguna parte sin quejarse.
+# El resultado, no el código: ¿existe la cola y apunta al servidor?
 LISTA=$(LC_ALL=C lpstat -v "$COLA" 2>/dev/null | grep -c "$SERVIDOR")
 if [ "$LISTA" -ge 1 ]; then
   ok "esta máquina ya puede imprimir en «$COLA»"
+  # Si se quejó pero quedó bien, se dice — callarlo escondería un aviso
+  # que mañana puede importar.
+  [ -n "$QUEJA" ] && nota "(aviso de CUPS, sin consecuencias: $(printf '%s' "$QUEJA" | head -1))"
 else
-  mal "la cola no quedó apuntando a «$SERVIDOR»"; exit 1
+  mal "no se pudo enganchar a esa impresora"
+  [ -n "$QUEJA" ] && nota "CUPS dijo: $(printf '%s' "$QUEJA" | head -3)"
+  nota "comprueba que «$SERVIDOR» siga encendida"
+  echo; exit 1
+fi
+
+# ── La impresora duplicada ────────────────────────────────────────────
+#
+# 🔴 Visto en rosi el 20/08/2026. Además de la nuestra aparecía
+# «EPSON_L380_servidor_ciudad_2», que la puso sola «cups-browsed» al
+# encontrar la impresora en la red.
+#
+# Para el sistema es inofensivo. Para la persona que va a imprimir, no:
+# abre el cuadro de imprimir y ve DOS impresoras casi iguales sin saber
+# cuál es la buena. En un centro de salud eso acaba en hojas perdidas y en
+# una llamada.
+#
+# Como aquí ya la dejamos puesta a mano y con nombre claro, se retiran las
+# que se pusieron solas y se le quita a «cups-browsed» la costumbre de
+# volver a ponerlas. Lo nuestro no depende de él para nada.
+DUP=0
+while read -r L; do
+  U=$(printf '%s' "$L" | sed 's/^.*: //')
+  case "$U" in implicitclass:*) ;; *) continue ;; esac
+  NOM=$(printf '%s' "$L" | sed 's/^.*device for \([^:]*\):.*$/\1/')
+  [ "$NOM" = "$COLA" ] && continue
+  cancel -a "$NOM" 2>/dev/null
+  lpadmin -x "$NOM" 2>/dev/null && DUP=$((DUP+1))
+done <<EOF
+$(LC_ALL=C lpstat -v 2>/dev/null)
+EOF
+if [ "$DUP" -gt 0 ]; then
+  systemctl disable --now cups-browsed >/dev/null 2>&1
+  avi "retirada(s) $DUP impresora(s) repetida(s) que se habían puesto solas"
+  nota "así en el cuadro de imprimir sale una sola, y no hay dudas"
 fi
 
 titulo "LISTO"
