@@ -111,6 +111,94 @@ haya nadie allí**: se enciende sola a la 1:00. Por eso su objetivo 11 supera al
 de Cochabamba, que tiene las mismas piezas pero **no tiene despertador**: si se
 apaga, no la alcanza nadie.
 
+## 📋 LO QUE FALTA — al 21/08/2026, el proyecto en 93% (con TRECE objetivos)
+
+**Ordenado por lo que yo haría primero, y con el porqué.**
+
+### 🔴 Primero: lo que está PUESTO pero nadie ha visto funcionar
+
+Es la lección que este proyecto ya aprendió dos veces por las malas —el
+aviso de la nube roto durante días, el respaldo que no reintentaba tras un
+apagón—. **«Puesto» no es «visto funcionar».**
+
+```
+1 · EL PUENTE AL WINDOWS DE HORNOMA        redhornoma-puente, 21/08
+     Está «enabled» y NUNCA se ha ejecutado. Sin él, un puesto de otro
+     centro no alcanza el Windows de Hornoma. Se prueba REINICIANDO
+     Hornoma y comprobando que vuelve solo.
+
+2 · EL VIGÍA NO SABE MIRAR HACIA FUERA
+     El 21/08 flora dejó de ver a Hornoma —cada extremo se quedó en un
+     relevo distinto de Tailscale— y lo descubrió euflo al abrir SOAPS y
+     leer «error general de red». Debería decirlo el sistema.
+     Ver [[puesto-de-otro-centro-soaps]].
+```
+
+### 🟡 Después: decisiones pendientes, que no se deciden solas
+
+```
+3 · FLORA APUNTA A HORNOMA
+     Su SOAPS lee la base de Hornoma. Consecuencia real: su respaldo
+     nocturno sigue copiando SUS bases, que ya no usa nadie, y si el
+     enlace cae flora se queda sin SOAPS. Hay que decidirlo a propósito.
+     La copia de cómo estaba: C:\SOAPS7\SUIS-ANTES-DE-APUNTAR-A-HORNOMA.reg
+
+4 · ROSI: dos cabos sueltos
+     · la impresora le sale DUPLICADA (lo arregla perifericos 1.3.7,
+       enviado a /tmp/redhornoma-impresora)
+     · sigue con «apt-mark hold redhornoma-perifericos». Ya no hace falta:
+       la impresora no está enchufada ahí.
+```
+
+### 🟢 Obra nueva, por orden de valor
+
+```
+5 · OBJETIVO 13 — IMPRIMIR                                          70%
+     Cochabamba resuelto y probado con papel. Falta la Epson de Hornoma:
+     el driver abierto de Debian NO trae la L220 ni la L222, así que hay
+     que encontrar el propietario. El modelo exacto se sabrá con
+     «lsusb | grep -i epson» allá. Ver [[impresora-del-centro-en-red]].
+
+6 · SOAPS SOBRE WINE                                        el ultimo muro
+     Arranca, valida su licencia y negocia el cifrado. Falla al conectar:
+     la pieza de red de Microsoft NO abre ni un socket bajo Wine.
+     Siguiente intento: FreeTDS compilado para Windows, dentro de Wine.
+     Ver [[programas-del-ministerio-sin-windows]].
+
+7 · EL 301 SIN EXCEL                                       uno o dos dias
+     SNIS funciona entero salvo imprimir: pide Excel por su nombre, y lo
+     que se entrega al SEDES son .xlsx. Se podria generar desde Linux
+     leyendo snis2026.mdb. Para comprobarlo hay un patron de verdad en
+     ~/Descargas/INF-HORNOMA-JULIO/SNIS-0726/FORM301A1.xlsx
+     ⚠️ euflo recuerda haber armado un 301a identico en abril/mayo para un
+     taller de CAI, en otro proyecto. NO esta en este portatil: buscarlo
+     antes de rehacerlo.
+
+8 · LOS OTROS 4 CENTROS DEL MUNICIPIO                    idea del 17/08
+     Usan Windows 10 y no quieren cambiar. Seis de las siete cosas que
+     aporta RedHornoma no necesitan Linux. Falta juntarlo en un
+     instalador: medio dia.
+```
+
+### ⏳ Y lo que depende de gente o de hierro, no de nosotros
+
+```
+9 · un portatil de medico de verdad          cierra el objetivo 2
+10 · una maquina prestada de verdad          cierra el objetivo 1
+11 · el instalador en boliviano              el 7 se queda en 99%
+12 · la .103 como puesto  ⚠️ NO TOCARLA hasta que agosto este en el .101
+```
+
+### ✅ Cerrado desde que se escribió la lista anterior
+
+```
+· la llave de BitLocker      IMPRESA el 20/08 → objetivo 4 al 100%
+· que Hornoma sepa avisar    hecho el 18/08
+· SALMI y SNIS en Linux      21/08, sin Windows ni virtualizacion
+```
+
+---
+
 ## 📋 LO QUE FALTA — al 18/08/2026, el proyecto en 96%
 
 **Ya no hay obras: son remates.** Ninguno es difícil.
