@@ -1,0 +1,12 @@
+[Unit]
+Description=RECESA: carga la imagen de SQL Server sin internet y arranca soaps-sql si falta
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/recesa-cargar-sql.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
