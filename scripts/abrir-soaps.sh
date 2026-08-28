@@ -1,5 +1,5 @@
 #!/bin/bash
-export WINE=/opt/wine-staging/bin/wine WINEPREFIX="$HOME/.wine-ministerio" WINEARCH=win32 WINEDEBUG=-all
+export WINE=/opt/wine-staging/bin/wine WINEPREFIX="${WINEPREFIX:-$HOME/.wine-ministerio}" WINEARCH=win32 WINEDEBUG=-all
 [ -x /opt/wine-staging/bin/wine ] || WINE=wine
 # Red de seguridad: si el motor de datos no estuviera arriba, lo despertamos.
 docker start soaps-sql >/dev/null 2>&1

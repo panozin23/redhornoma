@@ -1,0 +1,8 @@
+prog "SOAPS 7" - /home/euflo/abrir-soaps.sh
+prog "SNIS 2026" - /home/euflo/.local/bin/abrir-snis
+prog "SALMI" - /home/euflo/.local/bin/abrir-salmi
+separator
+prog "Excel" - /home/euflo/.local/bin/abrir-excel
+prog "Word" - /home/euflo/.local/bin/abrir-word
+separator
+prog "Terminal" - xterm

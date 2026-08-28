@@ -1,0 +1,14 @@
+[Unit]
+Description=RECESA: sesion independiente de consultorio %i (Xvnc + icewm)
+After=network.target
+
+[Service]
+Type=simple
+User=euflo
+Environment=HOME=/home/euflo
+ExecStart=/usr/local/bin/recesa-puesto-sesion.sh %i
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
