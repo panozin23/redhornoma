@@ -110,6 +110,19 @@ ver la sección "Pendiente" más abajo.
    vieja de RedHornoma) — se instaló y se armaron los accesos a la pantalla
    física y al Consultorio 2.
 
+9. **Epson L380 en red.** Se conectó la impresora física a flora. El driver
+   propietario y las dos correcciones de Debian mínimo (`libcupsimage2t64`,
+   blacklist de `usblp`) ya estaban puestos de una sesión anterior — solo
+   faltó compartirla: `sudo /usr/sbin/cupsctl --share-printers --remote-any`
+   + `sudo lpadmin -p L380-Series -o printer-is-shared=true` (ojo: `cupsctl`
+   vive en `/usr/sbin`, no está en el PATH de un usuario normal). Probada
+   de punta a punta: impresión física directa en flora, y **desde esta
+   laptop por la red** (`lp -h 192.168.0.110:631 -d L380-Series ...`), las
+   dos veces salió la hoja. Como el servidor la anuncia por Avahi con
+   soporte IPP Everywhere (URF/PWG-raster, "mopria-certified"), **los
+   puestos cliente no necesitan instalar el driver de Epson** — la ven y
+   usan directo, incluso desde Windows.
+
 ---
 
 ## 🔴 Auditoría del 28/08 — lo que falta, sin tocar todavía
@@ -123,8 +136,7 @@ ver la sección "Pendiente" más abajo.
 2. **No hay "vigía"** (el aviso automático si un centro deja de responder) —
    no se portó todavía a la versión sin Windows/virtualización.
 3. Office sigue en 2013 — cambio a 2010 pendiente del instalador de euflo.
-4. Impresora Epson: configurada en el sistema (colas L380-Series, PDF) pero
-   sin el dispositivo físico conectado ahora mismo.
+4. ✅ Impresora Epson: RESUELTO más tarde en la jornada, ver punto 9 de arriba.
 5. El disco de flora está SANO (`smartctl -H`: PASSED) — el problema de la
    PC del portátil no fue el disco.
 
