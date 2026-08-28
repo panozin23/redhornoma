@@ -125,6 +125,45 @@ ver la sección "Pendiente" más abajo.
 
 ---
 
+10. **Office cambiado de 2013 a 2007 (S5, resuelto de nuevo tras el giro).**
+    Se quiso instalar Office 2010 primero (el usuario tenía un instalador),
+    pero resultó ser un `.rar` de un sitio de descargas con un
+    "Activador" (KMSpico) adentro — **se borró sin usar**, riesgo real de
+    virus para el servidor de un centro de salud. Se bajó una copia limpia
+    y oficial de Office 2010 en español desde archive.org
+    (`office-2010-proplus-rtm-spanish`, instaladores x86/x64 oficiales), pero
+    el instalador **exige clave para instalación silenciosa o básica**, y
+    con la clave genérica de KMS (`6QFDX-PYH2G-PPYFD-C7RJM-BBKQ8`, la
+    publicada por Microsoft para medios VL) el instalador copiaba TODO
+    bien pero se revertía entero al final (error 1603) — no se pudo
+    resolver. Además se confirmó que **los servidores de activación de
+    Office 2010 están apagados desde 2020**, así que ni comprando una
+    clave real se podría activar por el metodo normal. **Se descartó
+    Office 2010.** Also descartado 2019/2021: son Click-to-Run, no
+    instalan bien en Wine (ya probado y descartado antes en el proyecto).
+
+    **Se volvió a Office 2007** (el mismo que ya se sabía que funciona en
+    hardware viejo, `office2007.iso` en el Toshiba). Antes de instalarlo se
+    desinstaló Office 2010 a medias y se limpiaron sus vestigios del
+    registro (misma técnica de bloques). Al instalar Office 2007 con la
+    clave del propio ISO (`VB48G-H6VK9-WJ93D-9R6RM-VP7GT`), **Excel se
+    quedaba trabado en la pantalla de bienvenida** (confirmado con `gdb`:
+    los 5 hilos bloqueados en el mismo punto) — resultó ser solo que el
+    cartel de bienvenida no se cerraba solo; haciendo clic sobre él, Excel
+    ya estaba cargado y andando atrás. **Quedó activado** (Excel dice
+    "este producto ya se activó"). Se actualizaron `abrir-excel`,
+    `abrir-word`, `abrir-powerpoint` de `Office15` a `Office12`.
+    **Probado con SNIS: genera el 301 con datos reales (julio) en Excel
+    2007.** ⚠️ NO intentar "actualizar" Office 2007 por internet — sus
+    servidores de actualización también están apagados; cualquier sitio
+    que aparezca ahí es sospechoso.
+
+11. **El Shift de x11vnc se trabó DOS VECES más durante la jornada**, después
+    de reinicios de wineserver y mucha actividad. Cada vez se resolvió
+    reiniciando x11vnc (ya tiene `-clear_mods`, ver punto 4). **Queda como
+    algo a vigilar**: si vuelve a pasar seguido, revisar si hay una causa de
+    fondo en vez de seguir reiniciando a mano.
+
 ## 🔴 Auditoría del 28/08 — lo que falta, sin tocar todavía
 
 1. **No hay respaldo automático de la base de datos.** Último `.bak` real:
@@ -135,7 +174,7 @@ ver la sección "Pendiente" más abajo.
    probada` en `PLAN.md`).
 2. **No hay "vigía"** (el aviso automático si un centro deja de responder) —
    no se portó todavía a la versión sin Windows/virtualización.
-3. Office sigue en 2013 — cambio a 2010 pendiente del instalador de euflo.
+3. ✅ Office: RESUELTO más tarde en la jornada — se cambió a 2007, activado, ver punto 10 de arriba.
 4. ✅ Impresora Epson: RESUELTO más tarde en la jornada, ver punto 9 de arriba.
 5. El disco de flora está SANO (`smartctl -H`: PASSED) — el problema de la
    PC del portátil no fue el disco.
