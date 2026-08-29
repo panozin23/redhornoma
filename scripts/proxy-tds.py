@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 # Intermediario TDS para SOAPS: quita el cifrado que Wine (schannel) no completa.
-# El cliente Wine se conecta a 127.0.0.1:1435; reenviamos a 127.0.0.1:1433.
+# El cliente Wine se conecta a 127.0.0.1:1433 (el puerto ESTANDAR: asi el
+# registro de SOAPS puede decir SERVIDOR="127.0.0.1" sin puerto, que es lo
+# que SOAPS reconoce como "este es el equipo servidor" para funciones como
+# restaurar copias de seguridad); reenviamos al motor real, que quedo en
+# el puerto 14330 (28/08/2026, flora). Si el motor SQL vuelve a estar en
+# el 1433 default, cambiar MOTOR de nuevo.
 # CLAVE: modificamos el saludo (PRE-LOGIN) DEL CLIENTE poniendo su opcion
 # ENCRYPTION en NOT_SUP (0x02). Asi el MOTOR acepta no cifrar desde el inicio
 # y ambos quedan de acuerdo (modificar solo la respuesta del motor desincroniza
 # y cierra la conexion). El login viaja sin cifrar por el loopback local.
 import socket, threading, time
 
-ESCUCHA = ("127.0.0.1", 1435)
-MOTOR   = ("127.0.0.1", 1433)
+ESCUCHA = ("127.0.0.1", 1433)
+MOTOR   = ("127.0.0.1", 14330)
 
 def log(m): print("%.2f %s" % (time.time() % 1000, m), flush=True)
 

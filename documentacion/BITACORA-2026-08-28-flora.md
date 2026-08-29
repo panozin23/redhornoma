@@ -1,5 +1,59 @@
 # flora — Bitácora del 28/08/2026
 
+## ⏸️ PAUSA — CONTINUAR DESDE ACÁ
+
+**Lo último pendiente, sin resolver:** restaurar el respaldo `E300183SOAPS0401201913092064m.wak`
+(27/08, en `/media/portatil/CURSAKIALINUX/22ULTIMO-B-SALMO-SOAPSAGOST/actualizado/`)
+en BDEstadistica. **57 de 58 tablas SÍ se restauraron bien.** Las dos más
+importantes — **SE_DATOS** (consultas) y **SE_HC** (historias clínicas) —
+**NO entraron**: error de formato (no es solo el año 2064 conocido; hay
+"String data, right truncation" en cascada, como si el `.wak` viniera de
+otra versión/estructura de SOAPS). Se intentó 2 veces (con y sin tolerancia
+a errores) y terminó en 0 filas las dos veces. **Se devolvieron ambas
+tablas al estado de "antes de hoy"** (no se perdió nada, pero tampoco se
+ganaron los datos del 27/08 de esas dos tablas).
+
+**Qué queda listo para retomar sin repetir trabajo:**
+- Los 58 archivos `.dat` (formato nativo bcp) ya están extraídos en el
+  servidor: `/var/lib/soaps-sql/restore-tmp/` (visible desde el contenedor
+  como `/var/opt/mssql/restore-tmp/`).
+- Hay una base de referencia con el estado de "antes de tocar nada":
+  **`BDEstadistica_ANTES`** (restaurada de
+  `/var/opt/mssql/backup/BDEstadistica-antes-de-restaurar.bak` dentro del
+  contenedor `soaps-sql`). NO BORRAR hasta terminar de investigar.
+- Los archivos de error de bcp quedaron en
+  `/var/opt/mssql/restore-tmp/errores_se_datos.txt` (1802 líneas) y
+  `errores_se_hc.txt` (2 líneas) — ahí está el detalle fila por fila de
+  qué falló.
+- **Próximo paso sugerido:** comparar la estructura de columnas
+  (`sp_help SE_DATOS` / `sp_help SE_HC`) entre lo que el `.dat` espera y
+  lo que la tabla actual tiene, para encontrar el desajuste exacto (¿una
+  columna de más/menos, un varchar más corto, un tipo de fecha distinto?).
+
+**Otras cosas resueltas en el camino, sirven para cualquier centro:**
+- La restricción de SOAPS "la copia de seguridad debe realizarse en el
+  equipo servidor" (al querer usar F2-Restaurar desde el propio SOAPS)
+  **sigue sin resolverse** — se probaron dos teorías (nombre del
+  contenedor Docker, formato de la cadena de conexión) y ninguna era la
+  causa. Quedó igual, pero de paso se dejaron dos mejoras reales:
+  - El contenedor `soaps-sql` ahora se llama `FLORACBA` (antes tenía el
+    ID random de Docker) — más prolijo, y correcto para cuando haya que
+    identificarlo.
+  - El proxy TDS ahora escucha en el puerto 1433 (el estándar), y el
+    motor real quedó en el 14330 — antes era al revés. Registro de SOAPS
+    actualizado (`SERVIDOR="127.0.0.1"`, sin el puerto). **Si se vuelve a
+    clonar flora, revisar que `scripts/proxy-tds.py` en el repo tenga
+    estos puertos actualizados** (el que está en GitHub todavía dice
+    1435/1433 — falta subir esta versión).
+- El teclado (Shift trabado) resultó ser, la última vez, **Caps Lock
+  físicamente prendido en el servidor** (no un bug de VNC). Se apagó con
+  `xdotool key Caps_Lock`, y `x11vnc` quedó con `-clear_all` (limpia
+  también Bloq Mayús al arrancar, no solo Shift).
+
+---
+
+**Contexto de partida:** corte de luz en Cochabamba dejó SOAPS sin abrir en
+
 **Contexto de partida:** corte de luz en Cochabamba dejó SOAPS sin abrir en
 flora (el ícono aparecía y se cerraba solo). Al investigar se descubrió que
 el disco de este portátil (euflo) había tenido fallas y se perdieron varios
